@@ -101,7 +101,7 @@ jq -n \
 
 ### Automated publish (GitHub Actions)
 
-Copy `.github/workflows/publish-docs.yml` into your project repository and set these repository secrets:
+Copy `templates/publish-docs.yml` from the nrdocs repository into your project repository at `.github/workflows/publish-docs.yml` and set these repository secrets:
 
 | Secret | Value |
 |---|---|

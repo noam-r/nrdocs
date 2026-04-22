@@ -98,7 +98,7 @@ That's it. The page title in the browser tab comes from the `label` in `nav.yml`
 
 This is what makes publishing automatic. Without this file in your repo, nothing triggers — there's no external hook.
 
-Copy `.github/workflows/publish-docs.yml` from the nrdocs repository into your repo at the exact same path:
+Copy `templates/publish-docs.yml` from the nrdocs repository into your repo at `.github/workflows/publish-docs.yml`:
 
 ```
 your-repo/

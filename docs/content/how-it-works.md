@@ -172,7 +172,7 @@ The typical flow: push to `main` → GitHub Actions reads your repo files → PO
 
 ### Setup
 
-1. Copy `.github/workflows/publish-docs.yml` from the nrdocs repo into your project repo at the same path
+1. Copy `templates/publish-docs.yml` from the nrdocs repo into your project repo at `.github/workflows/publish-docs.yml`
 2. Set three repository **secrets** in GitHub (Settings → Secrets → Actions):
 
 | Secret | What it is |

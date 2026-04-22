@@ -127,7 +127,7 @@ my-project-docs/
 │   └── guides/
 │       └── installation.md
 └── .github/workflows/
-    └── publish-docs.yml      # copy from this repo
+    └── publish-docs.yml      # copy from templates/publish-docs.yml
 ```
 
 Pages are plain Markdown — no frontmatter required. Page titles come from `nav.yml` labels. See the [Repository Setup guide](docs/content/guides/repository-setup.md) for details.

@@ -99,7 +99,7 @@ The file `content/guides/installation.md` corresponds to `path: guides/installat
 
 ## Step 2: Copy the GitHub Actions workflow
 
-Copy the file `.github/workflows/publish-docs.yml` from the nrdocs repository into the target repository at the exact same path:
+Copy the file `templates/publish-docs.yml` from the nrdocs repository into the target repository at `.github/workflows/publish-docs.yml`:
 
 ```
 <repo>/
