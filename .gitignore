@@ -1,0 +1,7 @@
+node_modules/
+dist/
+dist-preview/
+
+# Local config with real credentials — use the .example templates
+.env
+wrangler.toml

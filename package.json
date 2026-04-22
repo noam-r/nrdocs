@@ -1,0 +1,24 @@
+{
+  "name": "nrdocs-platform",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc",
+    "test": "vitest --run",
+    "test:watch": "vitest",
+    "preview": "tsx scripts/preview.ts",
+    "nrdocs": "bash scripts/nrdocs.sh",
+    "setup": "bash scripts/setup.sh"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20250214.0",
+    "tsx": "^4.21.0",
+    "typescript": "^5.7.0",
+    "vitest": "^3.0.0"
+  },
+  "dependencies": {
+    "marked": "^18.0.2",
+    "yaml": "^2.8.3"
+  }
+}

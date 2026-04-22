@@ -1,0 +1,5 @@
+slug: nrdocs
+title: "nrdocs"
+description: "Documentation for the nrdocs serverless documentation platform"
+publish_enabled: true
+access_mode: public

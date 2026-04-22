@@ -1,0 +1,5 @@
+slug: private-docs
+title: "Private Documentation"
+description: "Password-protected test project"
+publish_enabled: true
+access_mode: password
