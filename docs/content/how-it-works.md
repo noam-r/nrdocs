@@ -172,6 +172,18 @@ The typical flow: push to `main` → GitHub Actions reads your repo files → PO
 
 ### Setup
 
+There are two authentication models for the workflow:
+
+**Repo publish token auth (recommended, via `nrdocs init`):**
+
+Projects onboarded with `nrdocs init --token` use a repo publish token — a single-repo, single-project credential that can only publish content. The workflow is generated automatically during onboarding with:
+- `secrets.NRDOCS_PUBLISH_TOKEN` — the repo publish token
+- `vars.NRDOCS_PROJECT_ID` — the project UUID (repository variable)
+- `X-Repo-Identity` header for repo identity binding
+- API URL embedded directly in the workflow file
+
+**Admin API key auth (legacy, via admin API):**
+
 1. Copy `templates/publish-docs.yml` from the nrdocs repo into your project repo at `.github/workflows/publish-docs.yml`
 2. Set three repository **secrets** in GitHub (Settings → Secrets → Actions):
 

@@ -4,6 +4,12 @@ import type {
   ProjectStatus,
   AccessPolicyEntry,
   OperationalEvent,
+  Organization,
+  OrganizationStatus,
+  BootstrapToken,
+  BootstrapTokenStatus,
+  RepoPublishToken,
+  RepoPublishTokenStatus,
 } from '../types';
 import type { DataStore } from '../interfaces/data-store';
 
@@ -42,21 +48,31 @@ export class D1DataStore implements DataStore {
     const status: ProjectStatus = 'awaiting_approval';
     const passwordVersion = 0;
 
+    // Resolve org_id: use provided value or fall back to default organization
+    const orgId = project.org_id ?? (await this.getDefaultOrganization()).id;
+
+    // Normalize repo_identity if provided
+    const repoIdentity = project.repo_identity != null
+      ? this.normalizeRepoIdentity(project.repo_identity)
+      : null;
+
     try {
       await this.db
         .prepare(
-          `INSERT INTO projects (id, slug, repo_url, title, description, status, access_mode, active_publish_pointer, password_hash, password_version, created_at, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?, ?, ?)`
+          `INSERT INTO projects (id, slug, org_id, repo_url, title, description, status, access_mode, active_publish_pointer, password_hash, password_version, repo_identity, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?, ?, ?, ?)`
         )
         .bind(
           id,
           project.slug,
+          orgId,
           project.repo_url,
           project.title,
           project.description,
           status,
           project.access_mode,
           passwordVersion,
+          repoIdentity,
           now,
           now,
         )
@@ -77,6 +93,7 @@ export class D1DataStore implements DataStore {
     return {
       id,
       slug: project.slug,
+      org_id: orgId,
       repo_url: project.repo_url,
       title: project.title,
       description: project.description,
@@ -85,6 +102,7 @@ export class D1DataStore implements DataStore {
       active_publish_pointer: null,
       password_hash: null,
       password_version: passwordVersion,
+      repo_identity: repoIdentity,
       created_at: now,
       updated_at: now,
     };
@@ -258,7 +276,131 @@ export class D1DataStore implements DataStore {
       .run();
   }
 
+  // ── Organization operations ──────────────────────────────────────
+
+  async getOrganizationById(id: string): Promise<Organization | null> {
+    const row = await this.db
+      .prepare('SELECT * FROM organizations WHERE id = ?')
+      .bind(id)
+      .first();
+    return row ? this.rowToOrganization(row as Record<string, unknown>) : null;
+  }
+
+  async getOrganizationBySlug(slug: string): Promise<Organization | null> {
+    const row = await this.db
+      .prepare('SELECT * FROM organizations WHERE slug = ?')
+      .bind(slug)
+      .first();
+    return row ? this.rowToOrganization(row as Record<string, unknown>) : null;
+  }
+
+  async getDefaultOrganization(): Promise<Organization> {
+    const org = await this.getOrganizationBySlug('default');
+    if (!org) {
+      throw new Error(
+        'Default organization not found — migration may be incomplete',
+      );
+    }
+    return org;
+  }
+
+  // ── Token operations ──────────────────────────────────────────────
+
+  async getBootstrapTokenByJti(jti: string): Promise<BootstrapToken | null> {
+    const row = await this.db
+      .prepare('SELECT * FROM bootstrap_tokens WHERE jti = ?')
+      .bind(jti)
+      .first();
+    return row ? this.rowToBootstrapToken(row as Record<string, unknown>) : null;
+  }
+
+  async createRepoPublishToken(token: RepoPublishToken): Promise<void> {
+    await this.db
+      .prepare(
+        `INSERT INTO repo_publish_tokens (id, jti, org_id, project_id, repo_identity, status, created_from_bootstrap_jti, created_at, expires_at, last_used_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      )
+      .bind(
+        token.id,
+        token.jti,
+        token.org_id,
+        token.project_id,
+        token.repo_identity,
+        token.status,
+        token.created_from_bootstrap_jti,
+        token.created_at,
+        token.expires_at,
+        token.last_used_at,
+      )
+      .run();
+  }
+
+  async incrementBootstrapTokenUsage(jti: string): Promise<void> {
+    await this.db
+      .prepare(
+        `UPDATE bootstrap_tokens SET repos_issued_count = repos_issued_count + 1, last_used_at = datetime('now') WHERE jti = ?`
+      )
+      .bind(jti)
+      .run();
+  }
+
+  async getRepoPublishTokenByJti(jti: string): Promise<RepoPublishToken | null> {
+    const row = await this.db
+      .prepare('SELECT * FROM repo_publish_tokens WHERE jti = ?')
+      .bind(jti)
+      .first();
+    return row ? this.rowToRepoPublishToken(row as Record<string, unknown>) : null;
+  }
+
+  async updateRepoPublishTokenLastUsedAt(jti: string): Promise<void> {
+    await this.db
+      .prepare("UPDATE repo_publish_tokens SET last_used_at = datetime('now') WHERE jti = ?")
+      .bind(jti)
+      .run();
+  }
+
   // ── Helpers ───────────────────────────────────────────────────────
+
+  private rowToOrganization(row: Record<string, unknown>): Organization {
+    return {
+      id: row['id'] as string,
+      slug: row['slug'] as string,
+      name: row['name'] as string,
+      status: row['status'] as OrganizationStatus,
+      created_at: row['created_at'] as string,
+      updated_at: row['updated_at'] as string,
+    };
+  }
+
+  private rowToBootstrapToken(row: Record<string, unknown>): BootstrapToken {
+    return {
+      id: row['id'] as string,
+      jti: row['jti'] as string,
+      org_id: row['org_id'] as string,
+      status: row['status'] as BootstrapTokenStatus,
+      created_by: row['created_by'] as string,
+      created_at: row['created_at'] as string,
+      expires_at: row['expires_at'] as string,
+      max_repos: row['max_repos'] as number,
+      repos_issued_count: row['repos_issued_count'] as number,
+      last_used_at: (row['last_used_at'] as string) ?? null,
+    };
+  }
+
+  private rowToRepoPublishToken(row: Record<string, unknown>): RepoPublishToken {
+    return {
+      id: row['id'] as string,
+      jti: row['jti'] as string,
+      org_id: row['org_id'] as string,
+      project_id: row['project_id'] as string,
+      repo_identity: row['repo_identity'] as string,
+      status: row['status'] as RepoPublishTokenStatus,
+      created_from_bootstrap_jti: row['created_from_bootstrap_jti'] as string,
+      created_at: row['created_at'] as string,
+      expires_at: row['expires_at'] as string,
+      last_used_at: (row['last_used_at'] as string) ?? null,
+    };
+  }
 
   private rowToAccessPolicyEntry(
     row: Record<string, unknown>,
@@ -275,10 +417,22 @@ export class D1DataStore implements DataStore {
     };
   }
 
+  private normalizeRepoIdentity(value: string): string {
+    const normalized = value.trim().toLowerCase();
+    const pattern = /^github\.com\/[a-z0-9._-]+\/[a-z0-9._-]+$/;
+    if (!pattern.test(normalized)) {
+      throw new Error(
+        'Invalid repo_identity format. Expected: github.com/<owner>/<repo>',
+      );
+    }
+    return normalized;
+  }
+
   private rowToProject(row: Record<string, unknown>): Project {
     return {
       id: row['id'] as string,
       slug: row['slug'] as string,
+      org_id: row['org_id'] as string,
       repo_url: row['repo_url'] as string,
       title: row['title'] as string,
       description: (row['description'] as string) ?? '',
@@ -288,6 +442,7 @@ export class D1DataStore implements DataStore {
         (row['active_publish_pointer'] as string) ?? null,
       password_hash: (row['password_hash'] as string) ?? null,
       password_version: row['password_version'] as number,
+      repo_identity: (row['repo_identity'] as string) ?? null,
       created_at: row['created_at'] as string,
       updated_at: row['updated_at'] as string,
     };

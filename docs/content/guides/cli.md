@@ -1,6 +1,53 @@
 # CLI Reference
 
-The nrdocs CLI (`scripts/nrdocs.sh`) is a local management tool that wraps the Control Plane API. Instead of manually constructing curl commands with JSON payloads, you run short commands like `./scripts/nrdocs.sh publish`.
+nrdocs has two CLI tools:
+
+- **`nrdocs` binary** — standalone CLI for bootstrap token onboarding (`nrdocs init --token`)
+- **`nrdocs.sh` script** — admin operations wrapper for the Control Plane API
+
+## nrdocs binary (bootstrap onboarding)
+
+The standalone `nrdocs` CLI handles end-to-end onboarding for developers with a bootstrap token.
+
+### init
+
+Onboard a repository using a bootstrap token. Runs a 6-phase flow: preflight checks, token validation, interactive prompting, file scaffolding, remote project creation + token minting, and CI secret installation.
+
+```bash
+nrdocs init --token <bootstrap-token>
+```
+
+**Flags:**
+
+| Flag | Required | Description |
+|---|---|---|
+| `--token <token>` | yes | Bootstrap token issued by your organization admin |
+| `--slug <value>` | no | Project slug (for non-interactive use) |
+| `--title <value>` | no | Project title (for non-interactive use) |
+| `--repo-identity <value>` | no | Repository identity in format `github.com/owner/repo` (for non-interactive use) |
+| `--docs-dir <value>` | no | Documentation directory (default: `docs`) |
+| `--description <value>` | no | Project description |
+
+In interactive mode, the CLI infers values from the git remote and prompts for confirmation. In non-interactive mode (piped stdin), `--slug`, `--title`, and `--repo-identity` are required.
+
+**What it does:**
+
+1. Verifies you're in a git repo and the token is a valid bootstrap token
+2. Validates the token against the control plane, displays org name and remaining quota
+3. Infers repo identity, slug, and title from the git remote; prompts for confirmation
+4. Generates `project.yml`, `nav.yml`, `content/home.md`, and `.github/workflows/publish-docs.yml`
+5. Creates the project on the control plane and mints a repo publish token
+6. Installs `NRDOCS_PUBLISH_TOKEN` (secret) and `NRDOCS_PROJECT_ID` (variable) via `gh` CLI
+
+If `gh` is not installed or not authenticated, the CLI prints the exact `gh secret set` / `gh variable set` commands to run manually.
+
+**Generated workflow:** The generated `publish-docs.yml` uses repo publish token auth (`NRDOCS_PUBLISH_TOKEN`) with `X-Repo-Identity` header binding — not the admin API key. The API URL is embedded directly in the workflow file.
+
+---
+
+## nrdocs.sh script (admin operations)
+
+The `nrdocs.sh` CLI (`scripts/nrdocs.sh`) is a local management tool that wraps the Control Plane API. Instead of manually constructing curl commands with JSON payloads, you run short commands like `./scripts/nrdocs.sh publish`.
 
 ## Prerequisites
 

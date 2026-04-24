@@ -101,6 +101,20 @@ jq -n \
 
 ### Automated publish (GitHub Actions)
 
+There are two ways to set up automated publishing, depending on how the project was onboarded:
+
+**If onboarded via `nrdocs init --token` (bootstrap token):**
+
+The CLI already generated `.github/workflows/publish-docs.yml` and configured the CI secrets. The workflow uses repo publish token auth:
+- `secrets.NRDOCS_PUBLISH_TOKEN` — single-repo credential (not the admin API key)
+- `vars.NRDOCS_PROJECT_ID` — repository variable
+- `X-Repo-Identity` header for repo binding
+- API URL embedded in the workflow file
+
+Just push to `main` and it publishes automatically.
+
+**If onboarded via admin API:**
+
 Copy `templates/publish-docs.yml` from the nrdocs repository into your project repository at `.github/workflows/publish-docs.yml` and set these repository secrets:
 
 | Secret | Value |

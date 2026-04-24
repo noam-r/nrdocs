@@ -11,6 +11,7 @@
 #   wrangler secret put HMAC_SIGNING_KEY --env delivery
 #   wrangler secret put API_KEY --env control-plane
 #   wrangler secret put HMAC_SIGNING_KEY --env control-plane
+#   wrangler secret put TOKEN_SIGNING_KEY --env control-plane
 # ──────────────────────────────────────────────────────────────────────
 
 # Replace with your Cloudflare account ID
@@ -67,5 +68,6 @@ binding = "BUCKET"
 bucket_name = "nrdocs-content"
 
 # Secrets (set via CLI, not stored here):
-#   API_KEY          — authenticates admin API requests
-#   HMAC_SIGNING_KEY — must be the same value as the Delivery Worker
+#   API_KEY            — authenticates admin API requests
+#   HMAC_SIGNING_KEY   — must be the same value as the Delivery Worker
+#   TOKEN_SIGNING_KEY  — signs bootstrap and repo publish tokens

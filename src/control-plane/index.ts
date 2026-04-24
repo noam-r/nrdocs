@@ -12,7 +12,10 @@ import { CloudflareAccessProvider } from '../access/cloudflare-access-provider';
 import { PasswordHasher } from '../auth/password-hasher';
 import { parseProjectConfig, parseNavConfig, parseAllowedListConfig, validateSlugMatch } from '../site-builder/config-parser';
 import { buildSite } from '../site-builder/site-builder';
-import type { OperationalEvent, AccessMode, AccessPolicyEntry } from '../types';
+import { validateToken } from '../auth/token-validator';
+import { signNrdocsToken } from '../auth/jwt-utils';
+import type { NrdocsTokenPayload } from '../auth/jwt-utils';
+import type { OperationalEvent, AccessMode, AccessPolicyEntry, RepoPublishToken, BootstrapToken } from '../types';
 
 /** Cloudflare Worker environment bindings. */
 export interface Env {
@@ -20,6 +23,8 @@ export interface Env {
   BUCKET: R2Bucket;
   API_KEY: string;
   HMAC_SIGNING_KEY: string;
+  TOKEN_SIGNING_KEY: string;
+  ISSUER_URL?: string;
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────
@@ -56,9 +61,200 @@ export function buildEvent(
   };
 }
 
+/** Extract the repo identity from the X-Repo-Identity request header. */
+export function extractRepoIdentity(request: Request): string | null {
+  return request.headers.get('X-Repo-Identity') ?? null;
+}
+
+/** Build structured audit context for publish auth decisions (never includes raw token string). */
+export function buildAuditContext(
+  tokenRecord: RepoPublishToken,
+  requestedProjectId: string,
+  request: Request,
+  result: 'allow' | 'deny',
+  denialReason?: string,
+): Record<string, unknown> {
+  return {
+    event: 'publish_auth',
+    token_jti: tokenRecord.jti,
+    token_typ: 'repo_publish',
+    token_org_id: tokenRecord.org_id,
+    token_project_id: tokenRecord.project_id,
+    token_repo_identity: tokenRecord.repo_identity,
+    requested_project_id: requestedProjectId,
+    request_repo_identity: extractRepoIdentity(request) ?? null,
+    result,
+    denial_reason: denialReason ?? null,
+  };
+}
+
 // ── Handlers ─────────────────────────────────────────────────────────
 
 const VALID_ACCESS_MODES: AccessMode[] = ['public', 'password'];
+
+/**
+ * POST /bootstrap/init — Validate a bootstrap token and return org metadata.
+ *
+ * Validates the bootstrap JWT, verifies the org is active, and returns
+ * org metadata with remaining quota. No project creation or token minting.
+ *
+ * This endpoint uses bootstrap token auth (NOT API key auth).
+ *
+ * Requirements: 14.1, 14.2, 14.3, 14.4, 2.3, 2.4
+ */
+export async function handleBootstrapInit(request: Request, env: Env): Promise<Response> {
+  // Extract Bearer token
+  const authHeader = request.headers.get('Authorization');
+  if (!authHeader) return jsonError('Missing or invalid bootstrap token', 401);
+  const parts = authHeader.split(' ');
+  if (parts.length !== 2 || parts[0] !== 'Bearer') {
+    return jsonError('Missing or invalid bootstrap token', 401);
+  }
+  const tokenStr = parts[1];
+
+  // Validate token
+  const dataStore = new D1DataStore(env.DB);
+  const expectedIssuer = env.ISSUER_URL ?? new URL(request.url).origin;
+  const result = await validateToken(tokenStr, env.TOKEN_SIGNING_KEY, expectedIssuer, dataStore, 'org_bootstrap');
+  if (!result.valid) return jsonError(result.reason, result.statusCode);
+
+  const bootstrapToken = result.dbRecord as BootstrapToken;
+
+  // Verify organization
+  const org = await dataStore.getOrganizationById(bootstrapToken.org_id);
+  if (!org || org.status !== 'active') return jsonError('Organization is disabled', 403);
+
+  // Return validation response
+  return jsonResponse({
+    org_name: org.name,
+    org_slug: org.slug,
+    remaining_quota: bootstrapToken.max_repos - bootstrapToken.repos_issued_count,
+    expires_at: bootstrapToken.expires_at,
+  }, 200);
+}
+
+/**
+ * POST /bootstrap/onboard — Create a project and mint a repo publish token.
+ *
+ * Validates the bootstrap JWT, verifies the org is active, checks quota,
+ * creates a project, approves it, mints a repo publish token, increments
+ * bootstrap token usage, and returns the project ID and signed token.
+ *
+ * This endpoint uses bootstrap token auth (NOT API key auth).
+ *
+ * Requirements: 9.1, 9.3, 9.4, 9.7, 9.8, 5.1–5.13, 6.1–6.8
+ */
+export async function handleBootstrapOnboard(request: Request, env: Env): Promise<Response> {
+  // 1. Extract Bearer token
+  const authHeader = request.headers.get('Authorization');
+  if (!authHeader) return jsonError('Missing or invalid bootstrap token', 401);
+  const parts = authHeader.split(' ');
+  if (parts.length !== 2 || parts[0] !== 'Bearer') {
+    return jsonError('Missing or invalid bootstrap token', 401);
+  }
+  const tokenStr = parts[1];
+
+  // 2. Validate token
+  const dataStore = new D1DataStore(env.DB);
+  const expectedIssuer = env.ISSUER_URL ?? new URL(request.url).origin;
+  const result = await validateToken(tokenStr, env.TOKEN_SIGNING_KEY, expectedIssuer, dataStore, 'org_bootstrap');
+  if (!result.valid) return jsonError(result.reason, result.statusCode);
+
+  const bootstrapToken = result.dbRecord as BootstrapToken;
+  const orgId = bootstrapToken.org_id;
+
+  // 3. Verify organization
+  const org = await dataStore.getOrganizationById(orgId);
+  if (!org || org.status !== 'active') return jsonError('Organization is disabled', 403);
+
+  // 4. Check quota
+  if (bootstrapToken.repos_issued_count >= bootstrapToken.max_repos) {
+    return jsonError('Bootstrap token repo limit reached', 403);
+  }
+
+  // 5. Parse and validate request body
+  let body: Record<string, unknown>;
+  try { body = await request.json() as Record<string, unknown>; }
+  catch { return jsonError('Invalid JSON body', 400); }
+
+  const { slug, title, description, repo_identity } = body;
+  if (!slug || typeof slug !== 'string') return jsonError('Missing or invalid field: slug', 400);
+  if (!title || typeof title !== 'string') return jsonError('Missing or invalid field: title', 400);
+  if (description !== undefined && typeof description !== 'string') {
+    return jsonError('Missing or invalid field: description', 400);
+  }
+  if (!repo_identity || typeof repo_identity !== 'string') {
+    return jsonError('Missing or invalid field: repo_identity', 400);
+  }
+
+  // 6. Create project (access_mode from control-plane default)
+  const defaultAccessMode: AccessMode = 'public';
+  let project;
+  try {
+    project = await dataStore.createProject({
+      slug: slug as string,
+      repo_url: '',
+      title: title as string,
+      description: (description as string) ?? '',
+      access_mode: defaultAccessMode,
+      org_id: orgId,
+      repo_identity: repo_identity as string,
+    });
+  } catch (err: unknown) {
+    if (err instanceof Error && err.message.includes('already exists')) {
+      return jsonError(`A project with slug ${slug} already exists`, 409);
+    }
+    if (err instanceof Error && err.message.includes('Invalid repo_identity format')) {
+      return jsonError(err.message, 400);
+    }
+    throw err;
+  }
+
+  // 7. Immediately approve project
+  await dataStore.updateProjectStatus(project.id, 'approved');
+
+  // 8. Record operational event
+  await dataStore.recordEvent(
+    buildEvent(project.id, 'registration', JSON.stringify({
+      slug: project.slug,
+      source: 'bootstrap_onboard',
+      bootstrap_jti: bootstrapToken.jti,
+    })),
+  );
+
+  // 9. Mint repo publish token
+  const repoPublishJti = crypto.randomUUID();
+  const now = Math.floor(Date.now() / 1000);
+  const oneYearFromNow = now + 365 * 24 * 60 * 60;
+  const iss = env.ISSUER_URL ?? new URL(request.url).origin;
+
+  const repoPublishPayload: NrdocsTokenPayload = {
+    v: 1, typ: 'repo_publish', iss, exp: oneYearFromNow, jti: repoPublishJti,
+  };
+  const repoPublishTokenJwt = await signNrdocsToken(repoPublishPayload, env.TOKEN_SIGNING_KEY);
+
+  const nowIso = new Date().toISOString();
+  const expiresAtIso = new Date(oneYearFromNow * 1000).toISOString();
+
+  await dataStore.createRepoPublishToken({
+    id: crypto.randomUUID(),
+    jti: repoPublishJti,
+    org_id: orgId,
+    project_id: project.id,
+    repo_identity: repo_identity as string,
+    status: 'active',
+    created_from_bootstrap_jti: bootstrapToken.jti,
+    created_at: nowIso,
+    expires_at: expiresAtIso,
+    last_used_at: null,
+  });
+
+  // 10. Increment bootstrap token usage
+  await dataStore.incrementBootstrapTokenUsage(bootstrapToken.jti);
+
+  // 11. Return success
+  return jsonResponse({ project_id: project.id, repo_publish_token: repoPublishTokenJwt }, 201);
+}
 
 /**
  * POST /projects — Register a new project.
@@ -95,7 +291,25 @@ async function handleCreateProject(request: Request, env: Env): Promise<Response
     return jsonError('Missing or invalid field: access_mode (must be "public" or "password")', 400);
   }
 
+  // Accept optional repo_identity from request body
+  const repo_identity = body.repo_identity;
+  if (repo_identity !== undefined && typeof repo_identity !== 'string') {
+    return jsonError('Invalid field: repo_identity', 400);
+  }
+
   const dataStore = new D1DataStore(env.DB);
+
+  // Resolve default org for org_id assignment (Requirement 8.1)
+  let orgId: string;
+  try {
+    const defaultOrg = await dataStore.getDefaultOrganization();
+    orgId = defaultOrg.id;
+  } catch (err: unknown) {
+    if (err instanceof Error && err.message.includes('Default organization not found')) {
+      return jsonError('Internal server error', 500);
+    }
+    throw err;
+  }
 
   try {
     const project = await dataStore.createProject({
@@ -104,6 +318,8 @@ async function handleCreateProject(request: Request, env: Env): Promise<Response
       title: title as string,
       description: (description as string) ?? '',
       access_mode: access_mode as AccessMode,
+      org_id: orgId,
+      repo_identity: repo_identity as string | undefined,
     });
 
     // Record registration operational event (Requirement 19.1)
@@ -115,6 +331,9 @@ async function handleCreateProject(request: Request, env: Env): Promise<Response
   } catch (err: unknown) {
     if (err instanceof Error && err.message.includes('already exists')) {
       return jsonError(err.message, 409);
+    }
+    if (err instanceof Error && err.message.includes('Invalid repo_identity format')) {
+      return jsonError(err.message, 400);
     }
     throw err;
   }
@@ -256,20 +475,85 @@ async function handleDeleteProject(projectId: string, env: Env): Promise<Respons
  */
 async function handlePublishProject(projectId: string, request: Request, env: Env): Promise<Response> {
   const dataStore = new D1DataStore(env.DB);
-  const storage = new R2StorageProvider(env.BUCKET);
-  const accessProvider = new CloudflareAccessProvider();
 
-  // Look up project and validate status
+  // ── Phase 1: Authentication & Authorization ──────────────────────
+
+  // 1a. Extract bearer token
+  const authHeader = request.headers.get('Authorization');
+  if (!authHeader) {
+    return jsonError('Missing authentication credentials', 401);
+  }
+  const parts = authHeader.split(' ');
+  if (parts.length !== 2 || parts[0] !== 'Bearer') {
+    return jsonError('Malformed authentication header', 401);
+  }
+  const tokenStr = parts[1];
+
+  // 1b. Validate token (structure, signature, claims, DB lookup, status)
+  const expectedIssuer = env.ISSUER_URL ?? new URL(request.url).origin;
+  const result = await validateToken(
+    tokenStr, env.TOKEN_SIGNING_KEY, expectedIssuer, dataStore, 'repo_publish',
+  );
+  if (!result.valid) {
+    // Auth failure — log via console.error, do NOT write to operational_events
+    console.error(JSON.stringify({
+      event: 'publish_auth_denied',
+      reason: result.reason,
+      requested_project_id: projectId,
+    }));
+    return jsonError(result.reason, result.statusCode);
+  }
+
+  const tokenRecord = result.dbRecord as RepoPublishToken;
+
+  // 1c. Project binding enforcement
+  if (tokenRecord.project_id !== projectId) {
+    const auditCtx = buildAuditContext(tokenRecord, projectId, request, 'deny', 'project_binding_mismatch');
+    console.error(JSON.stringify(auditCtx));
+    return jsonError('Token not authorized for this project', 403);
+  }
+
+  // 1d. Load project and validate existence
   const project = await dataStore.getProjectById(projectId);
   if (!project) {
     return jsonError('Project not found', 404);
   }
+
+  // 1e. Org cross-check
+  if (project.org_id !== tokenRecord.org_id) {
+    const auditCtx = buildAuditContext(tokenRecord, projectId, request, 'deny', 'org_mismatch');
+    console.error(JSON.stringify(auditCtx));
+    return jsonError('Token not authorized for this project', 403);
+  }
+
+  // 1f. Project status check
   if (project.status !== 'approved') {
     return jsonError(
       `Cannot publish project with status '${project.status}'; must be 'approved'`,
       409,
     );
   }
+
+  // 1g. Repo identity binding (best-effort Phase 1)
+  const requestRepoIdentity = extractRepoIdentity(request);
+  if (
+    requestRepoIdentity &&
+    tokenRecord.repo_identity &&
+    requestRepoIdentity !== tokenRecord.repo_identity
+  ) {
+    const auditCtx = buildAuditContext(tokenRecord, projectId, request, 'deny', 'repo_identity_mismatch');
+    console.error(JSON.stringify(auditCtx));
+    return jsonError('Token not authorized for this repository', 403);
+  }
+
+  // ── Phase 2: Publish Execution (field-level scope) ─────────────────
+  // Requirements: 8.1-8.8, 9.3-9.5, 10.1-10.2
+
+  const storage = new R2StorageProvider(env.BUCKET);
+  const accessProvider = new CloudflareAccessProvider();
+
+  // Build audit context for operational events (Requirement 9.3)
+  const auditCtx = buildAuditContext(tokenRecord, projectId, request, 'allow');
 
   // Parse request body
   let body: Record<string, unknown>;
@@ -301,9 +585,12 @@ async function handlePublishProject(projectId: string, request: Request, env: En
     return jsonError('Missing or invalid field: repo_content.pages', 400);
   }
 
-  // Record publish_start event (Requirement 19.3)
+  // Record publish_start event with audit context (Requirements 9.3, 9.4)
   await dataStore.recordEvent(
-    buildEvent(projectId, 'publish_start', JSON.stringify({ slug: project.slug })),
+    buildEvent(projectId, 'publish_start', JSON.stringify({
+      slug: project.slug,
+      ...auditCtx,
+    })),
   );
 
   const publishId = crypto.randomUUID();
@@ -318,8 +605,22 @@ async function handlePublishProject(projectId: string, request: Request, env: En
       ? parseAllowedListConfig(allowed_list_yml)
       : { allow: [] };
 
-    // Validate slug match (Requirement 10.5)
+    // Validate slug match (Requirement 8.2) — slug is validated for consistency, not mutated
     validateSlugMatch(projectConfig, project.slug);
+
+    // Use title and description as presentation metadata (Requirement 8.2)
+    // projectConfig.title and projectConfig.description are used by buildSite for rendering
+
+    // IGNORE access_mode from project_yml (Requirement 8.3, 8.6) —
+    // The project's registered access_mode is preserved unchanged.
+    // projectConfig.access_mode is NOT applied to the project record.
+
+    // Read publish_enabled for validation (Requirement 8.4) —
+    // does not change the project's security posture
+    void projectConfig.publish_enabled;
+
+    // Any other fields in project_yml beyond slug, title, description,
+    // publish_enabled, access_mode are ignored (Requirement 8.8)
 
     // Build site (Requirements 11.1-11.6, 12.1-12.4)
     const pagesMap = new Map(Object.entries(pages));
@@ -340,7 +641,7 @@ async function handlePublishProject(projectId: string, request: Request, env: En
     await dataStore.updateActivePublishPointer(projectId, publishPrefix);
 
     // b. Build AccessPolicyEntry objects from allowed-list and replace repo-derived entries
-    //    (Requirements 8.1-8.7)
+    //    (Requirements 8.5, 8.6) — admin overrides are preserved
     const newRepoDerivedEntries: AccessPolicyEntry[] = allowedListConfig.allow.map(
       (subject): AccessPolicyEntry => {
         const isDomain = subject.startsWith('*@');
@@ -379,16 +680,24 @@ async function handlePublishProject(projectId: string, request: Request, env: En
       await accessProvider.reconcileProjectAccess(project.slug, allPolicies);
     }
 
-    // d. Record publish_success event (Requirement 19.3)
+    // d. Update last_used_at ONLY on successful publish completion (Requirements 10.1, 10.2)
+    await dataStore.updateRepoPublishTokenLastUsedAt(tokenRecord.jti);
+
+    // e. Record publish_success event with audit context (Requirements 9.3, 9.4)
     await dataStore.recordEvent(
       buildEvent(
         projectId,
         'publish_success',
-        JSON.stringify({ slug: project.slug, publish_id: publishId, prefix: publishPrefix }),
+        JSON.stringify({
+          slug: project.slug,
+          publish_id: publishId,
+          prefix: publishPrefix,
+          ...auditCtx,
+        }),
       ),
     );
 
-    // e. Clean up previous publish prefix if it exists (Requirement 16.7)
+    // f. Clean up previous publish prefix if it exists (Requirement 16.7)
     if (previousPointer && previousPointer !== publishPrefix) {
       try {
         await storage.deletePrefix(previousPointer);
@@ -408,15 +717,20 @@ async function handlePublishProject(projectId: string, request: Request, env: En
       prefix: publishPrefix,
     });
   } catch (err: unknown) {
-    // Failure path:
+    // Failure path: do NOT update last_used_at (Requirement 10.2)
     const errorMessage = err instanceof Error ? err.message : String(err);
 
-    // a. Record publish_failure event with error context (Requirement 19.4)
+    // a. Record publish_failure event with error context and audit context (Requirement 9.5)
     await dataStore.recordEvent(
       buildEvent(
         projectId,
         'publish_failure',
-        JSON.stringify({ slug: project.slug, publish_id: publishId, error: errorMessage }),
+        JSON.stringify({
+          slug: project.slug,
+          publish_id: publishId,
+          error: errorMessage,
+          ...auditCtx,
+        }),
       ),
     );
 
@@ -699,6 +1013,14 @@ function route(request: Request, env: Env): Response | Promise<Response> {
   const method = request.method;
   const path = url.pathname;
 
+  // Bootstrap routes (use their own JWT-based auth, not API key auth)
+  if (method === 'POST' && path === '/bootstrap/init') {
+    return handleBootstrapInit(request, env);
+  }
+  if (method === 'POST' && path === '/bootstrap/onboard') {
+    return handleBootstrapOnboard(request, env);
+  }
+
   // Project routes
   if (method === 'POST' && path === '/projects') {
     return handleCreateProject(request, env);
@@ -764,10 +1086,18 @@ function route(request: Request, env: Env): Response | Promise<Response> {
 
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
-    // Authenticate every request
-    const authResult = authenticate(request, env);
-    if (authResult) {
-      return authResult;
+    // Bootstrap endpoint uses its own JWT-based auth, skip API key auth
+    // Publish endpoint uses repo-publish-token bearer auth, skip API key auth
+    const url = new URL(request.url);
+    const isPublishRoute = request.method === 'POST' &&
+      /^\/projects\/[^/]+\/publish$/.test(url.pathname);
+    const isBootstrapRoute = url.pathname === '/bootstrap/init' ||
+      url.pathname === '/bootstrap/onboard';
+    if (!isBootstrapRoute && !isPublishRoute) {
+      const authResult = authenticate(request, env);
+      if (authResult) {
+        return authResult;
+      }
     }
 
     return route(request, env);

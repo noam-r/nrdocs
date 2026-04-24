@@ -17,6 +17,57 @@ export type EventType =
   | 'publish_failure'
   | 'login_failure';
 
+// ── Organization types ────────────────────────────────────────────────
+
+/** Lifecycle status of an organization. */
+export type OrganizationStatus = 'active' | 'disabled';
+
+/** A fully-hydrated organization record as stored in D1. */
+export interface Organization {
+  id: string;
+  slug: string;
+  name: string;
+  status: OrganizationStatus;
+  created_at: string;
+  updated_at: string;
+}
+
+// ── Token types ──────────────────────────────────────────────────────
+
+/** Lifecycle status of a bootstrap token. */
+export type BootstrapTokenStatus = 'active' | 'revoked' | 'expired';
+
+/** A bootstrap token record scoped to an organization. */
+export interface BootstrapToken {
+  id: string;
+  jti: string;
+  org_id: string;
+  status: BootstrapTokenStatus;
+  created_by: string;
+  created_at: string;
+  expires_at: string;
+  max_repos: number;
+  repos_issued_count: number;
+  last_used_at: string | null;
+}
+
+/** Lifecycle status of a repo publish token. */
+export type RepoPublishTokenStatus = 'active' | 'revoked' | 'expired';
+
+/** A repo publish token bound to one organization and one project. */
+export interface RepoPublishToken {
+  id: string;
+  jti: string;
+  org_id: string;
+  project_id: string;
+  repo_identity: string;
+  status: RepoPublishTokenStatus;
+  created_from_bootstrap_jti: string;
+  created_at: string;
+  expires_at: string;
+  last_used_at: string | null;
+}
+
 // ── Project types ────────────────────────────────────────────────────
 
 /** A fully-hydrated project record as stored in D1. */
@@ -31,6 +82,8 @@ export interface Project {
   active_publish_pointer: string | null;
   password_hash: string | null;
   password_version: number;
+  org_id: string;
+  repo_identity: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -42,6 +95,8 @@ export interface NewProject {
   title: string;
   description: string;
   access_mode: AccessMode;
+  org_id?: string;
+  repo_identity?: string | null;
 }
 
 // ── Access policy types ──────────────────────────────────────────────

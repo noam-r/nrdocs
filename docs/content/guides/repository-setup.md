@@ -33,6 +33,20 @@ your-repo/
 
 ## Step by step
 
+### Quickest path: Bootstrap token onboarding
+
+If you have a bootstrap token from your org admin, the `nrdocs` CLI handles everything:
+
+```bash
+nrdocs init --token <bootstrap-token>
+```
+
+This generates all required files, creates the project, mints a repo publish token, and configures CI secrets. Skip to "Push and verify" below.
+
+### Manual setup
+
+If you're setting up manually (without a bootstrap token), follow these steps:
+
 ### 1. Create project.yml
 
 This file declares your project's identity. Every field except `description` is validated during publish.

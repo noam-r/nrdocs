@@ -5,3 +5,10 @@ dist-preview/
 # Local config with real credentials — use the .example templates
 .env
 wrangler.toml
+
+# IDE and tool state
+.kiro
+.vscode
+.wrangler
+
+mediator-docs

@@ -8,7 +8,65 @@ nrdocs is a documentation publishing platform. It takes Markdown files from a re
 
 The user has a running nrdocs platform (two Cloudflare Workers deployed). They want to connect a repository so its documentation is published automatically on push to `main`.
 
-## What you need from the user
+There are two onboarding paths:
+
+- **Bootstrap token onboarding** (recommended) — the user has a bootstrap token from their org admin. The `nrdocs init` CLI handles everything automatically.
+- **Admin API onboarding** — the user is a platform operator with the admin API key. They register and approve the project manually.
+
+## Path A: Bootstrap Token Onboarding (recommended)
+
+If the user has a bootstrap token, this is the fastest path. The `nrdocs` CLI handles project creation, file scaffolding, token minting, and CI secret installation in one command.
+
+### What you need from the user
+
+| Value | What it is | Example |
+|---|---|---|
+| Bootstrap token | An org-scoped JWT issued by an admin | `eyJhbGciOi...` |
+
+That's it. Everything else is inferred or prompted interactively.
+
+### Run the init command
+
+```bash
+nrdocs init --token <bootstrap-token>
+```
+
+The CLI will:
+1. Validate the token against the control plane
+2. Detect the git remote and infer repo identity, slug, and title
+3. Prompt the user to confirm or override each value
+4. Generate `project.yml`, `nav.yml`, `content/home.md`, and `.github/workflows/publish-docs.yml`
+5. Create the project on the control plane and mint a repo publish token
+6. Install `NRDOCS_PUBLISH_TOKEN` (secret) and `NRDOCS_PROJECT_ID` (variable) via `gh` CLI
+
+For non-interactive use (CI, scripts):
+
+```bash
+nrdocs init --token <token> --slug my-project --title "My Project" --repo-identity github.com/org/repo --docs-dir docs --description "My docs"
+```
+
+### After init
+
+The user just needs to:
+1. Review the generated files
+2. Commit: `git add -A && git commit -m "Initialize nrdocs"`
+3. Push to main: `git push origin main`
+
+The GitHub Actions workflow triggers automatically and publishes the docs.
+
+### Generated workflow differences
+
+The bootstrap-generated workflow uses **repo publish tokens** (not admin API keys):
+- `secrets.NRDOCS_PUBLISH_TOKEN` — a single-repo, single-project credential
+- `vars.NRDOCS_PROJECT_ID` — a repository variable (not a secret)
+- `X-Repo-Identity: github.com/${{ github.repository }}` header for repo binding
+- The API URL is embedded directly in the workflow file (not a secret)
+
+## Path B: Admin API Onboarding
+
+This is the original onboarding path for platform operators with the admin API key.
+
+### What you need from the user
 
 Before starting, ask the user for these values. They come from the nrdocs platform installation:
 

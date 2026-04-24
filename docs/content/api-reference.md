@@ -1,8 +1,65 @@
 # API Reference
 
-The Control Plane exposes a REST API for managing projects. All endpoints require `Authorization: Bearer <API_KEY>`.
+The Control Plane exposes a REST API for managing projects. Most endpoints require `Authorization: Bearer <API_KEY>`. Bootstrap endpoints use `Authorization: Bearer <bootstrap-token>` instead.
 
-## Endpoints
+## Bootstrap Endpoints
+
+These endpoints use bootstrap token authentication (not API key auth).
+
+### POST /bootstrap/init
+
+Validate a bootstrap token and return org metadata. Used by the CLI as a preflight check before onboarding.
+
+**Headers:** `Authorization: Bearer <bootstrap-token>`
+
+**Request body:** empty or `{}`
+
+**Response:** `200 OK`
+
+```json
+{
+  "org_name": "My Organization",
+  "org_slug": "my-org",
+  "remaining_quota": 8,
+  "expires_at": "2025-12-31T00:00:00.000Z"
+}
+```
+
+---
+
+### POST /bootstrap/onboard
+
+Create a project and mint a repo publish token in a single request. Used by the CLI after the user confirms onboarding values.
+
+**Headers:** `Authorization: Bearer <bootstrap-token>`
+
+**Request body:**
+
+```json
+{
+  "slug": "my-project",
+  "title": "My Project",
+  "description": "Optional description",
+  "repo_identity": "github.com/owner/repo"
+}
+```
+
+**Response:** `201 Created`
+
+```json
+{
+  "project_id": "550e8400-e29b-41d4-a716-446655440000",
+  "repo_publish_token": "eyJhbGciOi..."
+}
+```
+
+**Error responses:** 400 (missing/invalid fields, invalid repo_identity), 401 (auth), 403 (org disabled, quota exceeded), 409 (slug conflict).
+
+---
+
+## Admin Endpoints
+
+These endpoints require `Authorization: Bearer <API_KEY>`.
 
 ### POST /projects
 

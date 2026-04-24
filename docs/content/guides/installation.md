@@ -21,6 +21,21 @@ These local files contain your credentials and are gitignored — only the `.exa
 
 If you just want to preview the site builder output without deploying, you can stop here and run `npm run preview`. The rest of this guide covers deploying to Cloudflare.
 
+## Quick deploy (recommended)
+
+After setup, the fastest path is the automated deploy script:
+
+```bash
+wrangler login
+./scripts/deploy.sh
+```
+
+This handles everything: account ID detection, D1 database creation, R2 bucket creation, wrangler.toml patching, database migrations, secret generation, Worker deployment, and `.env` configuration. No manual copy-paste needed.
+
+If you prefer to understand each step or need to customize the process, the manual steps are documented below.
+
+## Manual deployment (step by step)
+
 ## Step 2: Log in to Cloudflare
 
 ```bash
@@ -124,13 +139,13 @@ This creates four tables: `projects`, `access_policy_entries`, `operational_even
 
 ## Step 8: Generate and set secrets
 
-You need two secret values. Generate them now and keep them visible in your terminal — you'll paste each one into Wrangler prompts and into your `.env` file in the next few minutes.
+You need three secret values. Generate them now and keep them visible in your terminal — you'll paste each one into Wrangler prompts and into your `.env` file in the next few minutes.
 
 ```bash
 openssl rand -hex 32
 ```
 
-Run this twice. The first output is your **API_KEY**, the second is your **HMAC_SIGNING_KEY**.
+Run this three times. The first output is your **API_KEY**, the second is your **HMAC_SIGNING_KEY**, and the third is your **TOKEN_SIGNING_KEY**.
 
 Now set them on the Workers. Wrangler will prompt "Enter a secret value:" — paste the value and press Enter. Since the Workers haven't been deployed yet, Wrangler will also ask "Do you want to create a new Worker?" — answer **yes**:
 
@@ -140,16 +155,19 @@ wrangler secret put HMAC_SIGNING_KEY --env delivery
 # → paste your HMAC_SIGNING_KEY, press Enter
 # → if asked "create a new Worker?", answer: y
 
-# Control Plane Worker — needs both secrets
+# Control Plane Worker — needs all three secrets
 wrangler secret put API_KEY --env control-plane
 # → paste your API_KEY, press Enter
 # → if asked "create a new Worker?", answer: y
 
 wrangler secret put HMAC_SIGNING_KEY --env control-plane
 # → paste the SAME HMAC_SIGNING_KEY as above, press Enter
+
+wrangler secret put TOKEN_SIGNING_KEY --env control-plane
+# → paste your TOKEN_SIGNING_KEY, press Enter
 ```
 
-The HMAC signing key **must be the same value** in both Workers — it's used to sign and verify session tokens.
+The HMAC signing key **must be the same value** in both Workers — it's used to sign and verify session tokens. The TOKEN_SIGNING_KEY is used by the Control Plane to sign bootstrap tokens and repo publish tokens.
 
 Now put the API key in your `.env` file so the CLI can use it. Open `.env` and set:
 
@@ -157,7 +175,7 @@ Now put the API key in your `.env` file so the CLI can use it. Open `.env` and s
 NRDOCS_API_KEY=paste-your-api-key-here
 ```
 
-You don't need to save the HMAC key anywhere locally — it's only used by the Workers at runtime. The API key is the only one you need locally (for the CLI and GitHub Actions).
+You don't need to save the HMAC key or token signing key anywhere locally — they're only used by the Workers at runtime. The API key is the only one you need locally (for the CLI and GitHub Actions).
 
 ## Step 9: Deploy
 

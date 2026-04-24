@@ -4,6 +4,9 @@ import type {
   ProjectStatus,
   AccessPolicyEntry,
   OperationalEvent,
+  Organization,
+  BootstrapToken,
+  RepoPublishToken,
 } from '../types';
 
 /**
@@ -73,4 +76,32 @@ export interface DataStore {
 
   /** Record an operational event (registration, approval, publish, etc.) in the audit log. */
   recordEvent(event: OperationalEvent): Promise<void>;
+
+  // ── Organization operations ───────────────────────────────────────
+
+  /** Look up an organization by its internal ID. Returns null if not found. */
+  getOrganizationById(id: string): Promise<Organization | null>;
+
+  /** Look up an organization by its URL slug. Returns null if not found. */
+  getOrganizationBySlug(slug: string): Promise<Organization | null>;
+
+  /** Retrieve the default organization (slug `default`). Throws if missing. */
+  getDefaultOrganization(): Promise<Organization>;
+
+  // ── Token operations ──────────────────────────────────────────────
+
+  /** Look up a bootstrap token by its JTI. Returns null if not found. */
+  getBootstrapTokenByJti(jti: string): Promise<BootstrapToken | null>;
+
+  /** Insert a new repo publish token row. */
+  createRepoPublishToken(token: RepoPublishToken): Promise<void>;
+
+  /** Increment `repos_issued_count` and set `last_used_at` to now for a bootstrap token. */
+  incrementBootstrapTokenUsage(jti: string): Promise<void>;
+
+  /** Look up a repo publish token by its JTI. Returns null if not found. */
+  getRepoPublishTokenByJti(jti: string): Promise<RepoPublishToken | null>;
+
+  /** Update last_used_at timestamp for a repo publish token. */
+  updateRepoPublishTokenLastUsedAt(jti: string): Promise<void>;
 }

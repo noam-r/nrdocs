@@ -76,7 +76,20 @@ You do NOT need to pre-create the D1 database or R2 bucket — Wrangler creates 
 
 This installs dependencies, Wrangler, and creates `wrangler.toml` and `.env` from their templates.
 
-### Log in to Cloudflare
+### Deploy (automated)
+
+The fastest path is the automated deploy script:
+
+```bash
+wrangler login
+./scripts/deploy.sh
+```
+
+This handles D1/R2 creation, wrangler.toml patching, migrations, secret generation, and deployment in one step.
+
+### Deploy (manual)
+
+If you prefer manual control:
 
 ```bash
 wrangler login
