@@ -5,14 +5,18 @@
   "type": "module",
   "scripts": {
     "build": "tsc",
+    "build:cli": "bash scripts/build-cli.sh",
+    "install:cli:local": "npm run build:cli && bash scripts/install-built-cli.sh",
     "test": "vitest --run",
     "test:watch": "vitest",
     "preview": "tsx scripts/preview.ts",
+    "nrdocs:cli": "tsx cli/src/main.ts",
     "nrdocs": "bash scripts/nrdocs.sh",
     "setup": "bash scripts/setup.sh"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20250214.0",
+    "esbuild": "^0.27.0",
     "fast-check": "^4.7.0",
     "tsx": "^4.21.0",
     "typescript": "^5.7.0",

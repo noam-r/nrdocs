@@ -58,6 +58,10 @@ RATE_LIMIT_WINDOW = "300"      # Rate-limit window in seconds (default: 5 min)
 name = "nrdocs-control-plane"
 main = "src/control-plane/index.ts"
 
+[env.control-plane.vars]
+# Public Delivery Worker base URL. Used so nrdocs init can print the final docs URL.
+DELIVERY_URL = "https://docs.example.com"
+
 [[env.control-plane.d1_databases]]
 binding = "DB"
 database_name = "nrdocs"

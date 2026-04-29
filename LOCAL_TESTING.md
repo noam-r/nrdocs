@@ -124,10 +124,14 @@ Enable R2 in the Cloudflare dashboard (R2 Object Storage → enable), then creat
 wrangler r2 bucket create nrdocs-content
 ```
 
-### Run the database migration
+### Run the database migrations
+
+Apply all files in `migrations/` in order (or use `./scripts/deploy.sh`, which loops over them):
 
 ```bash
-wrangler d1 execute nrdocs --remote --file=migrations/0001_initial_schema.sql
+for f in migrations/*.sql; do
+  wrangler d1 execute nrdocs --remote --file="$f"
+done
 ```
 
 ### Set secrets
@@ -160,47 +164,47 @@ NRDOCS_API_KEY=the-api-key-you-generated-above
 NRDOCS_DOCS_DIR=docs
 ```
 
-Leave `NRDOCS_PROJECT_ID` empty for now — you'll get it after registering.
+You can set `NRDOCS_PROJECT_ID` for repeated commands, but the preferred flow is to pass the project ID directly.
 
 ### Test the full flow
 
 ```bash
 # Register a new project (reads slug, title, access_mode from docs/project.yml)
-./scripts/nrdocs.sh register
+nrdocs admin register
 
-# Copy the project ID from the output into .env as NRDOCS_PROJECT_ID
+# Copy the project ID from the output
 
-# Approve the project
-./scripts/nrdocs.sh approve
+# Approve the project and mint NRDOCS_PUBLISH_TOKEN
+nrdocs admin approve <project-id> --repo-identity github.com/org/repo
 
 # Publish the docs
-./scripts/nrdocs.sh publish
+nrdocs admin publish <project-id>
 ```
 
 Or do register + approve in one step:
 
 ```bash
-./scripts/nrdocs.sh init
+nrdocs admin init
 ```
 
 ### CLI commands reference
 
 | Command | What it does |
 |---|---|
-| `./scripts/nrdocs.sh init` | Register + approve in one step |
-| `./scripts/nrdocs.sh register` | Register a new project (starts in `awaiting_approval`) |
-| `./scripts/nrdocs.sh approve` | Approve a registered project for publishing |
-| `./scripts/nrdocs.sh publish` | Build docs from `docs/` and publish to the Control Plane |
-| `./scripts/nrdocs.sh status` | Show project details from the Control Plane |
-| `./scripts/nrdocs.sh disable` | Disable a project (returns 404, preserves data) |
-| `./scripts/nrdocs.sh delete` | Delete a project and all its data |
-| `./scripts/nrdocs.sh help` | Show all commands |
+| `nrdocs admin init` | Register + approve in one step |
+| `nrdocs admin register` | Register a new project (starts in `awaiting_approval`) |
+| `nrdocs admin approve <project-id>` | Approve a registered project and mint a repo publish token |
+| `nrdocs admin publish <project-id>` | Build docs from `docs/` and publish to the Control Plane |
+| `nrdocs admin status <project-id>` | Show project details from the Control Plane |
+| `nrdocs admin disable <project-id>` | Disable a project (returns 404, preserves data) |
+| `nrdocs admin delete <project-id>` | Delete a project and all its data |
+| `nrdocs admin --help` | Show all operator commands |
 
-You can also use `npm run nrdocs -- <command>`:
+You can also use `npm run nrdocs -- admin <command>`:
 
 ```bash
-npm run nrdocs -- publish
-npm run nrdocs -- status
+npm run nrdocs -- admin publish <project-id>
+npm run nrdocs -- admin status <project-id>
 ```
 
 ### Testing without a custom domain

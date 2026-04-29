@@ -4,6 +4,8 @@
 
 Draft, Phase 0 prerequisite for token-based onboarding.
 
+**Implementation note (codebase):** Organizations, bootstrap tokens, repo publish tokens, and **`UNIQUE(org_id, slug)`** on projects are implemented. Delivery URLs use **`/<org>/<project>/…`** for non-default orgs and **`/<project>/…`** for the default org. R2 publish prefixes use **`publishes/<org-slug>/<project-slug>/<publish-id>/`**. Sections below that still recommend *global* slug uniqueness are superseded by that behavior where they conflict.
+
 ## Purpose
 
 This spec defines the minimum **organization ("org") model** that NRDocs must add before implementing token-based onboarding and repo-scoped publish tokens.
@@ -109,20 +111,7 @@ Existing table must be updated.
 ### Constraints
 
 - every project must have a non-null `org_id`
-- slug uniqueness must be clarified:
-  - **recommended:** keep `project.slug` globally unique within the control plane for now
-  - do **not** weaken uniqueness to per-org unless there is a concrete need
-
-### Why keep global slug uniqueness now?
-
-Because it simplifies:
-
-- routing
-- site URLs
-- project lookup
-- later migration of existing data
-
-Per-org slug uniqueness can be revisited later if required.
+- slug uniqueness: **implemented as `UNIQUE(org_id, slug)`** (per-organization). Delivery routing uses `/<org>/<project>/` for non-default orgs and `/<project>/` for the default org.
 
 ---
 
@@ -277,7 +266,7 @@ These tables may remain unused until the token-bootstrap feature is implemented.
 ### Project constraints
 
 - `projects.org_id` must exist
-- `projects.slug` should remain globally unique for now
+- `projects.slug` is **unique per `org_id`** (composite uniqueness in D1)
 - if `repo_identity` is set, it should be normalized before storage
 
 ### Token constraints
@@ -313,7 +302,7 @@ The schema should support multiple orgs, even if the initial UX only exposes one
 
 ### 2. Project slug uniqueness
 
-Recommended Phase 0 answer: keep globally unique project slugs.
+**Resolved in implementation:** per-organization unique slugs, with URL disambiguation as documented in the Status note above.
 
 ### 3. Repo identity storage
 

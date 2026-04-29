@@ -16,6 +16,8 @@ import { validateToken } from '../auth/token-validator';
 import { signNrdocsToken } from '../auth/jwt-utils';
 import type { NrdocsTokenPayload } from '../auth/jwt-utils';
 import type { OperationalEvent, AccessMode, AccessPolicyEntry, RepoPublishToken, BootstrapToken } from '../types';
+import { verifyGitHubActionsOidcToken } from '../auth/github-oidc';
+import type { RepoProofChallengeAction } from '../types';
 
 /** Cloudflare Worker environment bindings. */
 export interface Env {
@@ -25,6 +27,7 @@ export interface Env {
   HMAC_SIGNING_KEY: string;
   TOKEN_SIGNING_KEY: string;
   ISSUER_URL?: string;
+  DELIVERY_URL?: string;
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────
@@ -43,6 +46,253 @@ function jsonResponse(body: Record<string, unknown>, status = 200): Response {
     status,
     headers: { 'Content-Type': 'application/json' },
   });
+}
+
+function base64urlEncode(bytes: Uint8Array): string {
+  // btoa expects a binary string.
+  let s = '';
+  for (const b of bytes) s += String.fromCharCode(b);
+  return btoa(s).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
+}
+
+function randomTokenBase64url(bytes = 32): string {
+  const buf = new Uint8Array(bytes);
+  crypto.getRandomValues(buf);
+  return base64urlEncode(buf);
+}
+
+async function sha256Base64url(input: string): Promise<string> {
+  const data = new TextEncoder().encode(input);
+  const digest = await crypto.subtle.digest('SHA-256', data);
+  return base64urlEncode(new Uint8Array(digest));
+}
+
+function nowIso(): string {
+  return new Date().toISOString();
+}
+
+function addSecondsIso(fromIso: string, seconds: number): string {
+  const ms = new Date(fromIso).getTime() + seconds * 1000;
+  return new Date(ms).toISOString();
+}
+
+function parseRepoProofAction(value: unknown): RepoProofChallengeAction | null {
+  if (value === 'set_password' || value === 'disable_password' || value === 'set_access_mode') return value;
+  return null;
+}
+
+async function handleRepoProofIssueChallenge(request: Request, env: Env): Promise<Response> {
+  let body: Record<string, unknown>;
+  try { body = await request.json() as Record<string, unknown>; }
+  catch { return jsonError('Invalid JSON body', 400); }
+
+  const { project_id, repo_identity, action } = body;
+  if (!project_id || typeof project_id !== 'string') return jsonError('Missing or invalid field: project_id', 400);
+  if (!repo_identity || typeof repo_identity !== 'string') return jsonError('Missing or invalid field: repo_identity', 400);
+  const parsedAction = parseRepoProofAction(action);
+  if (!parsedAction) return jsonError('Missing or invalid field: action', 400);
+
+  const dataStore = new D1DataStore(env.DB);
+  const project = await dataStore.getProjectById(project_id);
+  if (!project) return jsonError('Project not found', 404);
+  if (!project.repo_identity || project.repo_identity !== repo_identity) {
+    return jsonError('repo_identity does not match project', 403);
+  }
+
+  // Replace any stale issued challenge for this (project, action) so the caller always
+  // receives a fresh private_token (private_token is never stored in plaintext).
+  await dataStore.deleteIssuedRepoProofChallenges(project_id, parsedAction);
+
+  const now = nowIso();
+  const challengeId = crypto.randomUUID();
+  const publicToken = randomTokenBase64url(32);
+  const privateToken = randomTokenBase64url(32);
+  const privateTokenHash = await sha256Base64url(`${challengeId}.${privateToken}`);
+  const expiresAt = addSecondsIso(now, 20 * 60);
+
+  await dataStore.createRepoProofChallenge({
+    id: challengeId,
+    project_id,
+    repo_identity,
+    action: parsedAction,
+    public_token: publicToken,
+    private_token_hash: privateTokenHash,
+    status: 'issued',
+    issued_at: now,
+    expires_at: expiresAt,
+    verified_at: null,
+    opened_until: null,
+    verify_ref: null,
+    verify_sha: null,
+    consumed_at: null,
+    attempt_count_set: 0,
+    attempt_count_verify: 0,
+    last_denial_reason: null,
+  });
+
+  await dataStore.recordEvent(
+    buildEvent(project_id, 'repo_proof_challenge_issued', JSON.stringify({ repo_identity, action: parsedAction })),
+  );
+
+  return jsonResponse({
+    challenge_id: challengeId,
+    public_token: publicToken,
+    private_token: privateToken,
+    expires_at: expiresAt,
+    verify_file_path: `.nrdocs/challenges/${challengeId}.json`,
+    opened_ttl_seconds: 120,
+    issued_at: now,
+  }, 201);
+}
+
+async function handleRepoProofVerifyChallenge(challengeId: string, request: Request, env: Env): Promise<Response> {
+  // Auth: GitHub Actions OIDC
+  const authHeader = request.headers.get('Authorization');
+  if (!authHeader) return jsonError('Missing authentication credentials', 401);
+  const parts = authHeader.split(' ');
+  if (parts.length !== 2 || parts[0] !== 'Bearer') return jsonError('Malformed authentication header', 401);
+
+  const oidcToken = parts[1];
+  const expectedAudience = new URL(request.url).origin;
+  let claims: Awaited<ReturnType<typeof verifyGitHubActionsOidcToken>>;
+  try {
+    claims = await verifyGitHubActionsOidcToken(oidcToken, { expectedAudience });
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    return jsonError(message, 401);
+  }
+  const callerRepoIdentity = `github.com/${claims.repository}`;
+
+  let body: Record<string, unknown>;
+  try { body = await request.json() as Record<string, unknown>; }
+  catch { return jsonError('Invalid JSON body', 400); }
+
+  const { repo_identity, ref, sha, public_token } = body;
+  if (!repo_identity || typeof repo_identity !== 'string') return jsonError('Missing or invalid field: repo_identity', 400);
+  if (!ref || typeof ref !== 'string') return jsonError('Missing or invalid field: ref', 400);
+  if (!sha || typeof sha !== 'string') return jsonError('Missing or invalid field: sha', 400);
+  if (!public_token || typeof public_token !== 'string') return jsonError('Missing or invalid field: public_token', 400);
+
+  const repoIdentityNormalized = repo_identity.trim();
+  if (repoIdentityNormalized !== callerRepoIdentity) {
+    return jsonError('repo_identity does not match OIDC repository', 403);
+  }
+
+  const dataStore = new D1DataStore(env.DB);
+  const challenge = await dataStore.getRepoProofChallengeById(challengeId);
+  if (!challenge) return jsonError('Challenge not found', 404);
+
+  if (challenge.repo_identity !== repoIdentityNormalized) return jsonError('Challenge repo_identity mismatch', 403);
+  if (challenge.public_token !== public_token) return jsonError('Invalid public_token', 403);
+
+  const now = nowIso();
+  if (new Date(challenge.expires_at).getTime() <= Date.now()) {
+    return jsonError('Challenge expired', 409);
+  }
+
+  if (challenge.status === 'verified_by_push') {
+    if (challenge.verify_sha && challenge.verify_ref && (challenge.verify_sha !== sha || challenge.verify_ref !== ref)) {
+      return jsonError('Challenge already verified for a different sha/ref', 409);
+    }
+    return jsonResponse({ status: 'verified', opened_until: challenge.opened_until ?? addSecondsIso(now, 120) }, 200);
+  }
+  if (challenge.status !== 'issued') {
+    return jsonError('Challenge is not issuable', 409);
+  }
+
+  const openedUntil = addSecondsIso(now, 120);
+  await dataStore.markRepoProofChallengeVerified(challengeId, { verify_ref: ref, verify_sha: sha, opened_until: openedUntil });
+  await dataStore.recordEvent(
+    buildEvent(challenge.project_id, 'repo_proof_challenge_verify_success', JSON.stringify({ repo_identity, ref, sha })),
+  );
+  return jsonResponse({ status: 'verified', opened_until: openedUntil }, 200);
+}
+
+async function handleRepoProofSetPassword(request: Request, env: Env): Promise<Response> {
+  let body: Record<string, unknown>;
+  try { body = await request.json() as Record<string, unknown>; }
+  catch { return jsonError('Invalid JSON body', 400); }
+
+  const { challenge_id, public_token, private_token, project_id, password } = body;
+  if (!challenge_id || typeof challenge_id !== 'string') return jsonError('Missing or invalid field: challenge_id', 400);
+  if (!project_id || typeof project_id !== 'string') return jsonError('Missing or invalid field: project_id', 400);
+  if (!public_token || typeof public_token !== 'string') return jsonError('Missing or invalid field: public_token', 400);
+  if (!private_token || typeof private_token !== 'string') return jsonError('Missing or invalid field: private_token', 400);
+  if (!password || typeof password !== 'string' || password.length === 0) return jsonError('Missing or invalid field: password', 400);
+
+  const dataStore = new D1DataStore(env.DB);
+  const challenge = await dataStore.getRepoProofChallengeById(challenge_id);
+  if (!challenge) return jsonError('Challenge not found', 404);
+  if (challenge.project_id !== project_id) return jsonError('Challenge project mismatch', 403);
+  if (challenge.public_token !== public_token) {
+    await dataStore.incrementRepoProofChallengeSetAttempts(challenge_id, 'invalid_public_token');
+    return jsonError('Invalid token', 403);
+  }
+  const expectedHash = await sha256Base64url(`${challenge_id}.${private_token}`);
+  if (challenge.private_token_hash !== expectedHash) {
+    await dataStore.incrementRepoProofChallengeSetAttempts(challenge_id, 'invalid_private_token');
+    return jsonError('Invalid token', 403);
+  }
+  if (challenge.status !== 'verified_by_push') return jsonError('Challenge not verified', 409);
+  if (!challenge.opened_until || new Date(challenge.opened_until).getTime() <= Date.now()) return jsonError('Challenge window closed', 409);
+
+  const consumedAt = nowIso();
+  const consumed = await dataStore.consumeRepoProofChallenge(challenge_id, { status: 'consumed_success', consumed_at: consumedAt });
+  if (!consumed) return jsonError('Challenge already consumed', 409);
+
+  // Apply action: set password (implies password mode)
+  const project = await dataStore.getProjectById(project_id);
+  if (!project) return jsonError('Project not found', 404);
+  if (project.access_mode !== 'password') await dataStore.setProjectAccessMode(project_id, 'password');
+  const hash = await PasswordHasher.hash(password);
+  await dataStore.setPasswordHash(project_id, hash);
+
+  await dataStore.recordEvent(
+    buildEvent(project_id, 'repo_proof_password_set_success', JSON.stringify({ repo_identity: challenge.repo_identity })),
+  );
+  return jsonResponse({ ok: true, project_id, access_mode: 'password' }, 200);
+}
+
+async function handleRepoProofDisablePassword(request: Request, env: Env): Promise<Response> {
+  let body: Record<string, unknown>;
+  try { body = await request.json() as Record<string, unknown>; }
+  catch { return jsonError('Invalid JSON body', 400); }
+
+  const { challenge_id, public_token, private_token, project_id } = body;
+  if (!challenge_id || typeof challenge_id !== 'string') return jsonError('Missing or invalid field: challenge_id', 400);
+  if (!project_id || typeof project_id !== 'string') return jsonError('Missing or invalid field: project_id', 400);
+  if (!public_token || typeof public_token !== 'string') return jsonError('Missing or invalid field: public_token', 400);
+  if (!private_token || typeof private_token !== 'string') return jsonError('Missing or invalid field: private_token', 400);
+
+  const dataStore = new D1DataStore(env.DB);
+  const challenge = await dataStore.getRepoProofChallengeById(challenge_id);
+  if (!challenge) return jsonError('Challenge not found', 404);
+  if (challenge.project_id !== project_id) return jsonError('Challenge project mismatch', 403);
+  if (challenge.public_token !== public_token) {
+    await dataStore.incrementRepoProofChallengeSetAttempts(challenge_id, 'invalid_public_token');
+    return jsonError('Invalid token', 403);
+  }
+  const expectedHash = await sha256Base64url(`${challenge_id}.${private_token}`);
+  if (challenge.private_token_hash !== expectedHash) {
+    await dataStore.incrementRepoProofChallengeSetAttempts(challenge_id, 'invalid_private_token');
+    return jsonError('Invalid token', 403);
+  }
+  if (challenge.status !== 'verified_by_push') return jsonError('Challenge not verified', 409);
+  if (!challenge.opened_until || new Date(challenge.opened_until).getTime() <= Date.now()) return jsonError('Challenge window closed', 409);
+
+  const consumedAt = nowIso();
+  const consumed = await dataStore.consumeRepoProofChallenge(challenge_id, { status: 'consumed_success', consumed_at: consumedAt });
+  if (!consumed) return jsonError('Challenge already consumed', 409);
+
+  const project = await dataStore.getProjectById(project_id);
+  if (!project) return jsonError('Project not found', 404);
+  await dataStore.setProjectAccessMode(project_id, 'public');
+  await dataStore.clearProjectPassword(project_id);
+
+  await dataStore.recordEvent(
+    buildEvent(project_id, 'repo_proof_disable_password_success', JSON.stringify({ repo_identity: challenge.repo_identity })),
+  );
+  return jsonResponse({ ok: true, project_id, access_mode: 'public' }, 200);
 }
 
 /** Stub handler for routes not yet implemented. */
@@ -91,6 +341,24 @@ export function buildAuditContext(
 // ── Handlers ─────────────────────────────────────────────────────────
 
 const VALID_ACCESS_MODES: AccessMode[] = ['public', 'password'];
+const VALID_PROJECT_STATUSES = ['awaiting_approval', 'approved', 'disabled'] as const;
+
+function positiveInteger(value: unknown, fallback: number): number | null {
+  if (value === undefined || value === null) return fallback;
+  if (typeof value !== 'number' || !Number.isInteger(value) || value <= 0) return null;
+  return value;
+}
+
+function deliveryUrl(env: Env): string | undefined {
+  const value = env.DELIVERY_URL?.trim();
+  return value ? value.replace(/\/$/, '') : undefined;
+}
+
+function projectUrl(baseUrl: string | undefined, orgSlug: string, projectSlug: string): string | null {
+  if (!baseUrl) return null;
+  const path = orgSlug === 'default' ? projectSlug : `${orgSlug}/${projectSlug}`;
+  return `${baseUrl}/${path}/`;
+}
 
 /**
  * POST /bootstrap/init — Validate a bootstrap token and return org metadata.
@@ -130,6 +398,7 @@ export async function handleBootstrapInit(request: Request, env: Env): Promise<R
     org_slug: org.slug,
     remaining_quota: bootstrapToken.max_repos - bootstrapToken.repos_issued_count,
     expires_at: bootstrapToken.expires_at,
+    delivery_url: deliveryUrl(env),
   }, 200);
 }
 
@@ -167,17 +436,12 @@ export async function handleBootstrapOnboard(request: Request, env: Env): Promis
   const org = await dataStore.getOrganizationById(orgId);
   if (!org || org.status !== 'active') return jsonError('Organization is disabled', 403);
 
-  // 4. Check quota
-  if (bootstrapToken.repos_issued_count >= bootstrapToken.max_repos) {
-    return jsonError('Bootstrap token repo limit reached', 403);
-  }
-
-  // 5. Parse and validate request body
+  // 4. Parse and validate request body
   let body: Record<string, unknown>;
   try { body = await request.json() as Record<string, unknown>; }
   catch { return jsonError('Invalid JSON body', 400); }
 
-  const { slug, title, description, repo_identity } = body;
+  const { slug, title, description, repo_identity, access_mode } = body;
   if (!slug || typeof slug !== 'string') return jsonError('Missing or invalid field: slug', 400);
   if (!title || typeof title !== 'string') return jsonError('Missing or invalid field: title', 400);
   if (description !== undefined && typeof description !== 'string') {
@@ -186,74 +450,230 @@ export async function handleBootstrapOnboard(request: Request, env: Env): Promis
   if (!repo_identity || typeof repo_identity !== 'string') {
     return jsonError('Missing or invalid field: repo_identity', 400);
   }
-
-  // 6. Create project (access_mode from control-plane default)
-  const defaultAccessMode: AccessMode = 'public';
-  let project;
-  try {
-    project = await dataStore.createProject({
-      slug: slug as string,
-      repo_url: '',
-      title: title as string,
-      description: (description as string) ?? '',
-      access_mode: defaultAccessMode,
-      org_id: orgId,
-      repo_identity: repo_identity as string,
-    });
-  } catch (err: unknown) {
-    if (err instanceof Error && err.message.includes('already exists')) {
-      return jsonError(`A project with slug ${slug} already exists`, 409);
-    }
-    if (err instanceof Error && err.message.includes('Invalid repo_identity format')) {
-      return jsonError(err.message, 400);
-    }
-    throw err;
+  if (access_mode !== undefined && (!VALID_ACCESS_MODES.includes(access_mode as AccessMode))) {
+    return jsonError('Missing or invalid field: access_mode (must be "public" or "password")', 400);
   }
 
-  // 7. Immediately approve project
-  await dataStore.updateProjectStatus(project.id, 'approved');
+  let repoIdentityNormalized: string;
+  try {
+    repoIdentityNormalized = dataStore.normalizeRepoIdentityForOnboard(repo_identity as string);
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : 'Invalid repo_identity format';
+    return jsonError(message, 400);
+  }
 
-  // 8. Record operational event
-  await dataStore.recordEvent(
-    buildEvent(project.id, 'registration', JSON.stringify({
-      slug: project.slug,
-      source: 'bootstrap_onboard',
-      bootstrap_jti: bootstrapToken.jti,
-    })),
-  );
-
-  // 9. Mint repo publish token
-  const repoPublishJti = crypto.randomUUID();
+  const defaultAccessMode: AccessMode =
+    access_mode ? access_mode as AccessMode : 'public';
+  const nowIso = new Date().toISOString();
   const now = Math.floor(Date.now() / 1000);
   const oneYearFromNow = now + 365 * 24 * 60 * 60;
   const iss = env.ISSUER_URL ?? new URL(request.url).origin;
 
+  const existingProject = await dataStore.getProjectByOrgSlugAndProjectSlug(org.slug, slug as string);
+  if (existingProject) {
+    if (existingProject.repo_identity !== repoIdentityNormalized) {
+      return jsonError(
+        `A project with slug ${slug} already exists for a different repository identity`,
+        409,
+      );
+    }
+    if (existingProject.active_publish_pointer) {
+      return jsonError(
+        `Project ${slug} already exists and has been published. Run nrdocs status or ask your platform operator for recovery help.`,
+        409,
+      );
+    }
+    const originalToken = await dataStore.getRepoPublishTokenForProjectFromBootstrap(
+      existingProject.id,
+      bootstrapToken.jti,
+    );
+    if (!originalToken) {
+      return jsonError(
+        `A project with slug ${slug} already exists and was not created by this bootstrap token`,
+        409,
+      );
+    }
+
+    const recoveryPublishJti = crypto.randomUUID();
+    const recoveryPayload: NrdocsTokenPayload = {
+      v: 1, typ: 'repo_publish', iss, exp: oneYearFromNow, jti: recoveryPublishJti,
+    };
+    const recoveryPublishTokenJwt = await signNrdocsToken(recoveryPayload, env.TOKEN_SIGNING_KEY);
+    const recoveryPublishRow = {
+      id: crypto.randomUUID(),
+      jti: recoveryPublishJti,
+      org_id: orgId,
+      project_id: existingProject.id,
+      repo_identity: repoIdentityNormalized,
+      status: 'active' as const,
+      created_from_bootstrap_jti: bootstrapToken.jti,
+      created_at: nowIso,
+      expires_at: new Date(oneYearFromNow * 1000).toISOString(),
+      last_used_at: null,
+    };
+
+    await dataStore.createRepoPublishToken(recoveryPublishRow);
+    await dataStore.recordEvent(
+      buildEvent(
+        existingProject.id,
+        'publish_token_mint',
+        JSON.stringify({ repo_identity: repoIdentityNormalized, source: 'bootstrap_recovery' }),
+      ),
+    );
+
+    return jsonResponse({
+      project_id: existingProject.id,
+      repo_publish_token: recoveryPublishTokenJwt,
+      delivery_url: deliveryUrl(env),
+      recovered: true,
+    }, 200);
+  }
+
+  const reserved = await dataStore.tryReserveBootstrapRepoSlot(
+    bootstrapToken.jti,
+    bootstrapToken.max_repos,
+  );
+  if (!reserved) {
+    return jsonError('Bootstrap token repo limit reached', 403);
+  }
+
+  const projectId = crypto.randomUUID();
+  const repoPublishJti = crypto.randomUUID();
   const repoPublishPayload: NrdocsTokenPayload = {
     v: 1, typ: 'repo_publish', iss, exp: oneYearFromNow, jti: repoPublishJti,
   };
   const repoPublishTokenJwt = await signNrdocsToken(repoPublishPayload, env.TOKEN_SIGNING_KEY);
-
-  const nowIso = new Date().toISOString();
   const expiresAtIso = new Date(oneYearFromNow * 1000).toISOString();
 
-  await dataStore.createRepoPublishToken({
+  const repoPublishRow = {
     id: crypto.randomUUID(),
     jti: repoPublishJti,
     org_id: orgId,
-    project_id: project.id,
-    repo_identity: repo_identity as string,
-    status: 'active',
+    project_id: projectId,
+    repo_identity: repoIdentityNormalized,
+    status: 'active' as const,
     created_from_bootstrap_jti: bootstrapToken.jti,
     created_at: nowIso,
     expires_at: expiresAtIso,
     last_used_at: null,
-  });
+  };
 
-  // 10. Increment bootstrap token usage
-  await dataStore.incrementBootstrapTokenUsage(bootstrapToken.jti);
+  const registrationEvent = buildEvent(projectId, 'registration', JSON.stringify({
+    slug: slug as string,
+    source: 'bootstrap_onboard',
+    bootstrap_jti: bootstrapToken.jti,
+  }));
 
-  // 11. Return success
-  return jsonResponse({ project_id: project.id, repo_publish_token: repoPublishTokenJwt }, 201);
+  try {
+    await dataStore.bootstrapOnboardInsertBundle({
+      projectId,
+      orgId,
+      slug: slug as string,
+      repoUrl: '',
+      title: title as string,
+      description: (description as string) ?? '',
+      accessMode: defaultAccessMode,
+      repoIdentity: repoIdentityNormalized,
+      createdAt: nowIso,
+      updatedAt: nowIso,
+      repoPublishToken: repoPublishRow,
+      operationalEvent: registrationEvent,
+    });
+  } catch (err: unknown) {
+    await dataStore.releaseBootstrapRepoSlot(bootstrapToken.jti);
+    if (
+      err instanceof Error
+      && (err.message.includes('already exists') || err.message.includes('UNIQUE constraint failed'))
+    ) {
+      return jsonError(`A project with slug ${slug} already exists`, 409);
+    }
+    throw err;
+  }
+
+  return jsonResponse({
+    project_id: projectId,
+    repo_publish_token: repoPublishTokenJwt,
+    delivery_url: deliveryUrl(env),
+  }, 201);
+}
+
+/**
+ * POST /bootstrap-tokens — Create a bootstrap token for repo-owner onboarding.
+ *
+ * API-key protected. Operators use this endpoint via `nrdocs admin init`.
+ */
+async function handleCreateBootstrapToken(request: Request, env: Env): Promise<Response> {
+  let body: Record<string, unknown> = {};
+  try {
+    const text = await request.text();
+    if (text.trim()) {
+      body = JSON.parse(text) as Record<string, unknown>;
+    }
+  } catch {
+    return jsonError('Invalid JSON body', 400);
+  }
+
+  const orgSlug = typeof body.org_slug === 'string' && body.org_slug.trim()
+    ? body.org_slug.trim()
+    : 'default';
+  const maxRepos = positiveInteger(body.max_repos, 1);
+  if (maxRepos === null) {
+    return jsonError('Invalid field: max_repos must be a positive integer', 400);
+  }
+  const expiresInDays = positiveInteger(body.expires_in_days, 7);
+  if (expiresInDays === null) {
+    return jsonError('Invalid field: expires_in_days must be a positive integer', 400);
+  }
+  const createdBy = typeof body.created_by === 'string' && body.created_by.trim()
+    ? body.created_by.trim()
+    : 'admin_cli';
+
+  const dataStore = new D1DataStore(env.DB);
+  const org = await dataStore.getOrganizationBySlug(orgSlug);
+  if (!org) return jsonError(`Organization not found: ${orgSlug}`, 404);
+  if (org.status !== 'active') return jsonError('Organization is disabled', 403);
+
+  const now = Math.floor(Date.now() / 1000);
+  const expiresAtUnix = now + expiresInDays * 24 * 60 * 60;
+  const nowIso = new Date(now * 1000).toISOString();
+  const expiresAtIso = new Date(expiresAtUnix * 1000).toISOString();
+  const jti = crypto.randomUUID();
+  const issuer = env.ISSUER_URL ?? new URL(request.url).origin;
+
+  const tokenPayload: NrdocsTokenPayload = {
+    v: 1,
+    typ: 'org_bootstrap',
+    iss: issuer,
+    exp: expiresAtUnix,
+    jti,
+  };
+  const bootstrapToken = await signNrdocsToken(tokenPayload, env.TOKEN_SIGNING_KEY);
+
+  const row: BootstrapToken = {
+    id: crypto.randomUUID(),
+    jti,
+    org_id: org.id,
+    status: 'active',
+    created_by: createdBy,
+    created_at: nowIso,
+    expires_at: expiresAtIso,
+    max_repos: maxRepos,
+    repos_issued_count: 0,
+    last_used_at: null,
+  };
+  await dataStore.createBootstrapToken(row);
+
+  return jsonResponse({
+    bootstrap_token: bootstrapToken,
+    token_type: 'org_bootstrap',
+    org_id: org.id,
+    org_slug: org.slug,
+    org_name: org.name,
+    max_repos: maxRepos,
+    expires_at: expiresAtIso,
+    delivery_url: deliveryUrl(env),
+    jti,
+  }, 201);
 }
 
 /**
@@ -371,6 +791,96 @@ async function handleApproveProject(projectId: string, env: Env): Promise<Respon
 }
 
 /**
+ * POST /projects/:id/publish-token — Mint a repo publish JWT (API key auth).
+ *
+ * Optional JSON body: { repo_identity?: string }. When omitted, uses the project's stored repo_identity.
+ * The project must be approved.
+ */
+async function handleMintRepoPublishToken(projectId: string, request: Request, env: Env): Promise<Response> {
+  const dataStore = new D1DataStore(env.DB);
+  const project = await dataStore.getProjectById(projectId);
+
+  if (!project) {
+    return jsonError('Project not found', 404);
+  }
+
+  if (project.status !== 'approved') {
+    return jsonError(
+      `Cannot mint publish token for project with status '${project.status}'; must be 'approved'`,
+      409,
+    );
+  }
+
+  let body: Record<string, unknown> = {};
+  try {
+    const text = await request.text();
+    if (text.trim()) {
+      body = JSON.parse(text) as Record<string, unknown>;
+    }
+  } catch {
+    return jsonError('Invalid JSON body', 400);
+  }
+
+  let repoIdentityInput: unknown = body.repo_identity;
+  if (repoIdentityInput === undefined || repoIdentityInput === null) {
+    repoIdentityInput = project.repo_identity;
+  }
+  if (typeof repoIdentityInput !== 'string' || !repoIdentityInput.trim()) {
+    return jsonError(
+      'Missing repo_identity: set it on the project or send JSON {"repo_identity":"github.com/owner/repo"}',
+      400,
+    );
+  }
+
+  let normalized: string;
+  try {
+    normalized = dataStore.normalizeRepoIdentityForOnboard(repoIdentityInput);
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : 'Invalid repo_identity';
+    return jsonError(message, 400);
+  }
+
+  const repoPublishJti = crypto.randomUUID();
+  const now = Math.floor(Date.now() / 1000);
+  const oneYearFromNow = now + 365 * 24 * 60 * 60;
+  const iss = env.ISSUER_URL ?? new URL(request.url).origin;
+  const repoPublishPayload: NrdocsTokenPayload = {
+    v: 1,
+    typ: 'repo_publish',
+    iss,
+    exp: oneYearFromNow,
+    jti: repoPublishJti,
+  };
+  const repoPublishTokenJwt = await signNrdocsToken(repoPublishPayload, env.TOKEN_SIGNING_KEY);
+  const nowIso = new Date().toISOString();
+  const expiresAtIso = new Date(oneYearFromNow * 1000).toISOString();
+
+  const repoPublishRow: RepoPublishToken = {
+    id: crypto.randomUUID(),
+    jti: repoPublishJti,
+    org_id: project.org_id,
+    project_id: projectId,
+    repo_identity: normalized,
+    status: 'active',
+    created_from_bootstrap_jti: 'operator_mint',
+    created_at: nowIso,
+    expires_at: expiresAtIso,
+    last_used_at: null,
+  };
+
+  await dataStore.createRepoPublishToken(repoPublishRow);
+  await dataStore.recordEvent(
+    buildEvent(
+      projectId,
+      'publish_token_mint',
+      JSON.stringify({ repo_identity: normalized, source: 'operator_api' }),
+    ),
+  );
+
+  return jsonResponse({ repo_publish_token: repoPublishTokenJwt }, 201);
+}
+
+/**
  * POST /projects/:id/disable — Disable a project.
  *
  * Transitions a project to `disabled` status.
@@ -421,8 +931,11 @@ async function handleDeleteProject(projectId: string, env: Env): Promise<Respons
 
   // Step 2: Delete R2 artifacts — log and continue on failure (Requirement 21.2)
   const storage = new R2StorageProvider(env.BUCKET);
+  const orgForDelete = await dataStore.getOrganizationById(project.org_id);
+  const orgSlugForDelete = orgForDelete?.slug ?? 'default';
   let r2CleanupFailed = false;
   try {
+    await storage.deletePrefix(`publishes/${orgSlugForDelete}/${project.slug}/`);
     await storage.deletePrefix(`publishes/${project.slug}/`);
   } catch (err: unknown) {
     r2CleanupFailed = true;
@@ -453,7 +966,13 @@ async function handleDeleteProject(projectId: string, env: Env): Promise<Respons
   );
 
   // Step 4: Delete D1 project record and associated state
-  await dataStore.deleteProject(projectId);
+  try {
+    await dataStore.deleteProject(projectId);
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.error(`Delete failed for project ${projectId}: ${message}`);
+    return jsonError(`Delete failed: ${message}`, 500);
+  }
 
   return jsonResponse({
     message: r2CleanupFailed
@@ -517,6 +1036,11 @@ async function handlePublishProject(projectId: string, request: Request, env: En
   const project = await dataStore.getProjectById(projectId);
   if (!project) {
     return jsonError('Project not found', 404);
+  }
+
+  const projectOrg = await dataStore.getOrganizationById(project.org_id);
+  if (!projectOrg) {
+    return jsonError('Organization not found', 500);
   }
 
   // 1e. Org cross-check
@@ -594,7 +1118,7 @@ async function handlePublishProject(projectId: string, request: Request, env: En
   );
 
   const publishId = crypto.randomUUID();
-  const publishPrefix = `publishes/${project.slug}/${publishId}/`;
+  const publishPrefix = `publishes/${projectOrg.slug}/${project.slug}/${publishId}/`;
   const previousPointer = project.active_publish_pointer;
 
   try {
@@ -907,6 +1431,159 @@ async function handleGetProject(projectId: string, env: Env): Promise<Response> 
 }
 
 /**
+ * GET /status/:id — Limited repo-owner status endpoint.
+ *
+ * Does not require admin API key. Returns only non-secret lifecycle and URL data.
+ */
+async function handlePublicProjectStatus(projectId: string, env: Env): Promise<Response> {
+  const dataStore = new D1DataStore(env.DB);
+  const project = await dataStore.getProjectById(projectId);
+  if (!project) {
+    return jsonError('Project not found', 404);
+  }
+
+  const org = await dataStore.getOrganizationById(project.org_id);
+  const orgSlug = org?.slug ?? 'default';
+  const baseUrl = deliveryUrl(env);
+  const published = Boolean(project.active_publish_pointer);
+
+  return jsonResponse({
+    project_id: project.id,
+    slug: project.slug,
+    title: project.title,
+    org_slug: orgSlug,
+    status: project.status,
+    access_mode: project.access_mode,
+    approved: project.status === 'approved',
+    published,
+    active_publish_pointer: project.active_publish_pointer,
+    delivery_url: baseUrl ?? null,
+    url: projectUrl(baseUrl, orgSlug, project.slug),
+    updated_at: project.updated_at,
+  });
+}
+
+/**
+ * POST /oidc/publish-credentials — Exchange a GitHub Actions OIDC token for publish credentials.
+ *
+ * No API key required. Requires a GitHub Actions OIDC token in Authorization header.
+ *
+ * Response: { project_id, repo_publish_token, expires_at }
+ */
+async function handleOidcPublishCredentials(request: Request, env: Env): Promise<Response> {
+  const authHeader = request.headers.get('Authorization');
+  if (!authHeader) return jsonError('Missing authentication credentials', 401);
+  const parts = authHeader.split(' ');
+  if (parts.length !== 2 || parts[0] !== 'Bearer') {
+    return jsonError('Malformed authentication header', 401);
+  }
+
+  const oidcToken = parts[1];
+  const expectedAudience = new URL(request.url).origin;
+
+  let claims: Awaited<ReturnType<typeof verifyGitHubActionsOidcToken>>;
+  try {
+    claims = await verifyGitHubActionsOidcToken(oidcToken, { expectedAudience });
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    return jsonError(message, 401);
+  }
+
+  const repoIdentity = `github.com/${claims.repository}`;
+  const dataStore = new D1DataStore(env.DB);
+  const project = await dataStore.getProjectByRepoIdentity(repoIdentity);
+  if (!project) {
+    return jsonError(`No project is registered for repository ${repoIdentity}`, 404);
+  }
+  if (project.status !== 'approved') {
+    return jsonError(`Project is not approved (status: ${project.status})`, 409);
+  }
+
+  const repoPublishJti = crypto.randomUUID();
+  const now = Math.floor(Date.now() / 1000);
+  const ttlSeconds = 10 * 60;
+  const expires = now + ttlSeconds;
+  const issuer = env.ISSUER_URL ?? new URL(request.url).origin;
+
+  const payload: NrdocsTokenPayload = {
+    v: 1,
+    typ: 'repo_publish',
+    iss: issuer,
+    exp: expires,
+    jti: repoPublishJti,
+  };
+
+  const jwt = await signNrdocsToken(payload, env.TOKEN_SIGNING_KEY);
+  const nowIso = new Date(now * 1000).toISOString();
+  const expiresAtIso = new Date(expires * 1000).toISOString();
+
+  const row: RepoPublishToken = {
+    id: crypto.randomUUID(),
+    jti: repoPublishJti,
+    org_id: project.org_id,
+    project_id: project.id,
+    repo_identity: repoIdentity,
+    status: 'active',
+    created_from_bootstrap_jti: 'oidc',
+    created_at: nowIso,
+    expires_at: expiresAtIso,
+    last_used_at: null,
+  };
+
+  await dataStore.createRepoPublishToken(row);
+  await dataStore.recordEvent(
+    buildEvent(
+      project.id,
+      'publish_token_mint',
+      JSON.stringify({ repo_identity: repoIdentity, source: 'oidc_exchange' }),
+    ),
+  );
+
+  return jsonResponse(
+    {
+      project_id: project.id,
+      repo_publish_token: jwt,
+      expires_at: expiresAtIso,
+    },
+    201,
+  );
+}
+
+/**
+ * GET /projects — List projects.
+ *
+ * Defaults to approved projects only. Use ?all=1 to include every status,
+ * or ?status=awaiting_approval|approved|disabled for an explicit status.
+ */
+async function handleListProjects(request: Request, env: Env): Promise<Response> {
+  const url = new URL(request.url);
+  const statusParam = url.searchParams.get('status')?.trim();
+  const all = url.searchParams.get('all') === '1' || url.searchParams.get('all') === 'true';
+  const accessMode = url.searchParams.get('access_mode')?.trim();
+
+  if (statusParam && !VALID_PROJECT_STATUSES.includes(statusParam as typeof VALID_PROJECT_STATUSES[number])) {
+    return jsonError('Invalid status. Expected awaiting_approval, approved, or disabled', 400);
+  }
+  if (accessMode && !VALID_ACCESS_MODES.includes(accessMode as AccessMode)) {
+    return jsonError('Invalid access_mode. Expected public or password', 400);
+  }
+
+  const dataStore = new D1DataStore(env.DB);
+  const projects = await dataStore.listProjects({
+    status: statusParam
+      ? statusParam as typeof VALID_PROJECT_STATUSES[number]
+      : all ? undefined : 'approved',
+    name: url.searchParams.get('name')?.trim() || undefined,
+    slug: url.searchParams.get('slug')?.trim() || undefined,
+    title: url.searchParams.get('title')?.trim() || undefined,
+    repo_identity: url.searchParams.get('repo_identity')?.trim() || undefined,
+    access_mode: accessMode ? accessMode as AccessMode : undefined,
+  });
+
+  return jsonResponse({ projects: projects as unknown as Record<string, unknown>[], count: projects.length });
+}
+
+/**
  * POST /projects/:id/password — Set or update the project password.
  *
  * Expects JSON body: { password: "plaintext-password" }
@@ -916,15 +1593,40 @@ async function handleGetProject(projectId: string, env: Env): Promise<Response> 
  * Only applicable to projects with access_mode 'password'.
  */
 async function handleSetPassword(projectId: string, request: Request, env: Env): Promise<Response> {
+  // This route supports:
+  // - Operator auth via NRDOCS_API_KEY (Authorization: Bearer <api key>)
+  // - Repo-owner auth via short-lived repo_publish JWT (Authorization: Bearer <jwt>)
+  //
+  // Repo-owner auth is used from GitHub Actions after OIDC exchange, enabling
+  // password rotation without per-repo secrets and without operator involvement.
+  const apiKeyAuth = authenticate(request, env);
+  if (apiKeyAuth !== null) {
+    const header = request.headers.get('Authorization');
+    const parts = header?.split(' ') ?? [];
+    const tokenStr = parts.length === 2 && parts[0] === 'Bearer' ? parts[1] : undefined;
+    if (!tokenStr) return apiKeyAuth;
+
+    const dataStore = new D1DataStore(env.DB);
+    const expectedIssuer = env.ISSUER_URL ?? new URL(request.url).origin;
+    const tokenValidation = await validateToken(
+      tokenStr,
+      env.TOKEN_SIGNING_KEY,
+      expectedIssuer,
+      dataStore,
+      'repo_publish',
+    );
+    if (!tokenValidation.valid) return jsonError(tokenValidation.reason, tokenValidation.statusCode);
+    const tokenRecord = tokenValidation.dbRecord as RepoPublishToken;
+    if (tokenRecord.project_id !== projectId) {
+      return jsonError('Token is not authorized for this project', 403);
+    }
+  }
+
   const dataStore = new D1DataStore(env.DB);
   const project = await dataStore.getProjectById(projectId);
 
   if (!project) {
     return jsonError('Project not found', 404);
-  }
-
-  if (project.access_mode !== 'password') {
-    return jsonError('Cannot set password on a project with access_mode "public"', 400);
   }
 
   let body: Record<string, unknown>;
@@ -939,10 +1641,77 @@ async function handleSetPassword(projectId: string, request: Request, env: Env):
     return jsonError('Missing or invalid field: password', 400);
   }
 
+  // Common journey: start public, later add a password.
+  // Setting a password flips the project to access_mode=password.
+  if (project.access_mode !== 'password') {
+    await dataStore.setProjectAccessMode(projectId, 'password');
+  }
+
   const hash = await PasswordHasher.hash(password);
   await dataStore.setPasswordHash(projectId, hash);
 
   return jsonResponse({ message: 'Password updated', id: projectId });
+}
+
+/**
+ * POST /projects/:id/access-mode — Change the project's access mode.
+ *
+ * Expects JSON body: { access_mode: "public" | "password" }
+ *
+ * Auth: operator API key or repo_publish JWT scoped to the project.
+ */
+async function handleSetAccessMode(projectId: string, request: Request, env: Env): Promise<Response> {
+  const apiKeyAuth = authenticate(request, env);
+  if (apiKeyAuth !== null) {
+    const header = request.headers.get('Authorization');
+    const parts = header?.split(' ') ?? [];
+    const tokenStr = parts.length === 2 && parts[0] === 'Bearer' ? parts[1] : undefined;
+    if (!tokenStr) return apiKeyAuth;
+
+    const dataStore = new D1DataStore(env.DB);
+    const expectedIssuer = env.ISSUER_URL ?? new URL(request.url).origin;
+    const tokenValidation = await validateToken(
+      tokenStr,
+      env.TOKEN_SIGNING_KEY,
+      expectedIssuer,
+      dataStore,
+      'repo_publish',
+    );
+    if (!tokenValidation.valid) return jsonError(tokenValidation.reason, tokenValidation.statusCode);
+    const tokenRecord = tokenValidation.dbRecord as RepoPublishToken;
+    if (tokenRecord.project_id !== projectId) {
+      return jsonError('Token is not authorized for this project', 403);
+    }
+  }
+
+  const dataStore = new D1DataStore(env.DB);
+  const project = await dataStore.getProjectById(projectId);
+  if (!project) return jsonError('Project not found', 404);
+
+  let body: Record<string, unknown>;
+  try {
+    body = await request.json() as Record<string, unknown>;
+  } catch {
+    return jsonError('Invalid JSON body', 400);
+  }
+
+  const { access_mode } = body;
+  if (!access_mode || typeof access_mode !== 'string' || !VALID_ACCESS_MODES.includes(access_mode as AccessMode)) {
+    return jsonError('Missing or invalid field: access_mode (must be "public" or "password")', 400);
+  }
+
+  const next = access_mode as AccessMode;
+  if (next === project.access_mode) {
+    return jsonResponse({ message: 'Access mode unchanged', id: projectId, access_mode: next });
+  }
+
+  await dataStore.setProjectAccessMode(projectId, next);
+  if (next === 'public') {
+    // Turning password off clears the hash and invalidates sessions.
+    await dataStore.clearProjectPassword(projectId);
+  }
+
+  return jsonResponse({ message: 'Access mode updated', id: projectId, access_mode: next });
 }
 
 // ── Auth middleware ──────────────────────────────────────────────────
@@ -1011,7 +1780,8 @@ function timingSafeEqual(a: string, b: string): boolean {
 function route(request: Request, env: Env): Response | Promise<Response> {
   const url = new URL(request.url);
   const method = request.method;
-  const path = url.pathname;
+  // Normalize multiple slashes so `/oidc/...` and `//oidc/...` behave the same.
+  const path = url.pathname.replace(/\/{2,}/g, '/');
 
   // Bootstrap routes (use their own JWT-based auth, not API key auth)
   if (method === 'POST' && path === '/bootstrap/init') {
@@ -1020,16 +1790,52 @@ function route(request: Request, env: Env): Response | Promise<Response> {
   if (method === 'POST' && path === '/bootstrap/onboard') {
     return handleBootstrapOnboard(request, env);
   }
+  if (method === 'POST' && path === '/bootstrap-tokens') {
+    return handleCreateBootstrapToken(request, env);
+  }
+
+  const statusMatch = path.match(/^\/status\/([^/]+)$/);
+  if (method === 'GET' && statusMatch) {
+    return handlePublicProjectStatus(statusMatch[1], env);
+  }
+
+  if (method === 'POST' && path === '/oidc/publish-credentials') {
+    return handleOidcPublishCredentials(request, env);
+  }
+
+  // Repo-proof challenge routes (repo-owner password management)
+  if (method === 'POST' && path === '/repo-proof/challenges') {
+    return handleRepoProofIssueChallenge(request, env);
+  }
+  const rpVerifyMatch = path.match(/^\/repo-proof\/challenges\/([^/]+)\/verify$/);
+  if (method === 'POST' && rpVerifyMatch) {
+    return handleRepoProofVerifyChallenge(rpVerifyMatch[1], request, env);
+  }
+  if (method === 'POST' && path === '/repo-proof/password') {
+    return handleRepoProofSetPassword(request, env);
+  }
+  if (method === 'POST' && path === '/repo-proof/disable-password') {
+    return handleRepoProofDisablePassword(request, env);
+  }
 
   // Project routes
   if (method === 'POST' && path === '/projects') {
     return handleCreateProject(request, env);
+  }
+  if (method === 'GET' && path === '/projects') {
+    return handleListProjects(request, env);
   }
 
   // Match /projects/:id/approve
   const approveMatch = path.match(/^\/projects\/([^/]+)\/approve$/);
   if (method === 'POST' && approveMatch) {
     return handleApproveProject(approveMatch[1], env);
+  }
+
+  // Match /projects/:id/publish-token (before /publish)
+  const mintPublishTokenMatch = path.match(/^\/projects\/([^/]+)\/publish-token$/);
+  if (method === 'POST' && mintPublishTokenMatch) {
+    return handleMintRepoPublishToken(mintPublishTokenMatch[1], request, env);
   }
 
   // Match /projects/:id/disable
@@ -1062,6 +1868,12 @@ function route(request: Request, env: Env): Response | Promise<Response> {
     return handleSetPassword(passwordMatch[1], request, env);
   }
 
+  // Match /projects/:id/access-mode
+  const accessModeMatch = path.match(/^\/projects\/([^/]+)\/access-mode$/);
+  if (method === 'POST' && accessModeMatch) {
+    return handleSetAccessMode(accessModeMatch[1], request, env);
+  }
+
   // Admin override routes
   if (method === 'POST' && path === '/admin/overrides') {
     return handleCreateAdminOverride(request, env);
@@ -1088,12 +1900,23 @@ export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     // Bootstrap endpoint uses its own JWT-based auth, skip API key auth
     // Publish endpoint uses repo-publish-token bearer auth, skip API key auth
+    // OIDC exchange endpoint uses GitHub OIDC bearer auth, skip API key auth
+    // Public status endpoint returns limited non-secret lifecycle data.
     const url = new URL(request.url);
+    const path = url.pathname.replace(/\/{2,}/g, '/');
     const isPublishRoute = request.method === 'POST' &&
-      /^\/projects\/[^/]+\/publish$/.test(url.pathname);
-    const isBootstrapRoute = url.pathname === '/bootstrap/init' ||
-      url.pathname === '/bootstrap/onboard';
-    if (!isBootstrapRoute && !isPublishRoute) {
+      /^\/projects\/[^/]+\/publish$/.test(path);
+    const isBootstrapRoute = path === '/bootstrap/init' ||
+      path === '/bootstrap/onboard';
+    const isOidcRoute = request.method === 'POST' && path === '/oidc/publish-credentials';
+    const isPublicStatusRoute = request.method === 'GET' &&
+      /^\/status\/[^/]+$/.test(path);
+    const isPasswordRoute = request.method === 'POST' &&
+      /^\/projects\/[^/]+\/password$/.test(path);
+    const isAccessModeRoute = request.method === 'POST' &&
+      /^\/projects\/[^/]+\/access-mode$/.test(path);
+    const isRepoProofRoute = /^\/repo-proof\/.*/.test(path);
+    if (!isBootstrapRoute && !isPublishRoute && !isOidcRoute && !isPublicStatusRoute && !isPasswordRoute && !isAccessModeRoute && !isRepoProofRoute) {
       const authResult = authenticate(request, env);
       if (authResult) {
         return authResult;

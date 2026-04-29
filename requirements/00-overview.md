@@ -4,7 +4,8 @@
 
 Create a platform for publishing private documentation minisites from Markdown content under a single hostname:
 
-- `docs.example.com/<project-slug>/`
+- `docs.example.com/<project-slug>/` (projects in the default organization)
+- `docs.example.com/<org-slug>/<project-slug>/` (projects in a named organization)
 
 The platform is designed for:
 

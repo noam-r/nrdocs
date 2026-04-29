@@ -17,7 +17,7 @@ wrangler secret put API_KEY --env control-plane
 # paste the generated value when prompted
 ```
 
-Save this key somewhere safe — you'll need it for every admin API call and for configuring GitHub Actions secrets.
+Save this key somewhere safe — you'll need it for every admin API call.
 
 ## Register a project
 
@@ -53,7 +53,7 @@ The response includes the project `id` (a UUID). Save it — you need it for all
 
 | Field | Required | Description |
 |---|---|---|
-| `slug` | yes | URL path segment. Immutable. Must be unique across all projects. |
+| `slug` | yes | URL path segment (within the org). Immutable. Must be **unique per organization** (not globally). Reader URLs: `/<project>/…` for the default org, `/<org-slug>/<project>/…` for named orgs. |
 | `repo_url` | yes | Canonical repository URL. Informational — not used for fetching. |
 | `title` | yes | Display title shown in the sidebar header. |
 | `description` | no | Project description. |
@@ -105,11 +105,13 @@ There are two ways to set up automated publishing, depending on how the project 
 
 **If onboarded via `nrdocs init --token` (bootstrap token):**
 
-The CLI already generated `.github/workflows/publish-docs.yml` and configured the CI secrets. The workflow uses repo publish token auth:
-- `secrets.NRDOCS_PUBLISH_TOKEN` — single-repo credential (not the admin API key)
-- `vars.NRDOCS_PROJECT_ID` — repository variable
-- `X-Repo-Identity` header for repo binding
-- API URL embedded in the workflow file
+The CLI already generated `.github/workflows/publish-docs.yml`. The workflow uses **GitHub Actions OIDC** (secretless) to authenticate:
+
+- Requests an OIDC token from GitHub with audience set to your Control Plane URL
+- Exchanges it at `POST /oidc/publish-credentials` for a short-lived repo publish token + project id
+- Calls the standard publish endpoint using those short-lived credentials
+
+No per-repo `NRDOCS_PUBLISH_TOKEN` secret or `NRDOCS_PROJECT_ID` variable is required.
 
 Just push to `main` and it publishes automatically.
 
@@ -121,9 +123,16 @@ Copy `templates/publish-docs.yml` from the nrdocs repository into your project r
 |---|---|
 | `NRDOCS_API_URL` | Your Control Plane Worker URL |
 | `NRDOCS_API_KEY` | The API key you configured |
-| `NRDOCS_PROJECT_ID` | The project UUID from registration |
 
 Every push to `main` will automatically publish.
+
+#### Troubleshooting OIDC publish
+
+If publishing fails during the OIDC exchange step:
+
+- Ensure the Control Plane is deployed with `POST /oidc/publish-credentials`
+- Ensure the project is approved (`nrdocs admin approve <project-id>`)
+- Ensure the project was onboarded with the correct repo identity (`github.com/<owner>/<repo>`)
 
 ## What happens during a publish
 
@@ -131,11 +140,31 @@ Every push to `main` will automatically publish.
 2. It parses `project.yml`, `nav.yml`, and optionally `allowed-list.yml`
 3. It validates the slug in `project.yml` matches the registered slug
 4. It renders all Markdown pages to HTML with navigation and TOC
-5. It uploads the artifacts to R2 under a versioned prefix
+5. It uploads the artifacts to R2 under a versioned prefix (`publishes/<org-slug>/<project-slug>/<publish-id>/`)
 6. It atomically updates the active publish pointer in D1
 7. It cleans up the previous publish artifacts from R2
 
 If any step fails, the previous version remains live. Partial uploads are cleaned up automatically.
+
+## Where the docs are published
+
+After a successful `nrdocs init`, the CLI prints the final reader URL. After the publish workflow succeeds, visit that URL.
+
+The URL shape is:
+
+```text
+https://<delivery-host>/<project-slug>/
+```
+
+for the default organization, or:
+
+```text
+https://<delivery-host>/<org-slug>/<project-slug>/
+```
+
+for named organizations.
+
+If `nrdocs init` prints `<delivery URL unavailable>`, the Control Plane is missing `DELIVERY_URL`. The project can still publish, but users need the Delivery Worker hostname from the platform operator.
 
 ## Disable or delete a project
 
@@ -150,3 +179,5 @@ curl -X DELETE "$API_URL/projects/$PROJECT_ID" \
 ```
 
 Deletion proceeds in order: mark disabled (immediate 404), delete R2 artifacts, remove access config, delete D1 records. If R2 cleanup fails, the project is still inaccessible and the failure is logged for manual cleanup.
+
+For **which GitHub repos may publish**, revoking CI tokens, bootstrap quota, and D1 maintenance, see the [Administrator guide](administrator/index.html).

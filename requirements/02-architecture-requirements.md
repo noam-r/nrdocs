@@ -29,7 +29,7 @@ Each project repository contains:
 - optional separate allowed-list declaration file
 
 ### Storage/delivery plane
-- Projects are served under `docs.example.com/<slug>/...`
+- Projects are served under `docs.example.com/<project-slug>/...` (default org) or `docs.example.com/<org-slug>/<project-slug>/...` (named orgs)
 - Static artifacts are stored in platform-managed object storage.
 - Direct/static serving is preferred where feasible.
 - A Worker routing layer is permitted if needed for correctness, auth integration, or route handling.
@@ -54,8 +54,7 @@ Changing any of these requires delete/create of a new project.
 ## Serving requirements
 
 - Prefer stable URLs without version segments in the public project path.
-- Public URLs remain:
-  - `docs.example.com/<slug>/...`
+- Public URLs remain stable under the chosen prefix (`/<project>/…` or `/<org>/<project>/…`).
 - The platform must not require public URL changes on deploy.
 
 ## Sync requirements

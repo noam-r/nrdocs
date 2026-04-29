@@ -24,6 +24,7 @@ function makeConfig(overrides: Partial<ScaffoldConfig> = {}): ScaffoldConfig {
     docsDir: 'docs',
     apiUrl: 'https://nrdocs-cp.example.com',
     repoIdentity: 'github.com/owner/repo',
+    publishBranch: 'main',
     ...overrides,
   };
 }
@@ -38,11 +39,11 @@ describe('generateProjectYml', () => {
     expect(parsed.description).toBe('A test project');
   });
 
-  it('does NOT include access_mode', () => {
+  it('includes publish_enabled and access_mode', () => {
     const yml = generateProjectYml(makeConfig());
-    expect(yml).not.toContain('access_mode');
     const parsed = parse(yml) as Record<string, unknown>;
-    expect(parsed).not.toHaveProperty('access_mode');
+    expect(parsed.publish_enabled).toBe(true);
+    expect(parsed.access_mode).toBe('public');
   });
 
   it('handles empty description', () => {
@@ -83,14 +84,10 @@ describe('generateHomeMd', () => {
 describe('generatePublishWorkflow', () => {
   const config = makeConfig();
 
-  it('contains NRDOCS_PUBLISH_TOKEN reference', () => {
+  it('exchanges GitHub OIDC token for publish credentials', () => {
     const wf = generatePublishWorkflow(config);
-    expect(wf).toContain('NRDOCS_PUBLISH_TOKEN');
-  });
-
-  it('contains NRDOCS_PROJECT_ID reference', () => {
-    const wf = generatePublishWorkflow(config);
-    expect(wf).toContain('NRDOCS_PROJECT_ID');
+    expect(wf).toContain('/oidc/publish-credentials');
+    expect(wf).toContain('ACTIONS_ID_TOKEN_REQUEST_URL');
   });
 
   it('contains X-Repo-Identity header', () => {
@@ -104,25 +101,27 @@ describe('generatePublishWorkflow', () => {
     expect(wf).toContain('https://nrdocs-cp.example.com');
   });
 
+  it('requests id-token permission', () => {
+    const wf = generatePublishWorkflow(config);
+    expect(wf).toContain('id-token: write');
+  });
+
   it('triggers on push to main', () => {
     const wf = generatePublishWorkflow(config);
     expect(wf).toContain('push:');
     expect(wf).toContain('- main');
   });
 
-  it('uses vars.NRDOCS_PROJECT_ID (not secrets)', () => {
-    const wf = generatePublishWorkflow(config);
-    expect(wf).toContain('vars.NRDOCS_PROJECT_ID');
+  it('supports a configurable publish branch', () => {
+    const wf = generatePublishWorkflow(makeConfig({ publishBranch: 'docs/site' }));
+    expect(wf).toContain('branches:');
+    expect(wf).toContain('- docs/site');
+    expect(wf).not.toContain('- main');
   });
 
   it('supports configurable docs dir via vars.NRDOCS_DOCS_DIR', () => {
     const wf = generatePublishWorkflow(config);
     expect(wf).toContain('vars.NRDOCS_DOCS_DIR');
-  });
-
-  it('uses Bearer auth with secrets.NRDOCS_PUBLISH_TOKEN', () => {
-    const wf = generatePublishWorkflow(config);
-    expect(wf).toContain('Authorization: Bearer ${{ secrets.NRDOCS_PUBLISH_TOKEN }}');
   });
 
   it('defaults docs dir to the configured docsDir', () => {
@@ -246,23 +245,18 @@ describe('validateExistingWorkflow', () => {
   it('returns true when workflow contains all required references', () => {
     writeFileSync(
       workflowPath,
-      'NRDOCS_PUBLISH_TOKEN\nNRDOCS_PROJECT_ID\nX-Repo-Identity\n',
+      '/oidc/publish-credentials\nACTIONS_ID_TOKEN_REQUEST_URL\nX-Repo-Identity\n',
     );
     expect(validateExistingWorkflow()).toBe(true);
   });
 
-  it('returns false when NRDOCS_PUBLISH_TOKEN is missing', () => {
-    writeFileSync(workflowPath, 'NRDOCS_PROJECT_ID\nX-Repo-Identity\n');
-    expect(validateExistingWorkflow()).toBe(false);
-  });
-
-  it('returns false when NRDOCS_PROJECT_ID is missing', () => {
-    writeFileSync(workflowPath, 'NRDOCS_PUBLISH_TOKEN\nX-Repo-Identity\n');
+  it('returns false when OIDC exchange call is missing', () => {
+    writeFileSync(workflowPath, 'ACTIONS_ID_TOKEN_REQUEST_URL\nX-Repo-Identity\n');
     expect(validateExistingWorkflow()).toBe(false);
   });
 
   it('returns false when X-Repo-Identity is missing', () => {
-    writeFileSync(workflowPath, 'NRDOCS_PUBLISH_TOKEN\nNRDOCS_PROJECT_ID\n');
+    writeFileSync(workflowPath, '/oidc/publish-credentials\nACTIONS_ID_TOKEN_REQUEST_URL\n');
     expect(validateExistingWorkflow()).toBe(false);
   });
 });

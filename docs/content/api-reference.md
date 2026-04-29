@@ -53,7 +53,7 @@ Create a project and mint a repo publish token in a single request. Used by the 
 }
 ```
 
-**Error responses:** 400 (missing/invalid fields, invalid repo_identity), 401 (auth), 403 (org disabled, quota exceeded), 409 (slug conflict).
+**Error responses:** 400 (missing/invalid fields, invalid repo_identity), 401 (auth), 403 (org disabled, quota exceeded), 409 (slug conflict — slug already used **in that organization**; quota slot from a failed write is rolled back).
 
 ---
 
@@ -73,9 +73,19 @@ Register a new documentation project.
   "repo_url": "https://github.com/org/repo",
   "title": "My Project Docs",
   "description": "Internal documentation",
-  "access_mode": "public"
+  "access_mode": "public",
+  "repo_identity": "github.com/org/repo"
 }
 ```
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `slug` | yes | Unique per organization. |
+| `repo_url` | yes | Canonical repo URL (informational). |
+| `title` | yes | Display title. |
+| `description` | no | Optional. |
+| `access_mode` | yes | `public` or `password`. |
+| `repo_identity` | no | Canonical identity for CI binding: **`github.com/<owner>/<repo>`** (normalized server-side). Omit if unknown; see [Administrator guide](guides/administrator/index.html). |
 
 **Response:** `201 Created` with the full project object.
 
@@ -86,6 +96,22 @@ Register a new documentation project.
 Approve a project for publishing. Only projects in `awaiting_approval` status can be approved.
 
 **Response:** `200 OK`
+
+---
+
+### POST /projects/:id/publish-token
+
+**Authentication:** Control Plane **`API_KEY`** (Bearer `NRDOCS_API_KEY`).
+
+Mint a **repo publish** JWT for an **approved** project and insert the corresponding `repo_publish_tokens` row. Used by **`nrdocs admin mint-publish-token`** when a project was created via **`POST /projects`** instead of bootstrap onboard.
+
+**Request body (optional JSON):**
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `repo_identity` | no | **`github.com/<owner>/<repo>`**. If omitted, the server uses the project’s stored **`repo_identity`**; one of the two must be set. |
+
+**Response:** `201 Created` with `{ "repo_publish_token": "<JWT>" }`.
 
 ---
 
@@ -100,6 +126,8 @@ Disable a project. Returns 404 to all readers. Data is preserved.
 ### POST /projects/:id/publish
 
 Trigger a build and publish for the project. Project must be `approved`.
+
+**Authentication:** **repo publish** JWT in **`Authorization: Bearer …`** (not the control plane API key). Optionally **`X-Repo-Identity: github.com/owner/repo`** when the token enforces repository binding.
 
 **Request body:**
 
@@ -118,6 +146,8 @@ Trigger a build and publish for the project. Project must be `approved`.
 ```
 
 **Response:** `200 OK` with publish details including `publish_id` and `prefix`.
+
+The `prefix` is the R2 path for this publish version, typically `publishes/<org-slug>/<project-slug>/<publish-id>/`.
 
 ---
 

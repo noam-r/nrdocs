@@ -1,8 +1,9 @@
 /**
  * Delivery Worker — thin request router and authentication gate.
  *
- * Bound to `docs.example.com/*`. Extracts the project slug from the
- * first URL path segment, looks up the project in D1, and routes
+ * Bound to `docs.example.com/*`. Resolves org + project from the path
+ * (`/<org>/<project>/...` or legacy `/<project>/...` for the default org),
+ * looks up the project in D1, and routes
  * the request accordingly.
  *
  * Requirements: 1.1, 1.2, 1.3, 1.4, 1.7, 1.8, 1.9, 1.10, 13.2, 13.3, 20.1, 20.2, 20.3
@@ -171,27 +172,16 @@ const MIME_TYPES: Record<string, string> = {
   '.txt': 'text/plain; charset=utf-8',
 };
 
-/**
- * Extract the project slug from the URL path.
- * The slug is the first non-empty path segment.
- * e.g. `/my-project/section/page/` → `my-project`
- */
-function extractSlug(url: URL): string | null {
-  const segments = url.pathname.split('/').filter(Boolean);
-  return segments.length > 0 ? segments[0] : null;
+function pathSegments(url: URL): string[] {
+  return url.pathname.split('/').filter(Boolean);
 }
 
 /**
- * Extract the remaining path after the slug segment.
- * e.g. `/my-project/section/page/` → `section/page/`
- * e.g. `/my-project/` → ``
- * e.g. `/my-project` → ``
+ * Path under the project URL prefix (content path within the site).
+ * e.g. prefix `/my-project`, path `/my-project/section/page/` → `section/page/`
  */
-function extractRemainingPath(url: URL, slug: string): string {
-  // Remove leading `/slug` or `/slug/` prefix
-  const prefix = `/${slug}`;
-  let remaining = url.pathname.slice(prefix.length);
-  // Strip leading slash so the remaining path is relative
+function extractRemainingPathAfterPrefix(url: URL, urlPathPrefix: string): string {
+  let remaining = url.pathname.slice(urlPathPrefix.length);
   if (remaining.startsWith('/')) {
     remaining = remaining.slice(1);
   }
@@ -250,11 +240,11 @@ function parseCacheTtl(env: DeliveryEnv): number {
  */
 async function serveContent(
   url: URL,
-  slug: string,
+  urlPathPrefix: string,
   pointer: string,
   env: DeliveryEnv,
 ): Promise<Response> {
-  const remaining = extractRemainingPath(url, slug);
+  const remaining = extractRemainingPathAfterPrefix(url, urlPathPrefix);
 
   // URL resolution strategy (Requirements 1.8, 1.9, 1.10)
   // Case B: No trailing slash and no file extension → 301 redirect to trailing-slash form
@@ -298,14 +288,38 @@ async function serveContent(
 export default {
   async fetch(request: Request, env: DeliveryEnv): Promise<Response> {
     const url = new URL(request.url);
-    const slug = extractSlug(url);
-
-    if (!slug) {
-      return notFound();
-    }
-
     const dataStore = new D1DataStore(env.DB);
-    const project = await dataStore.getProjectBySlug(slug);
+    const segments = pathSegments(url);
+    if (segments.length === 0) return notFound();
+
+    // Disambiguate `/org/project/...` vs legacy `/project/...`:
+    // If `/org/project` exists in DB, treat it as org-scoped route.
+    // Otherwise, fall back to default-org `/project/...` and treat the rest as page path.
+    let orgSlug: string;
+    let projectSlug: string;
+    let urlPathPrefix: string;
+    let project = null as Awaited<ReturnType<typeof dataStore.getProjectByOrgSlugAndProjectSlug>>;
+
+    if (segments.length >= 2) {
+      const [maybeOrgSlug, maybeProjectSlug] = segments;
+      const explicit = await dataStore.getProjectByOrgSlugAndProjectSlug(maybeOrgSlug, maybeProjectSlug);
+      if (explicit) {
+        orgSlug = maybeOrgSlug;
+        projectSlug = maybeProjectSlug;
+        urlPathPrefix = `/${orgSlug}/${projectSlug}`;
+        project = explicit;
+      } else {
+        orgSlug = 'default';
+        projectSlug = segments[0];
+        urlPathPrefix = `/${projectSlug}`;
+        project = await dataStore.getProjectByOrgSlugAndProjectSlug(orgSlug, projectSlug);
+      }
+    } else {
+      orgSlug = 'default';
+      projectSlug = segments[0];
+      urlPathPrefix = `/${projectSlug}`;
+      project = await dataStore.getProjectByOrgSlugAndProjectSlug(orgSlug, projectSlug);
+    }
 
     // Unknown slug, disabled, or awaiting_approval → identical 404
     if (!project || project.status === 'disabled' || project.status === 'awaiting_approval') {
@@ -323,7 +337,7 @@ export default {
     if (project.access_mode === 'public') {
       // Public projects: serve content directly without authentication.
       // No access policy evaluation (Req 7.9).
-      return serveContent(url, slug, pointer, env);
+      return serveContent(url, urlPathPrefix, pointer, env);
     }
 
     // Password-protected projects: authentication required (Req 4.3).
@@ -340,7 +354,7 @@ export default {
         project.password_version,
       );
       if (validation.valid) {
-        return serveContent(url, slug, pointer, env);
+        return serveContent(url, urlPathPrefix, pointer, env);
       }
       // Invalid token (expired, tampered, wrong password version) → treat as unauthenticated
       // Fall through to login flow
@@ -428,8 +442,8 @@ export default {
         sessionTtl,
       );
 
-      // Set cookie: Secure; HttpOnly; SameSite=Lax; Path=/<slug>/; Max-Age=<ttl>
-      const cookieValue = `nrdocs_session=${token}; Secure; HttpOnly; SameSite=Lax; Path=/${slug}/; Max-Age=${sessionTtl}`;
+      // Set cookie scoped to this project's URL prefix (includes org segment when present).
+      const cookieValue = `nrdocs_session=${token}; Secure; HttpOnly; SameSite=Lax; Path=${urlPathPrefix}/; Max-Age=${sessionTtl}`;
 
       // Redirect to the originally requested path (Req 5.3)
       return new Response(null, {

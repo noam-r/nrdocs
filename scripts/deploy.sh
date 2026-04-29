@@ -97,7 +97,7 @@ CURRENT_ACCOUNT_ID=$(grep '^account_id' wrangler.toml | head -1 | sed 's/.*= *"\
 if [ "$CURRENT_ACCOUNT_ID" = "REPLACE_WITH_ACCOUNT_ID" ] || [ -z "$CURRENT_ACCOUNT_ID" ]; then
   # Try to extract from wrangler whoami
   ACCOUNT_INFO=$(wrangler whoami 2>&1 || true)
-  DETECTED_ID=$(echo "$ACCOUNT_INFO" | grep -oP '[a-f0-9]{32}' | head -1 || true)
+  DETECTED_ID=$(echo "$ACCOUNT_INFO" | grep -oE '[a-f0-9]{32}' | head -1 || true)
 
   if [ -n "$DETECTED_ID" ]; then
     echo "Detected account ID: $DETECTED_ID"
@@ -135,7 +135,7 @@ if [ "$CURRENT_DB_ID" = "REPLACE_WITH_D1_DATABASE_ID" ] || [ -z "$CURRENT_DB_ID"
     if echo "$D1_OUTPUT" | grep -qi "already exists"; then
       yellow "Database 'nrdocs' already exists. Listing databases..."
       D1_LIST=$(wrangler d1 list 2>&1)
-      DB_ID=$(echo "$D1_LIST" | grep -oP '[a-f0-9-]{36}' | head -1 || true)
+      DB_ID=$(echo "$D1_LIST" | grep -oE '[a-f0-9-]{36}' | head -1 || true)
       if [ -n "$DB_ID" ]; then
         echo "Found database ID: $DB_ID"
       else
@@ -150,7 +150,8 @@ if [ "$CURRENT_DB_ID" = "REPLACE_WITH_D1_DATABASE_ID" ] || [ -z "$CURRENT_DB_ID"
   }
 
   if [ -z "${DB_ID:-}" ]; then
-    DB_ID=$(echo "$D1_OUTPUT" | grep -oP 'database_id = "\K[^"]+' || echo "$D1_OUTPUT" | grep -oP '[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}' | head -1 || true)
+    DB_ID=$(echo "$D1_OUTPUT" | sed -n 's/.*database_id = "\([^"]*\)".*/\1/p' | head -1)
+    [ -z "${DB_ID:-}" ] && DB_ID=$(echo "$D1_OUTPUT" | grep -oE '[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}' | head -1 || true)
   fi
 
   if [ -z "${DB_ID:-}" ]; then
@@ -194,18 +195,36 @@ fi
 
 
 # ── Step 5: Run database migrations ──────────────────────────────────
+#
+# Wrangler prints "✘ [ERROR]" for any non-success SQL batch, including benign
+# cases like "table X already exists" when re-running deploy against an
+# already-initialized D1. That is a SQLite constraint message, not a broken
+# deploy — we detect those patterns and report success without surfacing noise.
+# Any other failure is treated as real and aborts the script.
 
 echo ""
 blue "Step 5/7: Running database migrations..."
 
+migration_already_applied() {
+  # Args: path to wrangler log file. Returns 0 if SQLite rejected DDL as already present.
+  grep -qiE 'already exists|duplicate column name' "$1"
+}
+
 for migration in migrations/*.sql; do
   MIGRATION_NAME=$(basename "$migration")
   echo "  Applying $MIGRATION_NAME..."
-  if wrangler d1 execute nrdocs --remote --file="$migration" 2>&1; then
+  MIG_LOG=$(mktemp)
+  if wrangler d1 execute nrdocs --remote --file="$migration" >"$MIG_LOG" 2>&1; then
     green "  ✓ $MIGRATION_NAME applied"
+  elif migration_already_applied "$MIG_LOG"; then
+    green "  ✓ $MIGRATION_NAME skipped (schema already matches; not an error)"
   else
-    yellow "  ⚠ $MIGRATION_NAME may have already been applied (this is OK)"
+    red "  ✗ $MIGRATION_NAME failed:"
+    cat "$MIG_LOG"
+    rm -f "$MIG_LOG"
+    exit 1
   fi
+  rm -f "$MIG_LOG"
 done
 
 # ── Step 6: Generate and set secrets ─────────────────────────────────
@@ -287,9 +306,9 @@ CP_OUTPUT=$(wrangler deploy --env control-plane 2>&1) || {
 green "  ✓ Control Plane Worker deployed"
 
 # Extract control plane URL from deploy output
-CP_URL=$(echo "$CP_OUTPUT" | grep -oP 'https://[^ ]+workers\.dev' | head -1 || true)
+CP_URL=$(echo "$CP_OUTPUT" | grep -oE 'https://[^ ]+workers\.dev' | head -1 || true)
 if [ -z "$CP_URL" ]; then
-  CP_URL=$(echo "$CP_OUTPUT" | grep -oP 'https://[^ ]+' | head -1 || true)
+  CP_URL=$(echo "$CP_OUTPUT" | grep -oE 'https://[^ ]+' | head -1 || true)
 fi
 
 # ── Update .env ──────────────────────────────────────────────────────
@@ -330,9 +349,9 @@ echo "    Issue a bootstrap token, then run:"
 echo "    nrdocs init --token <bootstrap-token>"
 echo ""
 echo "  Option B — Admin CLI (for platform operators):"
-echo "    ./scripts/nrdocs.sh register"
-echo "    ./scripts/nrdocs.sh approve"
-echo "    ./scripts/nrdocs.sh publish"
+echo "    nrdocs admin register"
+echo "    nrdocs admin approve"
+echo "    nrdocs admin publish"
 echo ""
 echo "  To verify the deployment:"
 echo "    curl -s -o /dev/null -w '%{http_code}' ${CP_URL:-\$NRDOCS_API_URL}/projects"

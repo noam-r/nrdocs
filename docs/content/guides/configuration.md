@@ -22,6 +22,7 @@ Secrets are set via `wrangler secret put` and stored in Cloudflare's encrypted s
 | `HMAC_SIGNING_KEY` | Both | Signs and verifies session tokens (HMAC-SHA256). Must be identical in both Workers. |
 | `API_KEY` | Control Plane only | Authenticates all admin API requests. Sent as `Authorization: Bearer <key>`. |
 | `TOKEN_SIGNING_KEY` | Control Plane only | Signs bootstrap tokens and repo publish tokens (JWT). |
+| `DELIVERY_URL` | Control Plane only | Public Delivery Worker base URL. Used by `nrdocs init` to print the final docs URL. |
 
 ### Setting secrets
 
@@ -39,7 +40,7 @@ wrangler secret put TOKEN_SIGNING_KEY --env control-plane
 
 To rotate the HMAC signing key, set the new value on both Workers and redeploy. All existing session tokens will be invalidated immediately (users will need to re-authenticate).
 
-To rotate the API key, set the new value on the Control Plane Worker and update any GitHub Actions secrets or scripts that use it.
+To rotate the API key, set the new value on the Control Plane Worker and update any operator scripts that use it. (The default GitHub Actions publish workflow uses OIDC and does not need the API key.)
 
 To rotate the token signing key, set the new value on the Control Plane Worker. All existing bootstrap tokens and repo publish tokens signed with the old key will be invalidated. New tokens must be issued.
 

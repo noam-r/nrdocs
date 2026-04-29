@@ -461,8 +461,8 @@ export function buildSite(
   const firstPage = findFirstNavPage(navConfig.nav);
   if (firstPage) {
     const redirectHtml = `<!DOCTYPE html>
-<html><head><meta http-equiv="refresh" content="0;url=${firstPage}/index.html"><title>Redirecting…</title></head>
-<body><p>Redirecting to <a href="${firstPage}/index.html">${escapeHtml(firstPage)}</a>…</p></body></html>`;
+<html><head><meta http-equiv="refresh" content="0;url=${firstPage}/"><title>Redirecting…</title></head>
+<body><p>Redirecting to <a href="${firstPage}/">${escapeHtml(firstPage)}</a>…</p></body></html>`;
     artifacts.push({
       path: 'index.html',
       content: encoder.encode(redirectHtml).buffer as ArrayBuffer,

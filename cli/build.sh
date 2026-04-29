@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Native binaries via Bun (optional). For a Node-only bundle from the repo, use: npm run build:cli
 set -euo pipefail
 
 VERSION="${1:?Usage: build.sh <version>}"

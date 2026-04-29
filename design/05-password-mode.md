@@ -36,11 +36,11 @@ The cookie is scoped logically to the specific project grant.
 ## Request flow
 
 ### First request
-1. User requests `docs.example.com/project-a/...`
-2. Worker parses slug `project-a`
+1. User requests `docs.example.com/project-a/...` (default org) or `docs.example.com/acme/docs/...` (org `acme`, project `docs`)
+2. Worker parses org + project slugs from the path prefix
 3. Worker loads project metadata
 4. Worker sees `access_mode = password`
-5. Worker checks for a valid session grant for `project-a`
+5. Worker checks for a valid session cookie scoped to that URL prefix
 6. If no valid session exists, Worker returns the login page
 
 ### Login submission

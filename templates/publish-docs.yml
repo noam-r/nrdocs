@@ -7,13 +7,16 @@
 # HOW TO USE:
 #   1. Copy this file into your repo at .github/workflows/publish-docs.yml
 #   2. Set the required repository secrets (see below)
-#   3. Push to main — the workflow runs automatically
+#   3. Set the branch below (main by default), then push to that branch
 #
-# Required repository secrets (set in GitHub → Settings → Secrets):
-#   NRDOCS_API_URL    — Base URL of the Control Plane API
-#                       (e.g. https://nrdocs-control-plane.you.workers.dev)
-#   NRDOCS_API_KEY    — The admin API key you generated during installation
-#   NRDOCS_PROJECT_ID — The project UUID returned when you registered the project
+# Required repository secret (set in GitHub → Settings → Secrets):
+#   NRDOCS_PUBLISH_TOKEN — Repo publish token returned by nrdocs init.
+#                          This is not the admin API key.
+#
+# Required repository variables (set in GitHub → Settings → Secrets and variables → Actions → Variables):
+#   NRDOCS_API_URL       — Base URL of the Control Plane API
+#                          (e.g. https://nrdocs-control-plane.you.workers.dev)
+#   NRDOCS_PROJECT_ID    — Project UUID returned by nrdocs init
 #
 # Optional repository variable:
 #   NRDOCS_DOCS_DIR   — Subdirectory containing docs (default: repo root ".")
@@ -28,6 +31,7 @@ name: Publish Docs to nrdocs
 on:
   push:
     branches:
+      # Change this to a dedicated docs branch if desired, e.g. docs or docs/site.
       - main
 
 jobs:
@@ -41,10 +45,10 @@ jobs:
 
       - name: Build payload and publish
         env:
-          NRDOCS_API_URL: ${{ secrets.NRDOCS_API_URL }}
-          NRDOCS_API_KEY: ${{ secrets.NRDOCS_API_KEY }}
-          NRDOCS_PROJECT_ID: ${{ secrets.NRDOCS_PROJECT_ID }}
+          NRDOCS_API_URL: ${{ vars.NRDOCS_API_URL }}
+          NRDOCS_PROJECT_ID: ${{ vars.NRDOCS_PROJECT_ID }}
           NRDOCS_DOCS_DIR: ${{ vars.NRDOCS_DOCS_DIR || '.' }}
+          NRDOCS_PUBLISH_TOKEN: ${{ secrets.NRDOCS_PUBLISH_TOKEN }}
         run: |
           set -euo pipefail
 
@@ -55,12 +59,12 @@ jobs:
             echo "::error::NRDOCS_API_URL secret is not set"
             exit 1
           fi
-          if [ -z "${NRDOCS_API_KEY:-}" ]; then
-            echo "::error::NRDOCS_API_KEY secret is not set"
+          if [ -z "${NRDOCS_PROJECT_ID:-}" ]; then
+            echo "::error::NRDOCS_PROJECT_ID variable is not set"
             exit 1
           fi
-          if [ -z "${NRDOCS_PROJECT_ID:-}" ]; then
-            echo "::error::NRDOCS_PROJECT_ID secret is not set"
+          if [ -z "${NRDOCS_PUBLISH_TOKEN:-}" ]; then
+            echo "::error::NRDOCS_PUBLISH_TOKEN secret is not set"
             exit 1
           fi
 
@@ -118,7 +122,8 @@ jobs:
           http_code=$(curl -s -o response.json -w '%{http_code}' \
             -X POST \
             -H "Content-Type: application/json" \
-            -H "Authorization: Bearer ${NRDOCS_API_KEY}" \
+            -H "Authorization: Bearer ${NRDOCS_PUBLISH_TOKEN}" \
+            -H "X-Repo-Identity: github.com/${{ github.repository }}" \
             -d "$payload" \
             "${NRDOCS_API_URL}/projects/${NRDOCS_PROJECT_ID}/publish")
 

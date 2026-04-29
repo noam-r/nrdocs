@@ -5,13 +5,14 @@ A project is the deployment and policy unit.
 
 Each project has:
 - a unique project ID
-- one immutable slug
+- one immutable slug (unique within its **organization**)
 - one immutable repo binding
 - one access mode
 - one lifecycle state
 
 Projects are served at:
-- `docs.example.com/<slug>/`
+- `docs.example.com/<project-slug>/` (default org), or
+- `docs.example.com/<org-slug>/<project-slug>/` (named orgs)
 
 ## Immutable fields
 After registration, these fields are immutable:
