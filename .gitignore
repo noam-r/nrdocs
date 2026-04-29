@@ -2,6 +2,7 @@ node_modules/
 dist/
 dist-cli/
 dist-preview/
+site/
 
 # Local config with real credentials — use the .example templates
 .env
