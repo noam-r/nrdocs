@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { parseCliToken } from '../config-parser';
-import { bootstrapValidate, bootstrapOnboard } from '../api-client';
+import { bootstrapValidate, bootstrapOnboard, setProjectPasswordWithPublishToken } from '../api-client';
 import { isValidSlug, inferSlug, inferTitle } from '../slug-validator';
 import { isInteractive, prompt, confirm } from '../prompts';
 import {
@@ -91,6 +91,48 @@ function detectCurrentGitBranch(): string | undefined {
 
 export function inferPublishBranchDefault(flagPublishBranch?: string): string {
   return flagPublishBranch ?? detectCurrentGitBranch() ?? DEFAULT_PUBLISH_BRANCH;
+}
+
+async function readPasswordHidden(promptLabel: string): Promise<string> {
+  const fromEnv = process.env.NRDOCS_NEW_PASSWORD?.trim();
+  if (fromEnv) return fromEnv;
+
+  const stdin = process.stdin;
+  const stdout = process.stdout;
+  if (!stdin.isTTY) {
+    throw new Error('Password input requires a TTY, or set NRDOCS_NEW_PASSWORD for non-interactive use.');
+  }
+
+  return new Promise((resolve, reject) => {
+    stdout.write(promptLabel);
+    stdin.setRawMode(true);
+    stdin.resume();
+    stdin.setEncoding('utf8');
+    let buf = '';
+
+    const cleanup = (): void => {
+      try { stdin.setRawMode(false); } catch { /* ignore */ }
+      stdin.pause();
+      stdin.removeListener('data', onData);
+    };
+
+    const onData = (key: string): void => {
+      if (key === '\u000d' || key === '\n' || key === '\u0004') {
+        cleanup();
+        stdout.write('\n');
+        resolve(buf);
+      } else if (key === '\u0003') {
+        cleanup();
+        reject(new Error('Interrupted'));
+      } else if (key === '\u007f' || key === '\b') {
+        buf = buf.slice(0, -1);
+      } else {
+        buf += key;
+      }
+    };
+
+    stdin.on('data', onData);
+  });
 }
 
 /**
@@ -309,7 +351,7 @@ export async function runInit(args: string[]): Promise<void> {
     docsDir = flagDocsDir ?? 'docs';
     description = flagDescription ?? '';
     publishBranch = publishBranchDefault;
-    accessMode = (flagAccessMode as 'public' | 'password' | null) ?? 'public';
+    accessMode = (flagAccessMode as 'public' | 'password' | null) ?? 'password';
   } else {
     // Interactive mode: prompt with inferred defaults
 
@@ -369,9 +411,9 @@ export async function runInit(args: string[]): Promise<void> {
     console.log('  - public: anyone can read');
     console.log('  - password: readers must login with a shared password');
     let validAccessMode = false;
-    accessMode = 'public';
+    accessMode = 'password';
     while (!validAccessMode) {
-      const value = (await prompt('Access mode (public|password)', flagAccessMode ?? 'public')).trim();
+      const value = (await prompt('Access mode (public|password)', flagAccessMode ?? 'password')).trim();
       if (value === 'public' || value === 'password') {
         accessMode = value;
         validAccessMode = true;
@@ -589,7 +631,33 @@ export async function runInit(args: string[]): Promise<void> {
   // Publishing is OIDC-based (secretless) by default.
   // There is no CI secret/variable installation phase.
   void skipCiCheck;
-  void repoPublishToken;
+  if (accessMode === 'password') {
+    console.log('\nPassword mode selected.');
+    try {
+      const password = await readPasswordHidden('Set initial docs password: ');
+      const confirmPassword = process.env.NRDOCS_NEW_PASSWORD
+        ? password
+        : await readPasswordHidden('Confirm password: ');
+      if (!password) {
+        console.error('Error: Password cannot be empty.');
+        process.exitCode = 1;
+        return;
+      }
+      if (password !== confirmPassword) {
+        console.error('Error: Passwords do not match.');
+        process.exitCode = 1;
+        return;
+      }
+      await setProjectPasswordWithPublishToken(apiBaseUrl, projectId, repoPublishToken, password);
+      console.log('✓ Initial password configured.');
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      console.log(`Warning: Could not set initial password during init: ${message}`);
+      console.log('You can finish this step later with: nrdocs password set');
+    }
+  } else {
+    void repoPublishToken;
+  }
 
   // ══════════════════════════════════════════════════════════════════
   // Success Summary

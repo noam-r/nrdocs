@@ -5,6 +5,7 @@ import { join } from 'node:path';
 vi.mock('../api-client', () => ({
   bootstrapValidate: vi.fn(),
   bootstrapOnboard: vi.fn(),
+  setProjectPasswordWithPublishToken: vi.fn(),
 }));
 
 vi.mock('../prompts', () => ({
@@ -67,6 +68,7 @@ describe('runInit', () => {
       repo_publish_token: 'repo-publish-token',
       delivery_url: 'https://docs.example.com',
     });
+    vi.mocked(api.setProjectPasswordWithPublishToken).mockResolvedValue();
 
     const prompts = await import('../prompts');
     vi.mocked(prompts.confirm).mockResolvedValue(false);

@@ -463,7 +463,7 @@ export async function handleBootstrapOnboard(request: Request, env: Env): Promis
   }
 
   const defaultAccessMode: AccessMode =
-    access_mode ? access_mode as AccessMode : 'public';
+    access_mode ? access_mode as AccessMode : 'password';
   const nowIso = new Date().toISOString();
   const now = Math.floor(Date.now() / 1000);
   const oneYearFromNow = now + 365 * 24 * 60 * 60;
