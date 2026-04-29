@@ -96,6 +96,24 @@ else
   npm install -g wrangler && green "  ✓ Wrangler installed ($(wrangler --version 2>/dev/null | head -1))" || { red "  ✗ Failed to install Wrangler"; ERRORS=$((ERRORS + 1)); }
 fi
 
+# ── GitHub CLI (for repo-owner onboarding automation) ────────────────
+
+if command -v gh >/dev/null 2>&1; then
+  GH_VERSION=$(gh --version 2>/dev/null | head -1)
+  green "✓ GitHub CLI ($GH_VERSION)"
+  if gh auth status >/dev/null 2>&1; then
+    green "✓ gh authentication detected"
+  else
+    yellow "⚠ gh is installed but not authenticated"
+    echo "  Run: gh auth login"
+    echo "  Note: nrdocs init needs a token that can manage Actions secrets/variables for the target repo."
+  fi
+else
+  yellow "⚠ GitHub CLI (gh) — not found"
+  echo "  Install: https://cli.github.com/"
+  echo "  Note: nrdocs init can still run, but you'll configure GitHub Actions secrets/variables manually."
+fi
+
 # ── npm dependencies ──────────────────────────────────────────────────
 
 echo ""

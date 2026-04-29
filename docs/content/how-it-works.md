@@ -52,7 +52,7 @@ access_mode: public
 
 | Field | Required | Description |
 |---|---|---|
-| `slug` | yes | Must match the registered slug exactly. Used in the URL path. |
+| `slug` | yes | Must match the registered slug exactly. Together with the project's organization, it determines the public URL path (see [The Delivery Worker](#the-delivery-worker)). |
 | `title` | yes | Displayed in the sidebar header on every page. |
 | `description` | yes | Project description (metadata). |
 | `publish_enabled` | yes | Must be `true` for publishing to work. |
@@ -112,7 +112,7 @@ allow:
 
 The Control Plane is a Cloudflare Worker that exposes an admin REST API. It handles:
 
-- **Project registration** — you tell it about a new project (slug, title, access mode)
+- **Project registration** — you tell it about a new project (slug, title, access mode). Slugs are **unique per organization** (`UNIQUE(org_id, slug)` in D1).
 - **Project approval** — new projects start in `awaiting_approval` and must be explicitly approved before they can publish or serve content
 - **Publish orchestration** — receives repo content as JSON, validates configs, builds HTML from Markdown, uploads artifacts to R2, and atomically updates the live pointer
 - **Access policy management** — admin overrides for allow/deny rules
@@ -133,19 +133,26 @@ A project cannot serve content or accept publishes until it's approved. Disablin
 
 The Delivery Worker is the public-facing Cloudflare Worker bound to your docs hostname (e.g., `docs.yourdomain.com/*`). When a reader visits a URL:
 
-1. It extracts the project slug from the first path segment (`/my-project/guides/installation/` → slug is `my-project`)
-2. It looks up the project in D1 by slug
+1. It parses **organization slug** and **project slug** from the path (see table below).
+2. It looks up the project in D1 using the resolved organization slug and project slug.
 3. If the project doesn't exist, is disabled, or is awaiting approval → 404 (identical response, no information disclosure)
 4. If the project is `public` → serves the content directly from R2
-5. If the project is `password` → checks for a valid session cookie, shows a login page if not authenticated
+5. If the project is `password` → checks for a valid session cookie scoped to the project's URL prefix, shows a login page if not authenticated
 
 ### URL resolution
 
+| Path shape | Meaning | Example |
+|---|---|---|
+| `/<project>/…` | **Legacy / default org** — `organizations.slug = default` | `/my-project/guides/installation/` → org `default`, project `my-project` |
+| `/<org>/<project>/…` | **Explicit org** (multi-tenant) | `/acme/docs/guides/installation/` → org `acme`, project `docs` |
+
+Non-default organizations **must** use the two-segment form. Session cookies use the full prefix (e.g. `/my-project/` or `/acme/docs/`).
+
 | URL pattern | What happens |
 |---|---|
-| `/slug/page/` | Resolves to `<publish-prefix>/page/index.html` in R2 |
-| `/slug/page` | 301 redirect to `/slug/page/` (adds trailing slash) |
-| `/slug/assets/style.css` | Serves the literal file from R2 (file extension detected) |
+| `/<prefix>/page/` | Resolves to `<publish-prefix>/page/index.html` in R2 (`<prefix>` is either `/<project>` or `/<org>/<project>`) |
+| `/<prefix>/page` | 301 redirect to `/<prefix>/page/` when there is no file extension (adds trailing slash) |
+| `/<prefix>/assets/style.css` | Serves the literal file from R2 (file extension detected) |
 
 ## The build process
 
@@ -158,7 +165,7 @@ When a publish is triggered (either manually via curl or automatically via GitHu
 5. Generates the sidebar navigation HTML
 6. Extracts h2/h3 headings for the in-page table of contents
 7. Wraps everything in the page template (sidebar + content + TOC)
-8. Uploads all artifacts to R2 under a versioned prefix (`publishes/<slug>/<publish-id>/`)
+8. Uploads all artifacts to R2 under a versioned prefix (`publishes/<org-slug>/<project-slug>/<publish-id>/`; older publishes may still use `publishes/<project-slug>/<publish-id>/` until republished)
 9. Atomically updates the active publish pointer in D1
 10. Cleans up the previous version's artifacts from R2
 
@@ -172,14 +179,16 @@ The typical flow: push to `main` → GitHub Actions reads your repo files → PO
 
 ### Setup
 
-1. Copy `templates/publish-docs.yml` from the nrdocs repo into your project repo at `.github/workflows/publish-docs.yml`
-2. Set three repository **secrets** in GitHub (Settings → Secrets → Actions):
+The recommended authentication model is **GitHub Actions OIDC (secretless)**:
 
-| Secret | What it is |
-|---|---|
-| `NRDOCS_API_URL` | The URL of your Control Plane Worker |
-| `NRDOCS_API_KEY` | The API key you generated during installation |
-| `NRDOCS_PROJECT_ID` | The project UUID returned when you registered the project |
+- The workflow requests an OIDC token from GitHub (`id-token: write`)
+- It exchanges that token with the Control Plane at `POST /oidc/publish-credentials`
+- The Control Plane returns short-lived publish credentials (`project_id` + `repo_publish_token`)
+- The workflow then calls the normal publish endpoint with `Authorization: Bearer <repo_publish_token>` and the `X-Repo-Identity` header
+
+This avoids per-repo secrets/variables while still binding publishes to a specific repository identity (`github.com/${{ github.repository }}`).
+
+If you need a manual/operator path, you can still publish using a repo publish JWT minted by an operator (for example, for one-off recovery publishes). In that case you set the token in the environment for `nrdocs admin publish` or use a legacy workflow template.
 
 3. If your docs live in a subdirectory (e.g., `docs/` instead of the repo root), also set a repository **variable**:
 

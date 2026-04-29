@@ -1,8 +1,65 @@
 # API Reference
 
-The Control Plane exposes a REST API for managing projects. All endpoints require `Authorization: Bearer <API_KEY>`.
+The Control Plane exposes a REST API for managing projects. Most endpoints require `Authorization: Bearer <API_KEY>`. Bootstrap endpoints use `Authorization: Bearer <bootstrap-token>` instead.
 
-## Endpoints
+## Bootstrap Endpoints
+
+These endpoints use bootstrap token authentication (not API key auth).
+
+### POST /bootstrap/init
+
+Validate a bootstrap token and return org metadata. Used by the CLI as a preflight check before onboarding.
+
+**Headers:** `Authorization: Bearer <bootstrap-token>`
+
+**Request body:** empty or `{}`
+
+**Response:** `200 OK`
+
+```json
+{
+  "org_name": "My Organization",
+  "org_slug": "my-org",
+  "remaining_quota": 8,
+  "expires_at": "2025-12-31T00:00:00.000Z"
+}
+```
+
+---
+
+### POST /bootstrap/onboard
+
+Create a project and mint a repo publish token in a single request. Used by the CLI after the user confirms onboarding values.
+
+**Headers:** `Authorization: Bearer <bootstrap-token>`
+
+**Request body:**
+
+```json
+{
+  "slug": "my-project",
+  "title": "My Project",
+  "description": "Optional description",
+  "repo_identity": "github.com/owner/repo"
+}
+```
+
+**Response:** `201 Created`
+
+```json
+{
+  "project_id": "550e8400-e29b-41d4-a716-446655440000",
+  "repo_publish_token": "eyJhbGciOi..."
+}
+```
+
+**Error responses:** 400 (missing/invalid fields, invalid repo_identity), 401 (auth), 403 (org disabled, quota exceeded), 409 (slug conflict — slug already used **in that organization**; quota slot from a failed write is rolled back).
+
+---
+
+## Admin Endpoints
+
+These endpoints require `Authorization: Bearer <API_KEY>`.
 
 ### POST /projects
 
@@ -16,9 +73,19 @@ Register a new documentation project.
   "repo_url": "https://github.com/org/repo",
   "title": "My Project Docs",
   "description": "Internal documentation",
-  "access_mode": "public"
+  "access_mode": "public",
+  "repo_identity": "github.com/org/repo"
 }
 ```
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `slug` | yes | Unique per organization. |
+| `repo_url` | yes | Canonical repo URL (informational). |
+| `title` | yes | Display title. |
+| `description` | no | Optional. |
+| `access_mode` | yes | `public` or `password`. |
+| `repo_identity` | no | Canonical identity for CI binding: **`github.com/<owner>/<repo>`** (normalized server-side). Omit if unknown; see [Administrator guide](guides/administrator/index.html). |
 
 **Response:** `201 Created` with the full project object.
 
@@ -29,6 +96,22 @@ Register a new documentation project.
 Approve a project for publishing. Only projects in `awaiting_approval` status can be approved.
 
 **Response:** `200 OK`
+
+---
+
+### POST /projects/:id/publish-token
+
+**Authentication:** Control Plane **`API_KEY`** (Bearer `NRDOCS_API_KEY`).
+
+Mint a **repo publish** JWT for an **approved** project and insert the corresponding `repo_publish_tokens` row. Used by **`nrdocs admin mint-publish-token`** when a project was created via **`POST /projects`** instead of bootstrap onboard.
+
+**Request body (optional JSON):**
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `repo_identity` | no | **`github.com/<owner>/<repo>`**. If omitted, the server uses the project’s stored **`repo_identity`**; one of the two must be set. |
+
+**Response:** `201 Created` with `{ "repo_publish_token": "<JWT>" }`.
 
 ---
 
@@ -43,6 +126,8 @@ Disable a project. Returns 404 to all readers. Data is preserved.
 ### POST /projects/:id/publish
 
 Trigger a build and publish for the project. Project must be `approved`.
+
+**Authentication:** **repo publish** JWT in **`Authorization: Bearer …`** (not the control plane API key). Optionally **`X-Repo-Identity: github.com/owner/repo`** when the token enforces repository binding.
 
 **Request body:**
 
@@ -61,6 +146,8 @@ Trigger a build and publish for the project. Project must be `approved`.
 ```
 
 **Response:** `200 OK` with publish details including `publish_id` and `prefix`.
+
+The `prefix` is the R2 path for this publish version, typically `publishes/<org-slug>/<project-slug>/<publish-id>/`.
 
 ---
 

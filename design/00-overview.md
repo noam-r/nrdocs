@@ -1,9 +1,10 @@
 # Private Docs Publishing Platform — Design Overview
 
 ## Purpose
-This design defines a serverless platform for publishing private documentation sites from Markdown repositories under a single domain:
+This design defines a serverless platform for publishing private documentation sites from Markdown repositories under a single domain. Reader paths:
 
-- `docs.example.com/<slug>/`
+- Default org: `docs.example.com/<project-slug>/…`
+- Named org (multi-tenant): `docs.example.com/<org-slug>/<project-slug>/…`
 
 The platform is optimized for:
 - one repository per project
@@ -33,7 +34,7 @@ A Cloudflare Worker sits in front of all site requests and acts as a thin reques
 ## Core design decisions
 - Custom content format, not MkDocs
 - One repo per project
-- One immutable slug per project
+- One immutable slug per project (**unique per organization** in D1; not globally unique)
 - Explicit project registration in phase 1
 - Automatic publish after registration/approval
 - Platform DB stores effective state
@@ -63,7 +64,7 @@ A Cloudflare Worker sits in front of all site requests and acts as a thin reques
 ### Delivery plane
 - Cloudflare Worker at `docs.example.com/*`
 - R2 as content origin
-- Path-based project resolution by slug
+- Path-based project resolution by organization slug + project slug (legacy single-segment path for default org)
 - Authentication gate for protected projects
 
 ## Phase scope

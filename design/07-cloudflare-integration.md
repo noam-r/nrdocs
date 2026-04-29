@@ -9,16 +9,17 @@
 ## Worker role
 The Worker is a thin gateway in front of all project requests.
 Responsibilities:
-- resolve project slug from URL path
+- resolve organization + project slugs from the URL path (`/<project>/…` for default org, `/<org>/<project>/…` otherwise)
 - load project metadata/state
 - enforce status behavior (`awaiting_approval`, `approved`, `disabled`)
 - enforce `public` vs `password`
 - serve content from R2
 
 ## R2 role
-R2 stores static artifacts under stable project paths.
-URLs remain stable at:
-- `docs.example.com/<slug>/...`
+R2 stores static artifacts under stable paths, e.g. `publishes/<org-slug>/<project-slug>/<publish-id>/…`. Public URLs remain stable at:
+
+- `docs.example.com/<project-slug>/...` (default org)
+- `docs.example.com/<org-slug>/<project-slug>/...` (named orgs)
 
 ## Cloudflare Access role
 Cloudflare Access is not the primary source of truth.
@@ -27,9 +28,12 @@ Cloudflare Access is the enforcement layer for future identity-aware project acc
 
 ## Access mapping strategy
 Cloudflare Access is modeled per project path.
-Example:
+Example (default org):
 - `docs.example.com/project-a/*`
 - `docs.example.com/project-b/*`
+
+Example (named org `acme`):
+- `docs.example.com/acme/docs/*`
 
 ## Sync model
 The sync model is hybrid:

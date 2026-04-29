@@ -33,6 +33,20 @@ your-repo/
 
 ## Step by step
 
+### Quickest path: Bootstrap token onboarding
+
+If you have a bootstrap token from your org admin, the `nrdocs` CLI handles everything:
+
+```bash
+nrdocs init --token <bootstrap-token>
+```
+
+This generates all required files, creates the project, and generates a secretless publish workflow using GitHub Actions OIDC. Skip to "Push and verify" below.
+
+### Manual setup
+
+If you're setting up manually (without a bootstrap token), follow these steps:
+
 ### 1. Create project.yml
 
 This file declares your project's identity. Every field except `description` is validated during publish.
@@ -45,7 +59,7 @@ publish_enabled: true
 access_mode: public
 ```
 
-The `slug` is critical — it must exactly match the slug you used when registering the project via the Control Plane API. If they don't match, the publish will fail with a "Slug mismatch" error.
+The `slug` is critical — it must exactly match the slug you used when registering the project via the Control Plane API. If they don't match, the publish will fail with a "Slug mismatch" error. On the platform, slugs are **unique per organization** (two different orgs may both have a project slug `docs`, with different URL paths). Projects registered via the admin API today belong to the **default** org and are served at `/<slug>/…` on the delivery host.
 
 `access_mode` must be either `public` (anyone can read) or `password` (readers must enter a shared password). This must also match what was registered.
 
@@ -109,19 +123,11 @@ your-repo/
 
 Then go to your repository's Settings → Secrets and variables → Actions, and add these **secrets**:
 
-| Secret name | Value |
-|---|---|
-| `NRDOCS_API_URL` | The URL of the Control Plane Worker (e.g., `https://nrdocs-control-plane.you.workers.dev`) |
-| `NRDOCS_API_KEY` | The API key set during nrdocs installation |
-| `NRDOCS_PROJECT_ID` | The UUID returned when you registered this project |
+With the default (recommended) workflow, **you do not need any secrets for publishing**. The workflow uses GitHub Actions OIDC to authenticate to the Control Plane and obtain short-lived publish credentials.
 
-If your docs live in a subdirectory (not the repo root), also add a **repository variable** (not a secret):
+If your docs live in a subdirectory, you may still set an optional repository variable:
 
-| Variable name | Value |
-|---|---|
-| `NRDOCS_DOCS_DIR` | Path to the docs directory, e.g. `docs` |
-
-For standalone doc repos where `project.yml` is at the root, you don't need `NRDOCS_DOCS_DIR` — it defaults to `.` (repo root).
+- `NRDOCS_DOCS_DIR`: Path to the docs directory, e.g. `docs`
 
 Now every push to `main` will automatically publish your docs.
 

@@ -6,12 +6,22 @@ nav:
   - label: "Guides"
     section: true
     children:
+      - label: "Onboarding (bootstrap token)"
+        path: guides/onboarding-bootstrap
+      - label: "OIDC publishing (secretless)"
+        path: guides/oidc-publishing
       - label: "Installation"
         path: guides/installation
       - label: "Configuration"
         path: guides/configuration
       - label: "Publishing"
         path: guides/publishing
+      - label: "Importing MkDocs"
+        path: guides/import-mkdocs
+      - label: "Admin quick guide"
+        path: guides/admin-quick-guide
+      - label: "Administrator guide"
+        path: guides/administrator
       - label: "Repository Setup"
         path: guides/repository-setup
       - label: "CLI Reference"

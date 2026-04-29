@@ -4,7 +4,7 @@
 
 ### Primary goals
 - Publish documentation minisites from Markdown content.
-- Serve all projects from `docs.example.com/<slug>/`.
+- Serve all projects from one hostname, using `docs.example.com/<project-slug>/` for the default org and `docs.example.com/<org-slug>/<project-slug>/` for named orgs.
 - Support both public and protected projects.
 - Keep project authoring repository-driven.
 - Centralize effective access control in a platform-managed database.
@@ -24,7 +24,7 @@
 
 - One project maps to one repository.
 - One repository may control only its own project.
-- One project has one immutable slug.
+- One project has one immutable slug (unique within its organization).
 - A project can be in one of these access modes:
   - `public`
   - `password`
@@ -33,11 +33,11 @@
 ## Routing requirements
 
 - All projects must be served from a single hostname.
-- Project identity is determined by the first path segment after the hostname.
+- Project identity is determined from the path: either **one** segment (`/<project>/…`, default org) or **two** segments (`/<org>/<project>/…`).
 - The project root is:
-  - `docs.example.com/<slug>/`
-- Deep links must work:
-  - `docs.example.com/<slug>/section/page/`
+  - `docs.example.com/<project-slug>/` (default org), or
+  - `docs.example.com/<org-slug>/<project-slug>/` (named org)
+- Deep links must work under that prefix, e.g. `docs.example.com/<project-slug>/section/page/` or `docs.example.com/acme/docs/section/page/`.
 - Unknown projects return `404`.
 - Disabled projects return `404`.
 - Existing protected projects may show a login page/title before authentication.

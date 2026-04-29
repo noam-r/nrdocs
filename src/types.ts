@@ -15,7 +15,97 @@ export type EventType =
   | 'publish_start'
   | 'publish_success'
   | 'publish_failure'
-  | 'login_failure';
+  | 'publish_token_mint'
+  | 'login_failure'
+  | 'repo_proof_challenge_issued'
+  | 'repo_proof_challenge_verify_success'
+  | 'repo_proof_password_set_success'
+  | 'repo_proof_disable_password_success';
+
+// ── Organization types ────────────────────────────────────────────────
+
+/** Lifecycle status of an organization. */
+export type OrganizationStatus = 'active' | 'disabled';
+
+/** A fully-hydrated organization record as stored in D1. */
+export interface Organization {
+  id: string;
+  slug: string;
+  name: string;
+  status: OrganizationStatus;
+  created_at: string;
+  updated_at: string;
+}
+
+// ── Token types ──────────────────────────────────────────────────────
+
+/** Lifecycle status of a bootstrap token. */
+export type BootstrapTokenStatus = 'active' | 'revoked' | 'expired';
+
+/** A bootstrap token record scoped to an organization. */
+export interface BootstrapToken {
+  id: string;
+  jti: string;
+  org_id: string;
+  status: BootstrapTokenStatus;
+  created_by: string;
+  created_at: string;
+  expires_at: string;
+  max_repos: number;
+  repos_issued_count: number;
+  last_used_at: string | null;
+}
+
+/** Lifecycle status of a repo publish token. */
+export type RepoPublishTokenStatus = 'active' | 'revoked' | 'expired';
+
+/** A repo publish token bound to one organization and one project. */
+export interface RepoPublishToken {
+  id: string;
+  jti: string;
+  org_id: string;
+  project_id: string;
+  repo_identity: string;
+  status: RepoPublishTokenStatus;
+  created_from_bootstrap_jti: string;
+  created_at: string;
+  expires_at: string;
+  last_used_at: string | null;
+}
+
+// ── Repo-proof challenge types ───────────────────────────────────────
+
+export type RepoProofChallengeAction =
+  | 'set_password'
+  | 'disable_password'
+  | 'set_access_mode';
+
+export type RepoProofChallengeStatus =
+  | 'issued'
+  | 'verified_by_push'
+  | 'consumed_success'
+  | 'consumed_failure'
+  | 'expired';
+
+export interface RepoProofChallenge {
+  id: string;
+  project_id: string;
+  repo_identity: string;
+  action: RepoProofChallengeAction;
+  public_token: string;
+  private_token_hash: string;
+  status: RepoProofChallengeStatus;
+  issued_at: string;
+  expires_at: string;
+  verified_at: string | null;
+  opened_until: string | null;
+  verify_ref: string | null;
+  verify_sha: string | null;
+  consumed_at: string | null;
+  attempt_count_set: number;
+  attempt_count_verify: number;
+  last_denial_reason: string | null;
+}
 
 // ── Project types ────────────────────────────────────────────────────
 
@@ -31,6 +121,8 @@ export interface Project {
   active_publish_pointer: string | null;
   password_hash: string | null;
   password_version: number;
+  org_id: string;
+  repo_identity: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -42,6 +134,8 @@ export interface NewProject {
   title: string;
   description: string;
   access_mode: AccessMode;
+  org_id?: string;
+  repo_identity?: string | null;
 }
 
 // ── Access policy types ──────────────────────────────────────────────
