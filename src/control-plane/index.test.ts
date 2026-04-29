@@ -1057,7 +1057,7 @@ describe('Control Plane Worker — POST /bootstrap/onboard', () => {
     expect(body.error).toBe('Organization is disabled');
   });
 
-  it('creates project with status approved and default access_mode public', async () => {
+  it('creates project with status approved and default access_mode password', async () => {
     const token = await signBootstrapToken();
     const db = mockOnboardDB();
     const env = makeEnv({ DB: db, TOKEN_SIGNING_KEY: TEST_SIGNING_KEY });

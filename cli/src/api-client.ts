@@ -138,3 +138,38 @@ export async function getProjectStatus(
 
   return (await response.json()) as ProjectStatusResponse;
 }
+
+export async function setProjectPasswordWithPublishToken(
+  apiBaseUrl: string,
+  projectId: string,
+  repoPublishToken: string,
+  password: string,
+): Promise<void> {
+  let response: Response;
+  const url = `${apiBaseUrl.replace(/\/$/, '')}/projects/${encodeURIComponent(projectId)}/password`;
+
+  try {
+    response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${repoPublishToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ password }),
+    });
+  } catch (_error: unknown) {
+    const reason = _error instanceof Error ? _error.message : 'Unknown error';
+    throw new Error(`Could not connect to ${url}: ${reason}`);
+  }
+
+  if (!response.ok) {
+    let errorMessage: string;
+    try {
+      const body = (await response.json()) as ApiError;
+      errorMessage = body.error;
+    } catch {
+      errorMessage = 'Unknown error';
+    }
+    throw new Error(`API request failed (${response.status}): ${errorMessage}`);
+  }
+}
