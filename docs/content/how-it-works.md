@@ -56,7 +56,7 @@ access_mode: public
 | `title` | yes | Displayed in the sidebar header on every page. |
 | `description` | yes | Project description (metadata). |
 | `publish_enabled` | yes | Must be `true` for publishing to work. |
-| `access_mode` | yes | `public` or `password`. Must match the registered mode. |
+| `access_mode` | yes | `public` or `password`. This field is **not authoritative**; the Control Plane preserves the project’s registered access mode and ignores repo-provided values during publish. |
 
 ### nav.yml
 

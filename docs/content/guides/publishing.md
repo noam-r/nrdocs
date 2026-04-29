@@ -57,7 +57,7 @@ The response includes the project `id` (a UUID). Save it — you need it for all
 | `repo_url` | yes | Canonical repository URL. Informational — not used for fetching. |
 | `title` | yes | Display title shown in the sidebar header. |
 | `description` | no | Project description. |
-| `access_mode` | yes | `public` or `password`. Immutable after registration. |
+| `access_mode` | yes | `public` or `password`. Can be changed later (repo-proof password flow or operator API). For sensitive docs, start with `password` mode. |
 
 ## Approve the project
 

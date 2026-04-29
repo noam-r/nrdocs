@@ -1,0 +1,122 @@
+# This workflow publishes the docs in this repository using nrdocs.
+#
+# It is based on the upstream template at `templates/publish-docs.yml`.
+# Configure these in GitHub repository settings:
+#
+# - Secrets:
+#   - NRDOCS_PUBLISH_TOKEN
+# - Variables:
+#   - NRDOCS_API_URL
+#   - NRDOCS_PROJECT_ID
+#   - (optional) NRDOCS_DOCS_DIR (default ".")
+#
+name: Publish Docs to nrdocs
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  publish:
+    name: Publish documentation
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Build payload and publish
+        env:
+          NRDOCS_API_URL: ${{ vars.NRDOCS_API_URL }}
+          NRDOCS_PROJECT_ID: ${{ vars.NRDOCS_PROJECT_ID }}
+          NRDOCS_DOCS_DIR: ${{ vars.NRDOCS_DOCS_DIR || '.' }}
+          NRDOCS_PUBLISH_TOKEN: ${{ secrets.NRDOCS_PUBLISH_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          DOCS_DIR="${NRDOCS_DOCS_DIR:-.}"
+
+          # --- Validate required secrets ---
+          if [ -z "${NRDOCS_API_URL:-}" ]; then
+            echo "::error::NRDOCS_API_URL secret is not set"
+            exit 1
+          fi
+          if [ -z "${NRDOCS_PROJECT_ID:-}" ]; then
+            echo "::error::NRDOCS_PROJECT_ID variable is not set"
+            exit 1
+          fi
+          if [ -z "${NRDOCS_PUBLISH_TOKEN:-}" ]; then
+            echo "::error::NRDOCS_PUBLISH_TOKEN secret is not set"
+            exit 1
+          fi
+
+          # --- Read config files ---
+          if [ ! -f "$DOCS_DIR/project.yml" ]; then
+            echo "::error::project.yml not found in $DOCS_DIR"
+            exit 1
+          fi
+          project_yml=$(jq -Rs '.' < "$DOCS_DIR/project.yml")
+
+          if [ ! -f "$DOCS_DIR/nav.yml" ]; then
+            echo "::error::nav.yml not found in $DOCS_DIR"
+            exit 1
+          fi
+          nav_yml=$(jq -Rs '.' < "$DOCS_DIR/nav.yml")
+
+          if [ -f "$DOCS_DIR/allowed-list.yml" ]; then
+            allowed_list_yml=$(jq -Rs '.' < "$DOCS_DIR/allowed-list.yml")
+          else
+            allowed_list_yml="null"
+          fi
+
+          # --- Read all Markdown pages from content/ ---
+          if [ ! -d "$DOCS_DIR/content" ]; then
+            echo "::error::content/ directory not found in $DOCS_DIR"
+            exit 1
+          fi
+
+          pages_json=$(jq -n '{}')
+          while IFS= read -r -d '' file; do
+            relative="${file#"$DOCS_DIR/content/"}"
+            key="${relative%.md}"
+            page_content=$(jq -Rs '.' < "$file")
+            pages_json=$(echo "$pages_json" | jq --arg k "$key" --argjson v "$page_content" '. + {($k): $v}')
+          done < <(find "$DOCS_DIR/content" -name '*.md' -type f -print0 | sort -z)
+
+          # --- Assemble the full payload ---
+          payload=$(jq -n \
+            --argjson project_yml "$project_yml" \
+            --argjson nav_yml "$nav_yml" \
+            --argjson allowed_list_yml "$allowed_list_yml" \
+            --argjson pages "$pages_json" \
+            '{
+              repo_content: {
+                project_yml: $project_yml,
+                nav_yml: $nav_yml,
+                allowed_list_yml: $allowed_list_yml,
+                pages: $pages
+              }
+            }')
+
+          # --- POST to Control Plane publish endpoint ---
+          echo "Publishing from $DOCS_DIR to ${NRDOCS_API_URL}/projects/${NRDOCS_PROJECT_ID}/publish ..."
+
+          http_code=$(curl -s -o response.json -w '%{http_code}' \
+            -X POST \
+            -H "Content-Type: application/json" \
+            -H "Authorization: Bearer ${NRDOCS_PUBLISH_TOKEN}" \
+            -H "X-Repo-Identity: github.com/${{ github.repository }}" \
+            -d "$payload" \
+            "${NRDOCS_API_URL}/projects/${NRDOCS_PROJECT_ID}/publish")
+
+          echo "Response status: ${http_code}"
+          cat response.json
+
+          if [ "$http_code" -lt 200 ] || [ "$http_code" -ge 300 ]; then
+            echo "::error::Publish failed with HTTP ${http_code}"
+            exit 1
+          fi
+
+          echo "Publish succeeded."
+

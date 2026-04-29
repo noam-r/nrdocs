@@ -31,6 +31,8 @@ git push
 
 Then check GitHub Actions and visit the URL printed by `nrdocs init` / `nrdocs status`.
 
+If you choose `password` access mode during `init`, the CLI will prompt you to set an initial password so the site is private from the first publish.
+
 Docs:
 - [Onboarding (bootstrap token)](guides/onboarding-bootstrap/index.html)
 - [OIDC publishing (secretless)](guides/oidc-publishing/index.html)

@@ -1,197 +1,185 @@
 # nrdocs
 
-A serverless private documentation publishing platform built on Cloudflare Workers, D1, and R2. Serve Markdown-based documentation minisites from GitHub repositories under a single shared hostname. Reader URLs use a path prefix derived from **organization** and **project** slugs:
+**GitHub Pages-style documentation publishing for private repositories.**
 
-- **Default organization** (typical single-tenant / admin-registered projects): `docs.example.com/<project-slug>/…`
-- **Named organizations** (multi-tenant): `docs.example.com/<org-slug>/<project-slug>/…`
+nrdocs lets you publish documentation from a private GitHub repository without making the repository public and without maintaining a separate public docs repo.
 
-Project slugs are **unique per organization**, not globally.
+Keep your docs next to your code, publish from a dedicated branch like `nrdocs`, and serve the generated site publicly or behind simple password protection on Cloudflare Workers, D1, and R2.
 
-Each project maps to one repository, gets its own URL slug (within its org), and supports either public or password-protected access.
+## Why nrdocs?
 
-## How it works
+GitHub Pages is great when your source repository can be public. But many projects cannot expose their source code:
 
+* private products
+* client work
+* internal tools
+* commercial libraries
+* closed-source apps with public documentation
+* projects where docs should be public but code must remain private
+
+The usual workaround is awkward: create a second public repository just for docs, copy files between repos, wire up deployment separately, and keep documentation in sync with code by hand.
+
+nrdocs avoids that.
+
+You keep documentation in the same repo as the project, optionally on a dedicated `nrdocs` branch, and publish it through GitHub Actions to a Cloudflare-hosted docs site.
+
+## What nrdocs does
+
+nrdocs provides the missing publishing layer between Markdown documentation in a private repository and a hosted documentation website.
+
+It handles:
+
+* publishing docs from private GitHub repositories
+* keeping docs in the same repo as the code
+* using a dedicated docs branch such as `nrdocs`
+* serving docs publicly or behind password protection
+* routing many docs projects under one shared hostname
+* registering and approving projects through a control plane
+* publishing through GitHub Actions without exposing the platform API key to repo owners
+* storing generated artifacts in Cloudflare R2
+* serving docs through Cloudflare Workers
+* tracking project state in Cloudflare D1
+
+nrdocs is not trying to replace MkDocs, Docusaurus, or other documentation generators. Those tools build static documentation sites. nrdocs focuses on the publishing, routing, access, and serving layer for docs that live in private repositories.
+
+The built-in Markdown renderer gives you a zero-config path for simple docs. Future versions may support bringing your own static site output from tools like MkDocs or Docusaurus.
+
+## Core workflow
+
+```text
+Private GitHub repo
+  └─ nrdocs branch or docs directory
+       └─ GitHub Actions publish workflow
+            └─ nrdocs Control Plane Worker
+                 ├─ build docs
+                 ├─ upload static artifacts to R2
+                 └─ update live project state in D1
+
+Reader
+  └─ docs.example.com/my-project
+       └─ nrdocs Delivery Worker
+            ├─ resolve project
+            ├─ enforce access policy
+            └─ serve static files from R2
 ```
-GitHub Repo ──push──▶ GitHub Actions ──POST──▶ Control Plane Worker
-                                                    │
-                                          build site from Markdown
-                                          upload artifacts to R2
-                                          update D1 state
-                                                    │
-User ──GET──▶ Delivery Worker ──lookup D1──▶ serve from R2
+
+## Example use cases
+
+### Public docs for a private codebase
+
+Your product source code is private, but the documentation should be public.
+
+Put docs in the same repo, publish through nrdocs, and expose only the generated documentation site.
+
+### Private docs for a private project
+
+Your team wants internal documentation without exposing the repository or setting up a full documentation platform.
+
+Publish docs through nrdocs and protect them with a password.
+
+### Same-repo docs without a public mirror
+
+Your project already has code, issues, pull requests, and releases in one repository.
+
+Use a dedicated `nrdocs` branch or docs directory so documentation changes can be reviewed and updated alongside code changes without creating a second public docs repository.
+
+### Many small documentation sites under one domain
+
+A platform operator can run nrdocs once and let multiple repo owners publish docs under a shared hostname:
+
+```text
+docs.example.com/project-a/
+docs.example.com/project-b/
+docs.example.com/acme/project-c/
 ```
 
-Two Cloudflare Workers run the platform:
+## Who is nrdocs for?
 
-- **Delivery Worker** (`docs.example.com/*`) — resolves org + project from the URL path, handles authentication for password-protected projects, and serves static content from R2.
-- **Control Plane Worker** — admin API for project registration, lifecycle management, publish orchestration, and access policy overrides. Protected by API key auth.
+### Repository owners
 
-Both Workers are configured in a single `wrangler.toml` using Wrangler environments. D1 is the system of record. R2 stores the built HTML artifacts.
+You own a project repo and want to publish its docs.
+
+You should be able to:
+
+1. receive a bootstrap token from your platform operator
+2. run `nrdocs init`
+3. commit the generated docs structure and workflow
+4. push the docs branch
+5. get a hosted docs URL
+
+You should not need to know how Cloudflare Workers, D1, R2, Wrangler, or the platform API key work.
+
+### Platform operators
+
+You run the shared nrdocs infrastructure.
+
+You are responsible for:
+
+* deploying the Control Plane Worker
+* deploying the Delivery Worker
+* configuring D1 and R2
+* issuing bootstrap tokens
+* approving projects
+* managing platform secrets
+* keeping the platform API key private
+
+Repo owners should never need the platform API key.
 
 ## Quick start
+
+### 1. Deploy nrdocs infrastructure
 
 ```bash
 git clone https://github.com/noam-r/nrdocs.git
 cd nrdocs
-./scripts/setup.sh        # installs deps, Wrangler, creates config files
-wrangler login             # authenticate with Cloudflare
-./scripts/deploy.sh        # creates D1/R2, sets secrets, deploys Workers
+./scripts/setup.sh
+wrangler login
+./scripts/deploy.sh
 ```
 
-For local preview without Cloudflare: `npm run preview`
+The deploy script creates and configures the required Cloudflare resources:
 
-For full deployment details, see the [Installation guide](docs/content/guides/installation.md).
+* Workers
+* D1 database
+* R2 bucket
+* secrets
+* migrations
+* environment configuration
 
-## Two personas: who does what
-
-### Repo owners (authors): publish docs from your repo
-
-- **You do**: get a bootstrap token from your operator, run `nrdocs init`, commit, push.
-- **You do not**: run `nrdocs admin` or handle the platform `NRDOCS_API_KEY`.
+For local preview without Cloudflare:
 
 ```bash
-nrdocs init --token '<bootstrap-token>'
+npm run preview
+```
+
+For full deployment details, see the installation guide.
+
+### 2. Onboard a repository
+
+If you are a repo owner and received a bootstrap token from your operator:
+
+```bash
+nrdocs init --token <bootstrap-token>
+nrdocs status
+```
+
+`nrdocs init` scaffolds the documentation structure, registers the project, and generates a GitHub Actions workflow for publishing.
+
+After that, commit and push:
+
+```bash
 git add -A
 git commit -m "Initialize nrdocs"
 git push
 ```
 
-Docs:
-- [Onboarding (bootstrap token)](docs/content/guides/onboarding-bootstrap.md)
-- [OIDC publishing (secretless)](docs/content/guides/oidc-publishing.md)
+Push to the configured publish branch to publish the docs.
 
-### Platform operators (admins): run the platform
+## Repository structure
 
-- **You do**: deploy Workers/D1/R2, keep `NRDOCS_API_KEY` private, issue bootstrap tokens.
-- **You do not**: ask repo owners for `NRDOCS_API_KEY`.
+A basic nrdocs project looks like this:
 
-Docs:
-- [Administrator guide](docs/content/guides/administrator.md)
-
-## Setup
-
-### 1. Run the setup script
-
-```bash
-./scripts/setup.sh
-```
-
-This installs Node dependencies, Wrangler, jq, and creates `wrangler.toml` and `.env` from their `.example` templates.
-
-### 2. Deploy to Cloudflare
-
-```bash
-wrangler login
-./scripts/deploy.sh
-```
-
-The deploy script handles everything: D1 database creation, R2 bucket creation, wrangler.toml patching, database migrations, secret generation, Worker deployment, and `.env` configuration. No manual copy-paste needed.
-
-### 3. Register and publish
-
-**Option A: Bootstrap token onboarding (recommended)**
-
-If your org admin has given you a bootstrap token, the standalone `nrdocs` CLI handles everything — remote project creation, local file scaffolding, and a secretless GitHub Actions workflow (OIDC):
-
-```bash
-nrdocs init --token <bootstrap-token>
-nrdocs status
-```
-
-This creates the docs structure, registers the project, and generates a workflow that publishes via **GitHub Actions OIDC** (no per-repo secrets/variables). `nrdocs status` shows whether the project is approved/published and which URL to visit. Push to the configured publish branch to publish.
-
-Repo owners normally stop here. They should not need **`nrdocs admin`** or the platform **`NRDOCS_API_KEY`**.
-
-**Step-by-step for authors (after the platform is already deployed):** see the docs page [Onboarding (bootstrap token)](docs/content/guides/onboarding-bootstrap.md) (built site: *Guides → Onboarding (bootstrap token)*).
-
-**Option B: Admin API (platform operators)**
-
-```bash
-# Edit .env with your API_URL and API_KEY
-nrdocs admin init       # register + approve
-nrdocs admin publish    # build and publish docs (repo publish JWT)
-```
-
-## Configuration
-
-Both Workers are defined in a single `wrangler.toml`:
-
-- Shared config (account ID, D1, R2) at the top level
-- `[env.delivery]` — Delivery Worker settings, routes, and vars
-- `[env.control-plane]` — Control Plane Worker settings
-
-### Environment variables
-
-Set in `wrangler.toml` under `[env.delivery.vars]`:
-
-| Variable | Default | Description |
-|---|---|---|
-| `SESSION_TTL` | `28800` | Session cookie lifetime in seconds (8 hours) |
-| `CACHE_TTL` | `300` | `Cache-Control` max-age in seconds (5 minutes) |
-| `RATE_LIMIT_MAX` | `5` | Failed login attempts before lockout |
-| `RATE_LIMIT_WINDOW` | `300` | Rate limit window in seconds (5 minutes) |
-
-### Secrets
-
-| Secret | Used by | Description |
-|---|---|---|
-| `HMAC_SIGNING_KEY` | Both Workers | Signs and verifies session tokens. Must be the same value in both. |
-| `API_KEY` | Control Plane only | Authenticates admin API requests. |
-| `TOKEN_SIGNING_KEY` | Control Plane only | Signs bootstrap and repo publish JWTs. |
-
-## CLI
-
-### nrdocs binary (bootstrap onboarding)
-
-The standalone `nrdocs` CLI handles end-to-end onboarding for developers with a bootstrap token:
-
-```bash
-nrdocs init --token <bootstrap-token>
-nrdocs status
-```
-
-This runs a flow of: preflight checks, token validation, interactive prompting (or flags in CI), **remote project creation**, **local file scaffolding**, and non-secret status metadata. The generated workflow publishes via **GitHub Actions OIDC**, so no `gh` secret/variable installation is required.
-
-**Getting the `nrdocs` command onto your machine**
-
-- **`sh install.sh`** (from this repo) downloads a release asset from GitHub (`nrdocs-linux-x64`, `nrdocs-darwin-arm64`, …). That returns **404** until a Release exists with those exact filenames, or you point at another fork: `NRDOCS_RELEASES_REPO=owner/repo sh install.sh` or `sh install.sh --repo owner/repo`.
-- **From a git clone** (Node.js 20+): `npm install && npm run build:cli`, then `sudo cp dist-cli/nrdocs.cjs /usr/local/bin/nrdocs` (or copy into `~/.local/bin/nrdocs`). Same onboarding flow; the script is a bundled Node entrypoint.
-
-After **git pull** CLI changes, run **`npm run build:cli`** again and **overwrite** the file **`command -v nrdocs`** prints (usually **`~/.local/bin/nrdocs`** or **`/usr/local/bin/nrdocs`**). If you see **`bash: /usr/local/bin/nrdocs: No such file or directory`** after copying to **`~/.local/bin`**, run **`hash -r`** (Bash) or **`rehash`** (zsh), or remove the stale **`/usr/local/bin/nrdocs`**. Verify with **`command -v nrdocs`**. Bare **`nrdocs`** vs **`nrdocs --help`** differ, and the first line includes **`nrdocs CLI <version>`**. To try without rebuilding: **`npm run nrdocs:cli -- --help`**.
-
-### `nrdocs admin` (operator commands)
-
-The same **`nrdocs`** binary includes Control Plane operator commands. These are for platform operators, not repo owners. Configure **`.env`** once, then:
-
-```bash
-nrdocs admin register    # register a new project
-nrdocs admin list        # list approved projects; add --all or --status disabled
-nrdocs admin approve <project-id> --repo-identity github.com/org/repo  # approve project for publishing
-nrdocs admin mint-publish-token <project-id>   # mint a repo publish JWT (legacy/manual publish)
-nrdocs admin publish <project-id>     # build and publish (uses repo publish JWT)
-nrdocs admin disable <project-id>     # take it offline
-nrdocs admin delete <project-id>      # remove everything
-nrdocs admin status <project-id>      # show project details
-nrdocs status                         # repo-owner setup/publish status, no admin key
-nrdocs admin quick-guide # shortest common operator workflows
-nrdocs admin --help      # all operator commands
-```
-
-From a git clone you can also run **`./scripts/nrdocs.sh`** (same entrypoint: built bundle or `tsx`). API-only admin commands can run from any operator workspace with the right env. Docs-reading admin commands (**`register`**, **`init`**, **`publish`**) are operator-managed/manual paths; run them from the docs repo root, or with **`NRDOCS_DOCS_DIR`** pointing at that docs directory. **`admin publish`** uses the **repo publish JWT**, not **`NRDOCS_API_KEY`**. In CI, **`nrdocs admin`** refuses unless **`NRDOCS_ALLOW_ADMIN_IN_CI=1`** (avoid putting the platform API key in doc-repo workflows).
-
-## Repository setup (for project owners)
-
-The fastest way to set up a new repo is with a bootstrap token:
-
-```bash
-nrdocs init --token <bootstrap-token>
-```
-
-This scaffolds the full structure, creates the project on the control plane, and configures CI secrets automatically.
-
-If setting up manually, each documentation project needs this structure:
-
-```
+```text
 my-project-docs/
 ├── project.yml               # slug, title, description
 ├── nav.yml                   # sidebar navigation
@@ -200,21 +188,103 @@ my-project-docs/
 │   └── guides/
 │       └── installation.md
 └── .github/workflows/
-    └── publish-docs.yml      # generated by nrdocs init, or copy from templates/
+    └── publish-docs.yml      # generated by nrdocs init
 ```
 
-Pages are plain Markdown — no frontmatter required. Page titles come from `nav.yml` labels. See the [Repository Setup guide](docs/content/guides/repository-setup.md) for details.
+Pages are plain Markdown. Page titles come from `nav.yml` labels, so frontmatter is not required for basic usage.
+
+## URL structure
+
+nrdocs serves many documentation projects under one shared hostname.
+
+For the default organization:
+
+```text
+docs.example.com/<project-slug>/...
+```
+
+For named organizations:
+
+```text
+docs.example.com/<org-slug>/<project-slug>/...
+```
+
+Project slugs are unique within an organization.
+
+## Architecture
+
+nrdocs runs on Cloudflare:
+
+* **Delivery Worker** — serves reader traffic, resolves projects from URLs, enforces access policies, and serves static assets from R2.
+* **Control Plane Worker** — handles project registration, approval, publishing, lifecycle management, and access policy changes.
+* **D1** — stores project metadata, approval state, access policy, and live deployment pointers.
+* **R2** — stores generated static site artifacts.
+* **GitHub Actions** — publishes documentation from the source repository.
+
+```text
+GitHub Repo ──push──▶ GitHub Actions ──publish──▶ Control Plane Worker
+                                                        │
+                                                        ├─ build site
+                                                        ├─ upload artifacts to R2
+                                                        └─ update D1 state
+
+Reader ──GET──▶ Delivery Worker ──lookup D1──▶ serve from R2
+```
+
+## Access modes
+
+Each project can be served as:
+
+* **public** — anyone with the URL can read the docs
+* **password-protected** — readers must enter the project password before accessing the docs
+
+More advanced access policies can be added later without changing the core publishing model.
+
+## CLI
+
+The `nrdocs` CLI supports both repository-owner onboarding and platform-operator commands.
+
+### Repository-owner commands
+
+```bash
+nrdocs init --token <bootstrap-token>
+nrdocs status
+```
+
+These commands are for project authors. They do not require the platform API key.
+
+### Operator commands
+
+```bash
+nrdocs admin register
+nrdocs admin list
+nrdocs admin approve <project-id> --repo-identity github.com/org/repo
+nrdocs admin disable <project-id>
+nrdocs admin delete <project-id>
+nrdocs admin status <project-id>
+nrdocs admin quick-guide
+```
+
+Admin commands are for platform operators only and require access to the control plane configuration.
 
 ## Development
 
 ```bash
-npm test              # run tests
-npm run build:cli     # bundle standalone `nrdocs` CLI to dist-cli/nrdocs.cjs
-npm run nrdocs:cli -- --help   # run author CLI from source (no rebuild)
-npm run preview       # preview docs locally
-npx tsc --noEmit      # type-check
+npm test
+npm run build:cli
+npm run nrdocs:cli -- --help
+npm run preview
+npx tsc --noEmit
 ```
+
+## Project status
+
+nrdocs is an early open-source tool. The current focus is making the private-repo publishing flow simple, reliable, and easy to operate.
+
+The most important product goal is friction reduction: a repo owner should be able to publish docs from a private repo with one initialization command and a normal Git push.
 
 ## License
 
-Private.
+Apache License 2.0.
+
+nrdocs is open source and may be used, modified, and distributed for private, commercial, and open-source projects under the terms of the Apache-2.0 license.

@@ -60,6 +60,15 @@ Even for the **same** person who ran deploy: the script could try to append `exp
 
 5. **GitHub Actions** runs the generated workflow; the control plane builds the site and your docs appear at the **Docs URL** printed by `nrdocs init`.
 
+### Choosing `password` mode (recommended for private docs)
+
+During `nrdocs init`, you will be asked for an **access mode**:
+
+- `public` — anyone can read
+- `password` — readers must login with a shared password
+
+If you choose `password`, `nrdocs init` will also prompt you to **set the initial password** immediately. This prevents any “briefly public” window between first publish and password setup.
+
    For the default organization, the URL is:
 
    ```text

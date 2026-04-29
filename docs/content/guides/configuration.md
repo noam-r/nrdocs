@@ -58,12 +58,17 @@ The domain must be managed by Cloudflare (added as a zone in your account). The 
 
 ## Access modes
 
-Each project has an immutable access mode set at registration:
+Each project has an access mode set at registration:
 
 - **public** — content is served without any authentication
 - **password** — users must enter a shared password to view content; a session cookie is issued on success
 
-The access mode cannot be changed after a project is registered. To switch modes, delete the project and re-register it.
+The access mode **can** be changed later:
+
+- **Repo owners** can set or disable a password using the repo-proof flow (`nrdocs password set` / `nrdocs password disable`).
+- **Operators** can also change access mode via the Control Plane API (`POST /projects/:id/access-mode`).
+
+If you onboard with `nrdocs init`, the recommended default is to start in `password` mode and set the initial password during `init` so content is never briefly exposed publicly.
 
 ## Project lifecycle
 
