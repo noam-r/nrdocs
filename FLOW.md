@@ -2,7 +2,7 @@
 
 This document is the **end-to-end product flow** for a single nrdocs deployment. It is **single-tenant**: one Control Plane, one Delivery Worker, and a **flat list of registered documentation sites** in D1. There are **no organizations** in the product surface.
 
-**Default path:** the **repository owner** sets the Control Plane URL once, runs **`nrdocs init`** to scaffold the workflow and docs, and **pushes**. The first CI run calls **`POST /oidc/register-project`** (GitHub OIDC, no API key), which creates an **`awaiting_approval`** row. The **operator** lists pending requests and **approves**. The same workflow run **polls** until the project is approved, then **publishes** in that job (no second push required). If approval takes longer than the wait budget, re-run the workflow or push again.
+**Default path:** the **repository owner** sets the Control Plane URL once, runs **`nrdocs init`** to scaffold the workflow and docs, and **pushes**. The CI run calls **`POST /oidc/register-project`** (GitHub OIDC, no API key), which creates an **`awaiting_approval`** row, then tries **`POST /oidc/publish-credentials`** once. If the repo is not approved yet, the job **exits successfully without polling** (no long Actions wait or extra billing). The **operator** approves asynchronously; after that, the owner **pushes again** or **re-runs the workflow** so a short second run can mint credentials and **publish** to Cloudflare.
 
 An **operator-first** path (**`POST /repos`** with the admin API key) still exists for automation; owners may optionally pass **`--repo-id`** to **`nrdocs init`** to link **`.nrdocs/status.json`** when a UUID was created out of band.
 
@@ -96,7 +96,7 @@ The owner sets **`nrdocs config set api-url`** (or **`NRDOCS_API_URL`** / **`--a
 1. **`nrdocs config set api-url 'https://…'`** (once per machine), or set **`NRDOCS_API_URL`** / use **`--api-url`** when you run init.
 2. **`nrdocs init`** (interactive or non-interactive with **`--slug`**, **`--title`**, **`--repo-identity`** as needed). Optional: **`--repo-id`** only if you are linking an existing Control Plane row (operator-first or copied from Actions).
 3. Commit the generated files (including **`.github/workflows/publish-docs.yml`**, **`docs/`**, **`.nrdocs/status.json`**).
-4. Push the **publish branch**. The workflow **registers** the site, then **waits** (polls OIDC publish-credentials) until approved and **publishes** in the same run. Tune **`NRDOCS_APPROVAL_POLL_INTERVAL`** (default 30s) and **`NRDOCS_APPROVAL_MAX_WAIT_SECS`** (default 3600) on the job if needed.
+4. Push the **publish branch**. The workflow **registers** the site and attempts **one** OIDC publish-credentials exchange. If the repo is still **awaiting approval**, the job **ends without publishing** (by design — no polling loop). After the operator approves, **push again** or **re-run** the workflow to publish in a quick follow-up run.
 5. **`nrdocs status`** shows remote state and the reader URL when the platform exposes them (easiest after you optionally link **`--repo-id`** or copy the id from the workflow summary).
 
 ### 1. Point the CLI at the Control Plane
@@ -137,7 +137,7 @@ The publish branch is whatever **`nrdocs init`** configured (often **`main`** or
 
 ### 4. Confirm
 
-- **GitHub Actions** — the run **registers**, **polls** until approved, **publishes**, then prints **Reader URL** in the job log and **Summary** when the Control Plane has **`DELIVERY_URL`** set, or when the repo defines Actions variable **`NRDOCS_DELIVERY_URL`** (same value: public delivery worker base URL, no trailing slash). Without either, the summary still shows the **site slug** and configuration hints.
+- **GitHub Actions** — the run **registers**, tries credentials **once**; if already approved it **publishes** and prints **Reader URL** in the job log and **Summary** when the Control Plane has **`DELIVERY_URL`** set, or when the repo defines Actions variable **`NRDOCS_DELIVERY_URL`** (same value: public delivery worker base URL, no trailing slash). If still awaiting approval, the run exits without a long wait; **re-run or push after approval** to publish. Without either URL source, the summary still shows the **site slug** and configuration hints.
 - Locally:
 
 ```bash
@@ -152,8 +152,8 @@ Shows local metadata, remote approval/publish state when the Control Plane retur
 
 1. The job requests a **GitHub OIDC** token with **audience** = your Control Plane URL.
 2. The workflow calls **`POST /oidc/register-project`** with that token and JSON from **`docs/project.yml`** (creates **`awaiting_approval`** or returns **200** idempotently).
-3. The workflow calls **`POST /oidc/publish-credentials`** in a loop until the project is **approved** (or a max wait), then receives **`repo_publish_token`** and **`repo_id`**.
-4. The workflow **`POST`s** the rendered payload to **`/repos/:repo_id/publish`** with **`Authorization: Bearer <repo_publish_token>`** and **`X-Repo-Identity: github.com/<owner>/<repo>`**.
+3. The workflow calls **`POST /oidc/publish-credentials`** **once**. If the repo is **not approved** yet (**409**), the job **exits without polling** (saves Actions time). After approval, a **later** push or workflow run performs steps 3–5 again and receives **`repo_publish_token`** and **`repo_id`**.
+4. When credentials succeed, the workflow **`POST`s** the rendered payload to **`/repos/:repo_id/publish`** with **`Authorization: Bearer <repo_publish_token>`** and **`X-Repo-Identity: github.com/<owner>/<repo>`**.
 5. The Control Plane builds HTML, writes artifacts to R2 under **`publishes/<slug>/<publish-id>/`**, and updates the active pointer in D1.
 6. Readers open **`https://<delivery-host>/<slug>/`** (shown in CI when **`DELIVERY_URL`** or repo var **`NRDOCS_DELIVERY_URL`** is set).
 

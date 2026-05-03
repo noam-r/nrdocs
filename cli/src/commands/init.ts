@@ -773,15 +773,31 @@ export async function runInit(args: string[]): Promise<void> {
     );
   }
 
-  console.log('\nNext steps:');
-  console.log('  1. Review the files listed above, then commit: git add -A && git commit -m "Initialize nrdocs"');
+  console.log('\nNext steps (run from this repo root):\n');
+  console.log('1. Review the file list above.\n');
+  console.log('2. Commit your changes (one command per line — copy/paste each):\n');
+  console.log('git add -A');
+  console.log('git commit -m "Initialize nrdocs"\n');
   console.log(
-    `  2. Push the publish branch: git push -u origin ${publishBranch} — CI registers (OIDC), waits for operator approval, then publishes in the same run.`,
+    '3. Confirm the workflow triggers on pushes to your publish branch (GitHub only runs workflows whose on.push.branches list matches the branch you push):\n',
   );
-  console.log('  3. Find the reader URL in the workflow summary once DELIVERY_URL is configured on the Control Plane.');
+  console.log("grep -A8 '^on:' .github/workflows/publish-docs.yml\n");
+  console.log(
+    `   You should see two spaces, a hyphen, then exactly: ${publishBranch}\n`,
+  );
+  console.log(
+    '4. Push the publish branch. The workflow registers via OIDC and exits quickly if the repo is not approved yet (no polling — saves Actions minutes). After approval, push again or re-run the workflow to publish:\n',
+  );
+  console.log(`git push -u origin ${publishBranch}\n`);
+  console.log(
+    '5. When the workflow finishes, find the reader URL in the job summary or logs (needs DELIVERY_URL on the Control Plane, or check nrdocs status if you linked a repo id).\n',
+  );
   if (docsUrl) {
-    console.log(`  4. Open: ${docsUrl}`);
+    console.log('6. Open the published site:');
+    console.log(docsUrl);
   } else if (accessMode === 'password') {
-    console.log('  4. After publish: run nrdocs password set (or ask your operator for nrdocs admin set-password).');
+    console.log('6. After publish, set the reader password:');
+    console.log('nrdocs password set');
+    console.log('(Or ask your operator: nrdocs admin set-password <repo-id>)\n');
   }
 }

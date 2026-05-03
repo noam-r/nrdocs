@@ -143,7 +143,8 @@ describe('runInit', () => {
 
     expect(process.exitCode).toBeUndefined();
     expect(output).toContain('Reader URL:       https://docs.example.com/docs/');
-    expect(output).toContain('4. Open: https://docs.example.com/docs/');
+    expect(output).toContain('6. Open the published site:');
+    expect(output).toContain('https://docs.example.com/docs/');
 
     log.mockRestore();
     err.mockRestore();

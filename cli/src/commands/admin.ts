@@ -577,8 +577,7 @@ async function cmdApprove(args: string[] = []): Promise<void> {
 
   if (!mintPublish) {
     console.log('');
-    console.log('Approved. GitHub Actions will publish via OIDC (no publish token in .env).');
-    console.log('A workflow run that is waiting for approval will continue and publish in the same job.');
+    console.log('Approved. GitHub Actions OIDC can publish on the next workflow run or push (workflows do not poll for approval).');
     console.log(`Optional — link local status: nrdocs init --repo-id ${projectId}`);
     return;
   }

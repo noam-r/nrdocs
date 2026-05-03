@@ -123,52 +123,54 @@ jobs:
               if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
                 {
                   echo "## nrdocs registration"
-                  echo "Internal project id (optional for local tooling): `$reg_id`"
+                  echo "Internal project id (optional for local tooling): \`$reg_id\`"
                 } >> "$GITHUB_STEP_SUMMARY"
               fi
             fi
           fi
 
-          # Exchange OIDC for short-lived publish credentials (poll until approved in the same job)
-          POLL_SECS="${NRDOCS_APPROVAL_POLL_INTERVAL:-30}"
-          MAX_WAIT="${NRDOCS_APPROVAL_MAX_WAIT_SECS:-3600}"
-          elapsed=0
-          exchange_code=""
-          while true; do
-            exchange_code=$(curl -s -o exchange.json -w '%{http_code}' -X POST -H "Authorization: Bearer $oidc_token" "${API_BASE}/oidc/publish-credentials")
-            if [ "$exchange_code" -ge 200 ] && [ "$exchange_code" -lt 300 ]; then
-              break
+          # One-shot OIDC publish-credentials. Operator approval is asynchronous — CI must not poll/sleep (Actions billing).
+          oidc_json=$(curl -sSf -H "Authorization: Bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=${audience}")
+          oidc_token=$(echo "$oidc_json" | jq -r '.value')
+          if [ -z "$oidc_token" ] || [ "$oidc_token" = "null" ]; then
+            echo "::error::Failed to acquire GitHub OIDC token for publish-credentials"
+            exit 1
+          fi
+          exchange_code=$(curl -s -o exchange.json -w '%{http_code}' -X POST -H "Authorization: Bearer $oidc_token" "${API_BASE}/oidc/publish-credentials")
+          if [ "$exchange_code" -ge 200 ] && [ "$exchange_code" -lt 300 ]; then
+            creds=$(cat exchange.json)
+            NRDOCS_REPO_ID=$(echo "$creds" | jq -r '.repo_id')
+            NRDOCS_PUBLISH_TOKEN=$(echo "$creds" | jq -r '.repo_publish_token')
+            if [ -z "$NRDOCS_REPO_ID" ] || [ "$NRDOCS_REPO_ID" = "null" ]; then
+              echo "::error::OIDC exchange did not return repo_id"
+              echo "$creds"
+              exit 1
             fi
-            if [ "$exchange_code" = "409" ]; then
-              err=$(jq -r '.error // empty' exchange.json 2>/dev/null || true)
-              case "$err" in
-                *"not approved"*)
-                  if [ "$elapsed" -ge "$MAX_WAIT" ]; then
-                    echo "::warning::Stopped waiting for approval after ${MAX_WAIT}s. Re-run the workflow or push after the operator approves."
-                    exit 0
-                  fi
-                  echo "::notice::Waiting for operator approval (${elapsed}s / ${MAX_WAIT}s max, every ${POLL_SECS}s)..."
-                  sleep "$POLL_SECS"
-                  elapsed=$((elapsed + POLL_SECS))
-                  continue
-                  ;;
-              esac
+            if [ -z "$NRDOCS_PUBLISH_TOKEN" ] || [ "$NRDOCS_PUBLISH_TOKEN" = "null" ]; then
+              echo "::error::OIDC exchange did not return repo_publish_token"
+              echo "$creds"
+              exit 1
             fi
+          elif [ "$exchange_code" = "409" ]; then
+            err=$(jq -r '.error // empty' exchange.json 2>/dev/null || true)
+            case "$err" in
+              *"not approved"*|*"Repo is not approved"*)
+                echo "::notice::Registered with the Control Plane. Publishing is skipped until an operator approves (this job exits without polling — no long Actions wait)."
+                if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
+                  {
+                    echo "## Awaiting operator approval"
+                    echo "After an operator approves this repo, **re-run this workflow** (Actions → run workflow) or **push** the publish branch again to publish to Cloudflare."
+                  } >> "$GITHUB_STEP_SUMMARY"
+                fi
+                exit 0
+                ;;
+            esac
             echo "::error::OIDC exchange failed with HTTP $exchange_code"
             cat exchange.json || true
             exit 1
-          done
-          creds=$(cat exchange.json)
-          NRDOCS_REPO_ID=$(echo "$creds" | jq -r '.repo_id')
-          NRDOCS_PUBLISH_TOKEN=$(echo "$creds" | jq -r '.repo_publish_token')
-          if [ -z "$NRDOCS_REPO_ID" ] || [ "$NRDOCS_REPO_ID" = "null" ]; then
-            echo "::error::OIDC exchange did not return repo_id"
-            echo "$creds"
-            exit 1
-          fi
-          if [ -z "$NRDOCS_PUBLISH_TOKEN" ] || [ "$NRDOCS_PUBLISH_TOKEN" = "null" ]; then
-            echo "::error::OIDC exchange did not return repo_publish_token"
-            echo "$creds"
+          else
+            echo "::error::OIDC exchange failed with HTTP $exchange_code"
+            cat exchange.json || true
             exit 1
           fi
 
@@ -272,7 +274,7 @@ jobs:
             if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
               {
                 echo "## Published documentation"
-                echo "Reader URL: `$pub_url`"
+                echo "Reader URL: \`$pub_url\`"
               } >> "$GITHUB_STEP_SUMMARY"
             fi
           elif [ -n "$pub_slug" ]; then
@@ -280,13 +282,13 @@ jobs:
             if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
               {
                 echo "## Published documentation"
-                echo "Site slug: `$pub_slug`"
+                echo "Site slug: \`$pub_slug\`"
                 echo ""
                 echo "Configure the public delivery base URL so the exact link appears:"
-                echo "- **Control Plane** Worker env: `DELIVERY_URL` (e.g. `https://docs.example.com`)"
-                echo "- **Or** repo variable: **Settings → Actions → Variables** → `NRDOCS_DELIVERY_URL`"
+                echo "- **Control Plane** Worker env: \`DELIVERY_URL\` (e.g. \`https://docs.example.com\`)"
+                echo "- **Or** repo variable: **Settings → Actions → Variables** → \`NRDOCS_DELIVERY_URL\`"
                 echo ""
-                echo "Reader path pattern: `https://<your-delivery-host>/${pub_slug}/`"
+                echo "Reader path pattern: \`https://<your-delivery-host>/$pub_slug/\`"
               } >> "$GITHUB_STEP_SUMMARY"
             fi
           fi
