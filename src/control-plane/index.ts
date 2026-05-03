@@ -18,6 +18,7 @@ import {
   isValidProjectSlug,
 } from '../site-builder/config-parser';
 import { buildSite } from '../site-builder/site-builder';
+import { decodeRepoContentAssets } from '../publish/asset-ingest';
 import { validateToken } from '../auth/token-validator';
 import { signNrdocsToken } from '../auth/jwt-utils';
 import type { NrdocsTokenPayload } from '../auth/jwt-utils';
@@ -675,7 +676,8 @@ async function handleDeleteRepo(projectId: string, env: Env): Promise<Response> 
  * Phase 1: The GitHub Actions workflow sends repo content directly in the
  * request body. The Control Plane is the sole build authority.
  *
- * Expects JSON body: { repo_content: { project_yml, nav_yml, allowed_list_yml?, pages } }
+ * Expects JSON body: { repo_content: { project_yml, nav_yml, allowed_list_yml?, pages, assets? } }
+ * Optional `assets` is a map of path (relative to content/) to base64-encoded file bytes (see publish asset limits).
  *
  * Requirements: 3.1-3.10, 8.1-8.7, 13.1, 16.1-16.7, 19.3, 19.4
  */
@@ -767,11 +769,12 @@ async function handlePublishRepo(projectId: string, request: Request, env: Env):
     return jsonError('Missing or invalid field: repo_content', 400);
   }
 
-  const { project_yml, nav_yml, allowed_list_yml, pages } = repoContent as {
+  const { project_yml, nav_yml, allowed_list_yml, pages, assets: assetsField } = repoContent as {
     project_yml?: string;
     nav_yml?: string;
     allowed_list_yml?: string;
     pages?: Record<string, string>;
+    assets?: unknown;
   };
 
   if (!project_yml || typeof project_yml !== 'string') {
@@ -782,6 +785,11 @@ async function handlePublishRepo(projectId: string, request: Request, env: Env):
   }
   if (!pages || typeof pages !== 'object') {
     return jsonError('Missing or invalid field: repo_content.pages', 400);
+  }
+
+  const assetIngest = decodeRepoContentAssets(assetsField);
+  if (!assetIngest.ok) {
+    return jsonError(assetIngest.error, 400);
   }
 
   // Record publish_start event with audit context (Requirements 9.3, 9.4)
@@ -832,6 +840,10 @@ async function handlePublishRepo(projectId: string, request: Request, env: Env):
         artifact.content,
         artifact.contentType,
       );
+    }
+
+    for (const bin of assetIngest.items) {
+      await storage.put(`${publishPrefix}${bin.path}`, bin.content, bin.contentType);
     }
 
     // Success path:

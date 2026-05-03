@@ -192,8 +192,16 @@ nrdocs renders standard Markdown with these features:
 - Ordered and unordered lists
 - Tables
 - Blockquotes
-- Links and images
+- Links (including absolute `https://…` URLs)
 - Horizontal rules
+
+### Images and other static files under `content/`
+
+You can keep **images next to your Markdown** under `content/` (for example `content/guides/img/screen.png`) and reference them with normal Markdown **relative to the `.md` file**, e.g. `![](img/screen.png)` from `content/guides/page.md` so the browser resolves `…/guides/img/screen.png` on the published site.
+
+Supported binary types in this release: **`.png`**, **`.jpg`**, **`.jpeg`**, **`.gif`**, **`.webp`**, **`.ico`**. GitHub Actions and `nrdocs admin publish` include those files in `repo_content.assets` as Base64; the Control Plane uploads them next to the built HTML in R2. Limits: **200** files, **5 MiB** per file, **25 MiB** total (decoded sizes). **`.svg`** is not accepted via `assets` yet (use an external HTTPS URL in Markdown if you need SVG).
+
+**Remote images** (`![](https://example.com/path/to/image.png)`) still work unchanged and do not count toward `assets` limits.
 
 Headings at h2 and h3 level automatically get anchor IDs and appear in the "On this page" table of contents on the right side of the page.
 

@@ -15,6 +15,7 @@ import { readFileSync, readdirSync, writeFileSync, mkdirSync, statSync, existsSy
 import { join, relative, dirname } from 'node:path';
 import { parseProjectConfig, parseNavConfig } from '../src/site-builder/config-parser.js';
 import { buildSite } from '../src/site-builder/site-builder.js';
+import { PUBLISH_ASSET_EXTENSIONS, extensionFromPath } from '../src/media/mime.js';
 
 const inputDir = process.argv[2] || 'docs';
 const outputDir = process.argv[3] || 'dist-preview';
@@ -70,7 +71,27 @@ for (const file of mdFiles) {
   pages.set(rel, readFileSync(file, 'utf-8'));
 }
 
+function collectBinaryAssetFiles(dir: string): string[] {
+  const results: string[] = [];
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const full = join(dir, entry.name);
+    if (entry.isDirectory()) {
+      results.push(...collectBinaryAssetFiles(full));
+    } else if (entry.isFile() && !entry.name.endsWith('.md')) {
+      const rel = relative(contentDir, full).replace(/\\/g, '/');
+      const ext = extensionFromPath(rel);
+      if (PUBLISH_ASSET_EXTENSIONS.has(ext)) results.push(full);
+    }
+  }
+  return results;
+}
+
+const assetFiles = collectBinaryAssetFiles(contentDir);
+
 console.log(`Found ${pages.size} page(s): ${[...pages.keys()].join(', ')}`);
+if (assetFiles.length > 0) {
+  console.log(`Found ${assetFiles.length} binary asset(s) under content/`);
+}
 
 // ── Build ────────────────────────────────────────────────────────────
 
@@ -92,7 +113,14 @@ for (const artifact of artifacts) {
   writeFileSync(outPath, decoder.decode(artifact.content));
 }
 
-console.log(`\nWrote ${artifacts.length} file(s) to ${outputDir}/`);
+for (const file of assetFiles) {
+  const rel = relative(contentDir, file).replace(/\\/g, '/');
+  const outPath = join(outputDir, rel);
+  mkdirSync(dirname(outPath), { recursive: true });
+  writeFileSync(outPath, readFileSync(file));
+}
+
+console.log(`\nWrote ${artifacts.length + assetFiles.length} file(s) to ${outputDir}/`);
 console.log(`\nOpen in browser:`);
 for (const artifact of artifacts) {
   console.log(`  file://${join(process.cwd(), outputDir, artifact.path)}`);

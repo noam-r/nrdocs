@@ -392,4 +392,40 @@ describe('runAdmin', () => {
     expect(out).toContain('nrdocs admin mint-publish-token proj-arg --repo-identity github.com/org/repo');
     err.mockRestore();
   });
+
+  it('publish POST body includes repo_content.assets for png under content/', async () => {
+    process.env.NRDOCS_PUBLISH_TOKEN = 'jwt';
+    const tinyPng = Buffer.from(
+      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
+      'base64',
+    );
+    mkdirSync(join(TMP, 'docs', 'content'), { recursive: true });
+    writeFileSync(
+      join(TMP, 'docs', 'project.yml'),
+      'slug: nrdocs\ntitle: "nrdocs"\ndescription: "x"\npublish_enabled: true\naccess_mode: public\n',
+    );
+    writeFileSync(join(TMP, 'docs', 'nav.yml'), 'nav:\n  - label: Home\n    path: home\n');
+    writeFileSync(join(TMP, 'docs', 'content', 'home.md'), '---\ntitle: Home\norder: 1\n---\n\n# Home\n');
+    writeFileSync(join(TMP, 'docs', 'content', 'pic.png'), tinyPng);
+
+    fetchMock.mockResolvedValue(
+      new Response(JSON.stringify({ message: 'Publish successful', id: 'proj-1', slug: 'nrdocs' }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    );
+
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+    await runAdmin(['publish', 'proj-1']);
+    log.mockRestore();
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const call = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(call[0]).toBe('https://cp.example/repos/proj-1/publish');
+    const body = JSON.parse(call[1].body as string) as {
+      repo_content: { assets: Record<string, string>; pages: Record<string, string> };
+    };
+    expect(body.repo_content.pages.home).toContain('# Home');
+    expect(body.repo_content.assets['pic.png']).toBe(tinyPng.toString('base64'));
+  });
 });

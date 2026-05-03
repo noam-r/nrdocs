@@ -7,6 +7,8 @@ import { parseProjectConfig } from '../config-parser';
 import { confirm } from '../prompts';
 import { inferRepoIdentity } from './init';
 import { getRepoStatus } from '../api-client';
+import { decodeRepoContentAssets } from '../../../src/publish/asset-ingest.js';
+import { PUBLISH_ASSET_EXTENSIONS, extensionFromPath } from '../../../src/media/mime.js';
 
 function fail(message: string): never {
   throw new CliUsageError(message);
@@ -280,6 +282,24 @@ function walkMdFiles(contentDir: string): string[] {
       const st = statSync(p);
       if (st.isDirectory()) walk(p);
       else if (st.isFile() && name.endsWith('.md')) out.push(p);
+    }
+  }
+  walk(contentDir);
+  return out.sort();
+}
+
+function walkBinaryAssetFiles(contentDir: string): string[] {
+  const out: string[] = [];
+  function walk(d: string): void {
+    for (const name of readdirSync(d)) {
+      const p = join(d, name);
+      const st = statSync(p);
+      if (st.isDirectory()) walk(p);
+      else if (st.isFile() && !name.endsWith('.md')) {
+        const rel = relative(contentDir, p).replace(/\\/g, '/');
+        const ext = extensionFromPath(rel);
+        if (PUBLISH_ASSET_EXTENSIONS.has(ext)) out.push(p);
+      }
     }
   }
   walk(contentDir);
@@ -577,7 +597,18 @@ async function cmdApprove(args: string[] = []): Promise<void> {
 
   if (!mintPublish) {
     console.log('');
-    console.log('Approved. GitHub Actions OIDC can publish on the next workflow run or push (workflows do not poll for approval).');
+    console.log('Approved on the Control Plane.');
+    console.log('');
+    console.log('--- Tell the repository owner (approval does not publish by itself) ---');
+    console.log(
+      'Docs will not change until GitHub Actions runs again with OIDC. They should do one of:',
+    );
+    console.log('  • GitHub: Actions → publish workflow → Run workflow (pick their publish branch), or');
+    console.log(
+      '  • Locally on that branch: git commit --allow-empty -m "chore: trigger publish" && git push origin <publish-branch>',
+    );
+    console.log('    (<publish-branch> is the branch listed under on.push.branches in .github/workflows/publish-docs.yml.)');
+    console.log('');
     console.log(`Optional — link local status: nrdocs init --repo-id ${projectId}`);
     return;
   }
@@ -665,8 +696,26 @@ async function cmdPublish(args: string[] = []): Promise<void> {
     const key = rel.replace(/\.md$/i, '');
     pages[key] = readFileSync(abs, 'utf8');
   }
+
+  const assetFiles = walkBinaryAssetFiles(contentDir);
+  const assets: Record<string, string> = {};
+  for (const abs of assetFiles) {
+    const rel = relative(contentDir, abs).replace(/\\/g, '/');
+    assets[rel] = readFileSync(abs).toString('base64');
+  }
+  const assetCheck = decodeRepoContentAssets(assets);
+  if (!assetCheck.ok) {
+    fail(assetCheck.error);
+  }
+
   console.log(`Building payload from ${docsPath} ...`);
   console.log(`Found ${mdFiles.length} page(s)`);
+  if (assetFiles.length > 0) {
+    const approxDecoded = Math.floor(
+      Object.values(assets).reduce((s, b64) => s + (b64.length * 3) / 4, 0),
+    );
+    console.log(`Found ${assetFiles.length} binary asset(s) (~${approxDecoded} bytes decoded, approximate)`);
+  }
 
   const payload = {
     repo_content: {
@@ -674,6 +723,7 @@ async function cmdPublish(args: string[] = []): Promise<void> {
       nav_yml: navYml,
       allowed_list_yml: allowedListYml,
       pages,
+      assets,
     },
   };
 

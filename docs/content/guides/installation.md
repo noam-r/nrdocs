@@ -334,7 +334,7 @@ After **`wrangler deploy --env control-plane`**, confirm the Worker you hit incl
 2. **`nrdocs admin approve <repo-id>`** (optionally **`--repo-identity`** so mint has a binding). If **`GET …/status/<repo-id>`** still shows a blank identity for an **approved** site, run **`nrdocs admin mint-publish-token <repo-id> --repo-identity github.com/<owner>/<repo>`** — the control plane can persist that value when minting.
 3. **`curl -s "$NRDOCS_API_URL/status/<repo-id>"`** — response JSON should include **`repo_identity`** matching the GitHub repo.
 4. Hand authors the **control plane URL** + **repo id**; they run **`nrdocs config set api-url`** and **`nrdocs init --repo-id`**, commit, push the publish branch.
-5. Open the repo’s **GitHub Actions** run for that push and confirm publish succeeded.
+5. Open the repo’s **GitHub Actions** run for that push and confirm publish succeeded. If the first run registered the repo but exited before publish (awaiting approval), you do **not** need new doc edits: use **Actions → Run workflow** on the publish branch, or **`git commit --allow-empty`** and push (see [Publishing](../publishing/index.html)).
 
 Manual **`nrdocs admin publish`** is optional (uses **`NRDOCS_PUBLISH_TOKEN`** from mint); CI does **not** need that secret when OIDC is configured.
 

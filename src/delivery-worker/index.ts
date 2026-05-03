@@ -16,6 +16,7 @@ import { PasswordHasher } from '../auth/password-hasher';
 import { SessionTokenManager } from '../auth/session-token-manager';
 import { RateLimiter } from '../auth/rate-limiter';
 import { readCookieValue } from './cookie-header';
+import { contentTypeForStaticExtension } from '../media/mime.js';
 
 /** Default R2 object key for GET / on the delivery host (platform landing page, not a repo slug). */
 export const DEFAULT_HOME_PAGE_R2_KEY = 'site/index.html';
@@ -155,27 +156,6 @@ function escapeHtml(str: string): string {
     .replace(/'/g, '&#39;');
 }
 
-/**
- * Common MIME types by file extension for content serving.
- */
-const MIME_TYPES: Record<string, string> = {
-  '.html': 'text/html; charset=utf-8',
-  '.css': 'text/css; charset=utf-8',
-  '.js': 'application/javascript; charset=utf-8',
-  '.json': 'application/json; charset=utf-8',
-  '.png': 'image/png',
-  '.jpg': 'image/jpeg',
-  '.jpeg': 'image/jpeg',
-  '.gif': 'image/gif',
-  '.svg': 'image/svg+xml',
-  '.ico': 'image/x-icon',
-  '.woff': 'font/woff',
-  '.woff2': 'font/woff2',
-  '.ttf': 'font/ttf',
-  '.xml': 'application/xml',
-  '.txt': 'text/plain; charset=utf-8',
-};
-
 function pathSegments(url: URL): string[] {
   return url.pathname.split('/').filter(Boolean);
 }
@@ -220,7 +200,9 @@ function resolveContentType(r2ContentType: string, filePath: string): string {
     return r2ContentType;
   }
   const ext = getFileExtension(filePath);
-  return MIME_TYPES[ext] ?? r2ContentType ?? 'application/octet-stream';
+  return contentTypeForStaticExtension(ext) !== 'application/octet-stream'
+    ? contentTypeForStaticExtension(ext)
+    : (r2ContentType || 'application/octet-stream');
 }
 
 /**

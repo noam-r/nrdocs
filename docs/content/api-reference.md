@@ -96,7 +96,12 @@ Build and publish. Repo must be `approved`.
 
 **Authentication:** repo-publish JWT in `Authorization` (not the API key). Optional **`X-Repo-Identity`** when the token enforces repository binding.
 
-**Request body:** `repo_content` with `project_yml`, `nav_yml`, `allowed_list_yml`, `pages` map.
+**Request body:** `repo_content` with:
+
+- `project_yml`, `nav_yml` (strings)
+- `allowed_list_yml` (string or `null`)
+- `pages` — map of page id (path under `content/` without `.md`) to Markdown source string
+- **`assets`** (optional) — map of path under `content/` (with file extension) to **standard Base64** file bytes. Allowed extensions: `.png`, `.jpg`, `.jpeg`, `.gif`, `.webp`, `.ico`. Paths must be relative (no `..`, no leading `/`), not end in `.md`, and match the server’s character rules. Limits: 200 files, 5 MiB per file decoded, 25 MiB total decoded (rejects with **400** if exceeded).
 
 **Response:** includes `publish_id` and R2 **`prefix`**, typically `publishes/<site-slug>/<publish-id>/`.
 

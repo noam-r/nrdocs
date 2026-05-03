@@ -155,11 +155,25 @@ jobs:
             err=$(jq -r '.error // empty' exchange.json 2>/dev/null || true)
             case "$err" in
               *"not approved"*|*"Repo is not approved"*)
-                echo "::notice::Registered with the Control Plane. Publishing is skipped until an operator approves (this job exits without polling — no long Actions wait)."
+                echo "::warning::nrdocs: DOCUMENTATION WAS NOT PUBLISHED — Control Plane refused publish credentials (repo not operator-approved yet)."
+                echo "::warning::nrdocs: Operators: run nrdocs admin approve <repo-id> (see registration JSON / nrdocs admin list --all)."
+                echo "::warning::nrdocs: Repo owners: approval does not re-run this job. After approval, push the publish branch again or use Actions → Run workflow."
+                echo "nrdocs: This job exits successfully so Actions does not retry in a loop; reader URLs are unchanged until a later run publishes."
                 if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
                   {
-                    echo "## Awaiting operator approval"
-                    echo "After an operator approves this repo, **re-run this workflow** (Actions → run workflow) or **push** the publish branch again to publish to Cloudflare."
+                    echo "## Documentation was not published"
+                    echo ""
+                    echo "**Why:** POST /oidc/publish-credentials returned HTTP **409**. The Control Plane has not approved this GitHub repo yet, so no publish token was issued."
+                    echo ""
+                    echo "### Operators"
+                    echo "Run: nrdocs admin approve <repo-id> (repo id from registration output or nrdocs admin list --all)."
+                    echo ""
+                    echo "### Repository owners (after approval)"
+                    echo "Approval does not publish by itself. Start a **new** workflow run, for example:"
+                    echo "- GitHub: Actions → this workflow → Run workflow → branch **${GITHUB_REF_NAME}**"
+                    echo "- Or: git commit --allow-empty -m \"chore: trigger publish\" && git push origin ${GITHUB_REF_NAME}"
+                    echo ""
+                    echo "**Until then, reader URLs will not update.**"
                   } >> "$GITHUB_STEP_SUMMARY"
                 fi
                 exit 0
@@ -238,12 +252,28 @@ jobs:
             mv "$tmp_pages" "$pages_file"
           done < <(find "$DOCS_DIR/content" -name '*.md' -type f -print0 | sort -z)
 
+          # Binary assets under content/ (extensions must match Control Plane allowlist).
+          assets_file=$(mktemp)
+          echo '{}' > "$assets_file"
+          while IFS= read -r -d '' file; do
+            relative="${file#"$DOCS_DIR/content/"}"
+            rel_lc=$(printf '%s' "$relative" | tr '[:upper:]' '[:lower:]')
+            case "$rel_lc" in
+              *.png|*.jpg|*.jpeg|*.gif|*.webp|*.ico) ;;
+              *) continue ;;
+            esac
+            b64=$(base64 -w0 < "$file")
+            tmp_assets=$(mktemp)
+            jq --arg k "$relative" --arg v "$b64" '. + {($k): $v}' "$assets_file" > "$tmp_assets"
+            mv "$tmp_assets" "$assets_file"
+          done < <(find "$DOCS_DIR/content" -type f ! -name '*.md' -print0 | sort -z)
+
           # Assemble payload (rawfile reads file content directly; no huge argv).
           payload_file=$(mktemp)
           if [ -f "$DOCS_DIR/allowed-list.yml" ]; then
-            jq -n               --rawfile project_yml "$DOCS_DIR/project.yml"               --rawfile nav_yml "$DOCS_DIR/nav.yml"               --rawfile allowed_list_yml "$DOCS_DIR/allowed-list.yml"               --slurpfile pages "$pages_file"               '{repo_content: {project_yml: $project_yml, nav_yml: $nav_yml, allowed_list_yml: $allowed_list_yml, pages: $pages[0]}}' > "$payload_file"
+            jq -n               --rawfile project_yml "$DOCS_DIR/project.yml"               --rawfile nav_yml "$DOCS_DIR/nav.yml"               --rawfile allowed_list_yml "$DOCS_DIR/allowed-list.yml"               --slurpfile pages "$pages_file"               --slurpfile assets "$assets_file"               '{repo_content: {project_yml: $project_yml, nav_yml: $nav_yml, allowed_list_yml: $allowed_list_yml, pages: $pages[0], assets: $assets[0]}}' > "$payload_file"
           else
-            jq -n               --rawfile project_yml "$DOCS_DIR/project.yml"               --rawfile nav_yml "$DOCS_DIR/nav.yml"               --slurpfile pages "$pages_file"               '{repo_content: {project_yml: $project_yml, nav_yml: $nav_yml, allowed_list_yml: null, pages: $pages[0]}}' > "$payload_file"
+            jq -n               --rawfile project_yml "$DOCS_DIR/project.yml"               --rawfile nav_yml "$DOCS_DIR/nav.yml"               --slurpfile pages "$pages_file"               --slurpfile assets "$assets_file"               '{repo_content: {project_yml: $project_yml, nav_yml: $nav_yml, allowed_list_yml: null, pages: $pages[0], assets: $assets[0]}}' > "$payload_file"
           fi
 
           # Publish

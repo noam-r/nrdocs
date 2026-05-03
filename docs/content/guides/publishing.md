@@ -124,7 +124,21 @@ The CLI-generated `.github/workflows/publish-docs.yml` workflow uses **GitHub Ac
 
 No per-repo `NRDOCS_PUBLISH_TOKEN` secret or `NRDOCS_REPO_ID` variable is required.
 
-Just push to `main` and it publishes automatically.
+**What actually starts a run:** the workflow’s `on.push.branches` list (set by **`nrdocs init`**, often **`nrdocs`** or **`main`**). A **push** to that branch with new commits triggers Actions. It is **not** “any push anywhere” — the branch name in the YAML must match the branch you push.
+
+**Typical doc update:** edit Markdown under your docs tree → **`git add` / `git commit`** → **`git push origin <publish-branch>`**.
+
+**Nothing to commit but you still need CI** (common after an operator **approves** your repo, or after a run exited early with “not approved”):
+
+1. **Re-run without a new commit (recommended):** GitHub → **Actions** → select **“Publish Docs to nrdocs”** (or your workflow name) → **Run workflow** → choose branch → Run. The generated workflow includes **`workflow_dispatch`** for exactly this.
+2. **Or** create an empty commit and push (same effect as any push):
+
+   ```bash
+   git commit --allow-empty -m "chore: trigger docs publish"
+   git push origin <publish-branch>
+   ```
+
+So “I have nothing to commit” does **not** block publishing: use **Run workflow**, or an **empty commit** if you prefer a normal push event.
 
 #### Troubleshooting OIDC publish
 

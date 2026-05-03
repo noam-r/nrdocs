@@ -91,7 +91,11 @@ describe('generatePublishWorkflow', () => {
     expect(wf.indexOf('/repo-proof/challenges')).toBeLessThan(wf.indexOf('/oidc/register-project'));
     expect(wf).toContain('ACTIONS_ID_TOKEN_REQUEST_URL');
     expect(wf).toContain('export DOCS_DIR');
-    expect(wf).toContain('without polling');
+    expect(wf).toContain('DOCUMENTATION WAS NOT PUBLISHED');
+    expect(wf).toContain('does not retry in a loop');
+    expect(wf).toContain('assets_file');
+    expect(wf).toContain('--slurpfile assets');
+    expect(wf).toContain('assets: $assets[0]');
     expect(wf).not.toContain('NRDOCS_APPROVAL_MAX_WAIT_SECS');
     expect(wf).toContain('Reader URL');
     expect(wf).toContain('NRDOCS_DELIVERY_URL');
