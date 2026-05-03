@@ -231,7 +231,7 @@
       font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
       font-size: 14px;
       line-height: 1.75;
-      min-height: 330px;
+      min-height: 280px;
       overflow-x: auto;
       white-space: pre;
     }
@@ -324,6 +324,22 @@
       margin-bottom: 0;
     }
 
+    .card ul.card-bullets {
+      margin: 1rem 0 0;
+      padding-left: 1.15rem;
+      color: var(--muted);
+      font-size: 0.95em;
+      line-height: 1.5;
+    }
+
+    .card ul.card-bullets li {
+      margin: 0;
+    }
+
+    .card ul.card-bullets strong {
+      color: var(--text);
+    }
+
     .big-card {
       padding: 32px;
       border-radius: 26px;
@@ -397,6 +413,15 @@
 
     .list strong {
       color: var(--text);
+    }
+
+    .list a {
+      color: var(--accent-dark);
+      text-decoration: underline;
+    }
+
+    .list a:hover {
+      color: var(--accent);
     }
 
     .callout {
@@ -533,20 +558,14 @@
             <span class="dot"></span>
             <span class="dot"></span>
           </div>
-          <pre class="terminal"><code><span class="muted"># one-time per machine</span>
+          <pre class="terminal"><code><span class="muted"># one-time on your machine</span>
 nrdocs config set api-url 'https://&lt;control-plane&gt;.workers.dev'
 
-<span class="muted"># inside your project repo</span>
-<span class="muted"># if you already have MkDocs content:</span>
-nrdocs import mkdocs
+<span class="muted"># in your Git repo</span>
 nrdocs init
+git add . &amp;&amp; git commit -m "Add docs" &amp;&amp; git push
 
-<span class="muted"># write docs like a normal person</span>
-git add .
-git commit -m "Add project docs"
-git push
-
-<span class="muted"># CI auto-registers, waits for operator approval, then publishes</span>
+<span class="muted"># CI registers → operator approves → same run publishes</span>
 <span class="ok">✓ docs published</span>
 <span class="path">https://&lt;delivery-host&gt;/&lt;site-slug&gt;/</span></code></pre>
         </aside>
@@ -641,13 +660,13 @@ git push
           <li><strong>Internal tools.</strong> Give teams a lightweight private docs site without rolling out a full portal or running another server.</li>
           <li><strong>Same-repo documentation.</strong> Review documentation changes alongside code changes instead of syncing a second repo.</li>
           <li><strong>Release-aware docs.</strong> Update docs in the same branch or pull request as the feature, fix, or breaking change they describe.</li>
-          <li><strong>Existing MkDocs sites.</strong> Import an existing MkDocs project with <code>nrdocs import mkdocs</code> instead of rebuilding the docs structure by hand.</li>
+          <li><strong>Existing MkDocs sites.</strong> Optional import when you already have a MkDocs tree — same publish and delivery flow as starting from scratch (<a href="#what-it-is">details</a>).</li>
           <li><strong>Many small docs sites.</strong> Serve multiple projects under one shared hostname with one Cloudflare-backed platform.</li>
         </ul>
       </div>
     </section>
 
-    <section>
+    <section id="what-it-is">
       <div class="container">
         <div class="grid two">
           <article class="card big-card">
@@ -656,12 +675,15 @@ git push
             <p>
               nrdocs handles onboarding, publishing, routing, access policy, artifact storage, and serving. Your documentation can stay in the project repository, while only the generated site is published.
             </p>
+            <ul class="card-bullets">
+              <li><strong>Optional — from MkDocs:</strong> <code>nrdocs import mkdocs</code> copies structure locally, then <code>nrdocs init</code> adds the same workflow and config as a greenfield project. nrdocs is a full platform, not only a migration helper.</li>
+            </ul>
           </article>
           <article class="card big-card">
             <div class="section-kicker">What it is not</div>
             <h2>Not another docs religion.</h2>
             <p>
-              nrdocs is not trying to replace MkDocs, Docusaurus, Starlight, or your favorite static site generator. Those are good. If you already have a MkDocs site, <code>nrdocs import mkdocs</code> gives you a direct path in.
+              nrdocs is not trying to replace MkDocs, Docusaurus, Starlight, or your favorite static site generator. It is the publish, routing, and access layer on top of plain Markdown content in your repo.
             </p>
           </article>
         </div>

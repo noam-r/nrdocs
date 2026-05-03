@@ -6,7 +6,7 @@ set -euo pipefail
 #
 # Handles: wrangler login check, D1 creation, R2 creation,
 # wrangler.toml patching, migrations, secret generation,
-# Worker deployment, and .env configuration.
+# Worker deployment, delivery homepage → R2 (GET /), and .env configuration.
 #
 # Usage:
 #   ./scripts/deploy.sh              # interactive full deploy
@@ -34,6 +34,67 @@ confirm() {
     [Yy]*) return 0 ;;
     *) return 1 ;;
   esac
+}
+
+# Sync repo site/index.html → R2 for Delivery GET / (default key site/index.html).
+# Runs after delivery deploy so the Worker and bucket always align with this wrangler.toml.
+ensure_delivery_homepage_r2() {
+  if ! [ -f wrangler.toml ]; then
+    return 0
+  fi
+  if grep -qE '^[[:space:]]*HOME_PAGE_R2_KEY[[:space:]]*=[[:space:]]*""[[:space:]]*(#.*)?$' wrangler.toml 2>/dev/null; then
+    yellow "HOME_PAGE_R2_KEY is \"\" in wrangler.toml — GET / is disabled by design; skipping homepage R2 upload."
+    return 0
+  fi
+
+  local R2_BUCKET
+  R2_BUCKET=$(grep -A20 '^\[\[env\.delivery\.r2_buckets\]\]' wrangler.toml 2>/dev/null | grep -E '^[[:space:]]*bucket_name[[:space:]]*=' | head -1 | sed 's/^[^"]*"\([^"]*\)".*/\1/')
+  if [ -z "$R2_BUCKET" ]; then
+    yellow "Could not parse bucket_name under [[env.delivery.r2_buckets]] — skipping homepage upload."
+    return 0
+  fi
+
+  local HOME_KEY="site/index.html"
+  local custom_key
+  custom_key=$(awk '
+    /^\[env\.delivery.vars\]/ { v = 1; next }
+    /^\[/ { if (v) exit }
+    v && $0 ~ /^[[:space:]]*HOME_PAGE_R2_KEY[[:space:]]*=/ {
+      sub(/^[[:space:]]*HOME_PAGE_R2_KEY[[:space:]]*=[[:space:]]*/, "", $0)
+      gsub(/^[[:space:]]+|[[:space:]]+$/, "", $0)
+      if ($0 ~ /^".*"$/) { gsub(/^"|"$/, "", $0); print; exit }
+      exit
+    }
+  ' wrangler.toml 2>/dev/null || true)
+  if [ -n "$custom_key" ]; then
+    HOME_KEY="$custom_key"
+  fi
+
+  if [ ! -f site/index.html ]; then
+    yellow "site/index.html missing in repo — cannot ensure delivery GET /. Add the file and re-run deploy, or upload manually to R2 key: ${R2_BUCKET}/${HOME_KEY}"
+    return 0
+  fi
+
+  local object_path="${R2_BUCKET}/${HOME_KEY}"
+  echo ""
+  blue "Ensuring delivery homepage in R2 (${object_path})..."
+
+  local had_object=0
+  if wrangler r2 object get "$object_path" --remote --pipe >/dev/null 2>&1; then
+    had_object=1
+  fi
+
+  if wrangler r2 object put "$object_path" --file=./site/index.html --remote -y --content-type 'text/html; charset=utf-8' 2>&1; then
+    if [ "$had_object" -eq 1 ]; then
+      green "✓ Delivery homepage refreshed in R2 (${object_path})"
+    else
+      green "✓ Delivery homepage uploaded to R2 (${object_path}) — was missing"
+    fi
+  else
+    yellow "⚠ Could not upload delivery homepage. Check Wrangler auth and R2. Manual fix:"
+    yellow "    wrangler r2 object put ${object_path} --file=./site/index.html --remote -y --content-type 'text/html; charset=utf-8'"
+    return 0
+  fi
 }
 
 SKIP_LOGIN=0
@@ -211,7 +272,6 @@ if echo "$R2_OUTPUT" | grep -qi "created"; then
   green "✓ R2 bucket 'nrdocs-content' created"
 fi
 
-
 # ── Step 5: Run database migrations ──────────────────────────────────
 #
 # Wrangler prints "✘ [ERROR]" for any non-success SQL batch, including benign
@@ -321,6 +381,8 @@ DELIVERY_OUTPUT=$(wrangler deploy --env delivery 2>&1) || {
   exit 1
 }
 green "  ✓ Delivery Worker deployed"
+
+ensure_delivery_homepage_r2
 
 # Public URL readers use (must match Control Plane DELIVERY_URL for published links in API + CI)
 DELIVERY_URL=$(echo "$DELIVERY_OUTPUT" | grep -oE 'https://[a-zA-Z0-9.-]+\.workers\.dev' | head -1 || true)
@@ -443,6 +505,9 @@ echo "    nrdocs admin approve"
 echo "    nrdocs admin publish"
 echo ""
 echo "  To verify the deployment:"
-echo "    curl -s -o /dev/null -w '%{http_code}' ${CP_URL:-\$NRDOCS_API_URL}/projects"
+echo "    curl -s -o /dev/null -w '%{http_code}' ${CP_URL:-\$NRDOCS_API_URL}/repos"
 echo "    (expect 401 — that means auth is working)"
+if [ -n "${DELIVERY_URL:-}" ]; then
+  echo "    curl -sI \"${DELIVERY_URL}/\" | head -5   # delivery root: expect 200 + text/html if homepage R2 object exists"
+fi
 echo ""

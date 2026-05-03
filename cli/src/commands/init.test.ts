@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { execSync } from 'node:child_process';
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
@@ -27,12 +28,20 @@ const originalCwd = process.cwd();
 describe('runInit', () => {
   beforeEach(async () => {
     rmSync(TMP, { recursive: true, force: true });
-    mkdirSync(join(TMP, '.git'), { recursive: true });
+    mkdirSync(TMP, { recursive: true });
+    execSync('git init', { cwd: TMP, stdio: 'pipe' });
+    execSync('git config user.email "vitest@example.com"', { cwd: TMP, stdio: 'pipe' });
+    execSync('git config user.name "vitest"', { cwd: TMP, stdio: 'pipe' });
+    writeFileSync(join(TMP, 'README.md'), '# seed\n', 'utf8');
+    execSync('git add README.md', { cwd: TMP, stdio: 'pipe' });
+    execSync('git commit -m seed', { cwd: TMP, stdio: 'pipe' });
     mkdirSync(join(TMP, 'docs'), { recursive: true });
     mkdirSync(join(TMP, '.github', 'workflows'), { recursive: true });
     writeFileSync(join(TMP, 'docs', 'project.yml'), 'slug: existing\ntitle: Existing\n', 'utf8');
     writeFileSync(join(TMP, 'docs', 'nav.yml'), 'nav:\n  - label: Existing\n    path: existing\n', 'utf8');
     writeFileSync(join(TMP, '.github', 'workflows', 'publish-docs.yml'), 'name: Existing\n', 'utf8');
+    execSync('git add -A', { cwd: TMP, stdio: 'pipe' });
+    execSync('git commit -m docs-seed', { cwd: TMP, stdio: 'pipe' });
     process.chdir(TMP);
     process.exitCode = undefined;
 
@@ -133,8 +142,8 @@ describe('runInit', () => {
     ].join('\n');
 
     expect(process.exitCode).toBeUndefined();
-    expect(output).toContain('Docs URL:       https://docs.example.com/docs/');
-    expect(output).toContain('5. Open: https://docs.example.com/docs/');
+    expect(output).toContain('Reader URL:       https://docs.example.com/docs/');
+    expect(output).toContain('4. Open: https://docs.example.com/docs/');
 
     log.mockRestore();
     err.mockRestore();
@@ -181,7 +190,7 @@ describe('runInit', () => {
     rmSync(join(TMP, 'docs', 'project.yml'), { force: true });
     rmSync(join(TMP, 'docs', 'nav.yml'), { force: true });
     rmSync(join(TMP, '.github', 'workflows', 'publish-docs.yml'), { force: true });
-    writeFileSync(join(TMP, '.git', 'HEAD'), 'ref: refs/heads/nrdocs\n', 'utf8');
+    execSync('git checkout -b nrdocs', { cwd: TMP, stdio: 'pipe' });
 
     const prompts = await import('../prompts');
     vi.mocked(prompts.confirm).mockResolvedValue(true);
@@ -213,9 +222,36 @@ describe('runInit', () => {
 
     expect(process.exitCode).toBeUndefined();
     expect(output).toContain('Publish branch is the Git branch whose pushes trigger publishing');
-    expect(output).toContain('Publish branch: nrdocs');
+    expect(output).toMatch(/Publish branch:\s+nrdocs/);
     expect(metadata.publish_branch).toBe('nrdocs');
     expect(metadata).not.toHaveProperty('repo_id');
+    expect(execSync('git branch --show-current', { cwd: TMP, encoding: 'utf8' }).trim()).toBe('nrdocs');
+
+    log.mockRestore();
+    err.mockRestore();
+  });
+
+  it('creates and checks out the publish branch when it does not exist yet', async () => {
+    rmSync(join(TMP, 'docs', 'project.yml'), { force: true });
+    rmSync(join(TMP, 'docs', 'nav.yml'), { force: true });
+    rmSync(join(TMP, '.github', 'workflows', 'publish-docs.yml'), { force: true });
+
+    const prompts = await import('../prompts');
+    vi.mocked(prompts.confirm).mockResolvedValue(true);
+
+    const { runInit } = await import('./init');
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    await runInit([...initBaseArgs.slice(0, -2), '--publish-branch', 'nrdocs', ...linkProjectArgs]);
+
+    expect(process.exitCode).toBeUndefined();
+    expect(execSync('git branch --show-current', { cwd: TMP, encoding: 'utf8' }).trim()).toBe('nrdocs');
+    const output = [
+      ...log.mock.calls.map((c) => c.join(' ')),
+      ...err.mock.calls.map((c) => c.join(' ')),
+    ].join('\n');
+    expect(output).toContain("Created and checked out publish branch 'nrdocs'");
 
     log.mockRestore();
     err.mockRestore();

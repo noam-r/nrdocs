@@ -36,13 +36,12 @@ function parseFlag(args: string[], name: string): string | undefined {
  * Check if the current directory is inside a git repository.
  */
 function isGitRepo(): boolean {
-  if (existsSync('.git')) return true;
   try {
     const result = spawnSync('git', ['rev-parse', '--is-inside-work-tree'], {
       stdio: 'pipe',
       timeout: 5000,
     });
-    return result.status === 0;
+    return result.status === 0 && result.stdout?.toString().trim() === 'true';
   } catch {
     return false;
   }
@@ -91,6 +90,69 @@ function detectCurrentGitBranch(): string | undefined {
 
 export function inferPublishBranchDefault(flagPublishBranch?: string): string {
   return flagPublishBranch ?? detectCurrentGitBranch() ?? DEFAULT_PUBLISH_BRANCH;
+}
+
+function gitSpawn(args: string[]): { status: number | null; stderr: string; stdout: string } {
+  const r = spawnSync('git', args, {
+    encoding: 'utf-8',
+    stdio: ['pipe', 'pipe', 'pipe'],
+    timeout: 30000,
+  });
+  return {
+    status: r.status,
+    stderr: (r.stderr ?? '').trim(),
+    stdout: (r.stdout ?? '').trim(),
+  };
+}
+
+/**
+ * Switch to `publishBranch` for subsequent commits: use an existing local branch,
+ * create `origin/<branch>` as the start if that remote-tracking ref exists,
+ * otherwise create a new branch from HEAD (typical when choosing `nrdocs` while on `main`).
+ */
+function ensureLocalPublishBranch(publishBranch: string): boolean {
+  const current = gitSpawn(['branch', '--show-current']).stdout;
+  if (current === publishBranch) {
+    console.log(`✓ Publish branch: already on '${publishBranch}'.`);
+    return true;
+  }
+
+  const localOk = gitSpawn(['show-ref', '--verify', '--quiet', `refs/heads/${publishBranch}`]).status === 0;
+  if (localOk) {
+    const co = gitSpawn(['checkout', publishBranch]);
+    if (co.status !== 0) {
+      console.error(`Error: Could not check out local branch '${publishBranch}'.`);
+      if (co.stderr) console.error(co.stderr);
+      return false;
+    }
+    console.log(`✓ Switched to existing local branch '${publishBranch}'.`);
+    return true;
+  }
+
+  const remoteOk =
+    gitSpawn(['show-ref', '--verify', '--quiet', `refs/remotes/origin/${publishBranch}`]).status === 0;
+  if (remoteOk) {
+    const co = gitSpawn(['checkout', '-b', publishBranch, `origin/${publishBranch}`]);
+    if (co.status !== 0) {
+      console.error(`Error: Could not check out '${publishBranch}' from origin/${publishBranch}.`);
+      if (co.stderr) console.error(co.stderr);
+      return false;
+    }
+    console.log(`✓ Checked out '${publishBranch}' from origin/${publishBranch}.`);
+    return true;
+  }
+
+  const co = gitSpawn(['checkout', '-b', publishBranch]);
+  if (co.status !== 0) {
+    console.error(`Error: Could not create local branch '${publishBranch}' from the current commit.`);
+    if (co.stderr) console.error(co.stderr);
+    console.error(
+      'Resolve uncommitted changes or naming conflicts, create the branch manually (git checkout -b …), then rerun nrdocs init.',
+    );
+    return false;
+  }
+  console.log(`✓ Created and checked out publish branch '${publishBranch}' (from current HEAD).`);
+  return true;
 }
 
 async function readPasswordHidden(promptLabel: string): Promise<string> {
@@ -529,23 +591,26 @@ export async function runInit(args: string[]): Promise<void> {
 
   if (conflicts.length > 0) {
     console.log(
-      `\nThe following files already exist and differ from what would be generated:`,
+      `\nThese paths already exist and differ from what this init run would generate (common when re-running init on the nrdocs repo or after hand-editing templates):`,
     );
     for (const c of conflicts) {
       console.log(`  - ${c.path}`);
     }
     console.log('');
-    console.log('These files are considered generated scaffolding for nrdocs.');
-    console.log('You can either let nrdocs overwrite them with canonical versions, or cancel and align them manually.');
+    console.log(
+      'They are generated scaffolding (project metadata + GitHub Actions workflow). Overwrite so they match the slug, publish branch, and access mode you chose?',
+    );
 
     const proceed = overwriteScaffold
       ? true
       : isInteractive()
-        ? await confirm('Overwrite these files with canonical nrdocs scaffolding?', false)
+        ? await confirm('Overwrite the files listed above?', false)
         : false;
 
     if (!proceed) {
       scaffoldingAborted = true;
+    } else if (!overwriteScaffold && conflicts.length > 0) {
+      console.log('(Proceeding — canonical scaffolding will replace the differing files.)\n');
     }
   }
 
@@ -569,34 +634,58 @@ export async function runInit(args: string[]): Promise<void> {
   } else {
     // Write all files
     try {
+      if (!ensureLocalPublishBranch(publishBranch)) {
+        process.exitCode = 1;
+        return;
+      }
+
       // Ensure docs dir exists
       mkdirSync(docsDir, { recursive: true });
 
+      const scaffoldLines: string[] = [];
+
       // Write project.yml (skip if identical)
-      if (checkExistingFile(projectYmlPath, projectYmlContent) !== 'identical') {
+      const prevProject = checkExistingFile(projectYmlPath, projectYmlContent);
+      if (prevProject !== 'identical') {
         writeFileSync(projectYmlPath, projectYmlContent, 'utf-8');
+        scaffoldLines.push(`  ${projectYmlPath}  (${prevProject === 'missing' ? 'created' : 'updated'})`);
+      } else {
+        scaffoldLines.push(`  ${projectYmlPath}  (unchanged — already matched)`);
       }
 
       // Write nav.yml only if missing (never overwrite user content).
-      if (checkExistingFile(navYmlPath, navYmlContent) === 'missing') {
+      const prevNav = checkExistingFile(navYmlPath, navYmlContent);
+      if (prevNav === 'missing') {
         writeFileSync(navYmlPath, navYmlContent, 'utf-8');
+        scaffoldLines.push(`  ${navYmlPath}  (created)`);
+      } else {
+        scaffoldLines.push(`  ${navYmlPath}  (unchanged — existing file kept)`);
       }
 
       // Write content/home.md (skip if identical)
       const contentDir = join(docsDir, 'content');
       mkdirSync(contentDir, { recursive: true });
       // Write home.md only if missing (never overwrite user content).
-      if (checkExistingFile(homeMdPath, homeMdContent) === 'missing') {
+      const prevHome = checkExistingFile(homeMdPath, homeMdContent);
+      if (prevHome === 'missing') {
         writeFileSync(homeMdPath, homeMdContent, 'utf-8');
+        scaffoldLines.push(`  ${homeMdPath}  (created)`);
+      } else {
+        scaffoldLines.push(`  ${homeMdPath}  (unchanged — existing file kept)`);
       }
 
       // Write workflow (skip if identical)
       const workflowDir = join('.github', 'workflows');
       mkdirSync(workflowDir, { recursive: true });
-      if (checkExistingFile(workflowPath, workflowContent) !== 'identical') {
+      const prevWorkflow = checkExistingFile(workflowPath, workflowContent);
+      if (prevWorkflow !== 'identical') {
         writeFileSync(workflowPath, workflowContent, 'utf-8');
+        scaffoldLines.push(`  ${workflowPath}  (${prevWorkflow === 'missing' ? 'created' : 'updated'})`);
+      } else {
+        scaffoldLines.push(`  ${workflowPath}  (unchanged — already matched)`);
       }
 
+      const statusExisted = existsSync(STATUS_METADATA_PATH);
       writeStatusMetadata({
         ...(repoIdFromEnv ? { repo_id: repoId } : {}),
         api_url: apiBaseUrl,
@@ -606,13 +695,14 @@ export async function runInit(args: string[]): Promise<void> {
         publish_branch: publishBranch,
         repo_identity: repoIdentity,
       });
+      scaffoldLines.push(
+        `  ${STATUS_METADATA_PATH}  (${statusExisted ? 'updated' : 'created'})`,
+      );
 
-      console.log('\nScaffolded files:');
-      console.log(`  ${projectYmlPath}`);
-      console.log(`  ${navYmlPath}`);
-      console.log(`  ${homeMdPath}`);
-      console.log(`  ${workflowPath}`);
-      console.log(`  ${STATUS_METADATA_PATH}`);
+      console.log('\nRepository files:');
+      for (const line of scaffoldLines) {
+        console.log(line);
+      }
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       console.error(`Error: Could not write files: ${message}`);
@@ -670,31 +760,28 @@ export async function runInit(args: string[]): Promise<void> {
   // ══════════════════════════════════════════════════════════════════
 
   console.log('\n✓ Documentation repo scaffolded successfully!\n');
-  console.log(`  Site slug:      ${slug}`);
-  console.log(`  Repo identity:  ${repoIdentity}`);
-  console.log(`  Docs directory: ${docsDir}`);
-  console.log(`  Publish branch: ${publishBranch}`);
+  console.log(`  Site slug:        ${slug}`);
+  console.log(`  Repo identity:    ${repoIdentity}`);
+  console.log(`  Docs directory:   ${docsDir}`);
+  console.log(`  Publish branch:   ${publishBranch}`);
   const docsUrl = publishedDocsUrl(deliveryBaseUrl, slug);
   if (docsUrl) {
-    console.log(`  Docs URL:       ${docsUrl}`);
+    console.log(`  Reader URL:       ${docsUrl}`);
   } else {
-    console.log('  Docs URL:       <not known until publish or delivery URL is configured>');
-    console.log(`                  Pattern: https://<delivery-host>/${slug}/ — check the GitHub Actions summary after publish, or run nrdocs status after linking (--repo-id).`);
+    console.log(
+      `  Reader URL:       after publish → https://<delivery-host>/${slug}/ (set Control Plane DELIVERY_URL, or check the GitHub Actions summary / run nrdocs status with --repo-id).`,
+    );
   }
 
   console.log('\nNext steps:');
-  console.log('  1. Review the generated files');
-  console.log('  2. Commit the changes: git add -A && git commit -m "Initialize nrdocs"');
+  console.log('  1. Review the files listed above, then commit: git add -A && git commit -m "Initialize nrdocs"');
   console.log(
-    `  3. Push to ${publishBranch}: git push origin ${publishBranch} — CI registers and waits for approval, then publishes.`,
+    `  2. Push the publish branch: git push -u origin ${publishBranch} — CI registers (OIDC), waits for operator approval, then publishes in the same run.`,
   );
-  console.log(
-    '  4. Find the reader URL in the workflow summary / logs (Reader URL) once DELIVERY_URL is set on the Control Plane.',
-  );
-  console.log('     Optional: nrdocs init --repo-id <uuid> then nrdocs status for the same URL from the API.');
+  console.log('  3. Find the reader URL in the workflow summary once DELIVERY_URL is configured on the Control Plane.');
   if (docsUrl) {
-    console.log(`  5. Open: ${docsUrl}`);
+    console.log(`  4. Open: ${docsUrl}`);
   } else if (accessMode === 'password') {
-    console.log('  5. After publish: run nrdocs password set (or ask your operator to set-password).');
+    console.log('  4. After publish: run nrdocs password set (or ask your operator for nrdocs admin set-password).');
   }
 }

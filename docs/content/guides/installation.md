@@ -71,7 +71,7 @@ wrangler login
 ./scripts/deploy.sh
 ```
 
-This handles everything: account ID detection, D1 database creation, R2 bucket creation, wrangler.toml patching, database migrations, secret generation, Worker deployment, and `.env` configuration. No manual copy-paste needed.
+This handles everything: account ID detection, D1 database creation, R2 bucket creation, wrangler.toml patching, database migrations, secret generation, Worker deployment, `.env` configuration, and **after the Delivery Worker deploy**, **upload or refresh `site/index.html` in R2** at the configured key (default `site/index.html`) so **`GET /`** on the delivery host returns HTML when that file exists in the repo. No manual copy-paste needed.
 
 If you prefer to understand each step or need to customize the process, the manual steps are documented below.
 
@@ -145,6 +145,26 @@ wrangler r2 bucket create nrdocs-content
 ```
 
 No config changes needed — the bucket name `nrdocs-content` is already in the config.
+
+### Delivery root homepage (`GET /`)
+
+The Delivery Worker serves the platform landing page for **`GET /`** (and **`HEAD /`**) from **one object** in the **same R2 bucket** bound to the delivery Worker (`[[env.delivery.r2_buckets]]` in `wrangler.toml`, binding `BUCKET`). By default it looks for the key **`site/index.html`**.
+
+**Finding your bucket name**
+
+1. **Config (authoritative):** open `wrangler.toml` and read **`bucket_name`** under **`[[env.delivery.r2_buckets]]`** (the template uses **`nrdocs-content`** unless you renamed it).
+2. **CLI:** `wrangler r2 bucket list`
+3. **Dashboard:** **R2** → bucket list.
+
+After the bucket exists, upload the tracked homepage from the repo root (object path is **`{bucket}/{key}`**):
+
+```bash
+wrangler r2 object put nrdocs-content/site/index.html --file=./site/index.html --remote
+```
+
+Replace **`nrdocs-content`** with your **`bucket_name`** if it differs. Re-run this whenever you change `site/index.html`. Optional: override or disable the key with **`HOME_PAGE_R2_KEY`** on the delivery Worker — see [Configuration](configuration/index.html).
+
+If this object is missing, **`https://<your-delivery-host>/`** returns **404** even though project docs under **`/<slug>/`** work.
 
 ## Step 6: Update the domain route (optional — can do later)
 
@@ -291,6 +311,14 @@ curl -s -o /dev/null -w "%{http_code}" $NRDOCS_API_URL/repos
 ```
 
 If you get `401`, it's working — the Control Plane is rejecting unauthenticated requests, which is correct.
+
+If you uploaded the delivery homepage (see **Delivery root homepage** under Step 5), check that the delivery origin returns HTML on `/`:
+
+```bash
+curl -sI "https://YOUR_DELIVERY_HOST/" | head -5
+```
+
+You should see **`HTTP/2 200`** (or **`HTTP/1.1 200`**) and a **`content-type`** that includes **`text/html`**. A **`404`** means the object is missing at the configured R2 key or **`HOME_PAGE_R2_KEY`** is set to **`""`**.
 
 Run the test suite to make sure the codebase is healthy:
 

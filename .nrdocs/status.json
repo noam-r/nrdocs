@@ -1,0 +1,8 @@
+{
+  "api_url": "https://nrdocs-control-plane.nrdocs.workers.dev",
+  "delivery_url": null,
+  "slug": "nrdocs",
+  "docs_dir": "docs",
+  "publish_branch": "nrdocs",
+  "repo_identity": "github.com/noam-r/nrdocs"
+}

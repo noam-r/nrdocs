@@ -137,9 +137,9 @@ Flags:
   --repo-identity <value>      Repository identity in format github.com/owner/repo (for non-interactive use)
   --docs-dir <value>           Documentation directory (default: docs)
   --access-mode <value>        Reader access mode: public or password (default: password)
-  --publish-branch <value>     Git branch that triggers publishing (default: current branch, fallback: main)
+  --publish-branch <value>     Git branch that triggers publishing (default: current branch, fallback: main). If that branch does not exist locally, init creates it from HEAD and checks it out before writing files (or checks out origin/<branch> when that remote ref exists).
   --description <value>        Description
-  --overwrite-scaffold         Overwrite existing generated files (project.yml, nav.yml, publish-docs.yml) when they differ
+  --overwrite-scaffold         Overwrite existing generated files (project.yml, publish workflow) when they differ from generated scaffolding
   --help, -h                   Show this help message`;
 
   console.log(help);
