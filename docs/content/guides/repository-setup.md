@@ -33,19 +33,19 @@ your-repo/
 
 ## Step by step
 
-### Quickest path: Bootstrap token onboarding
+### Quickest path: Operator-approved init
 
-If you have a bootstrap token from your org admin, the `nrdocs` CLI handles everything:
+If your platform operator has already registered and approved the project, the `nrdocs` CLI can scaffold all required files and generate the secretless OIDC workflow:
 
 ```bash
-nrdocs init --token <bootstrap-token>
+nrdocs init --api-url '<control-plane-url>' --repo-id '<repo-id>'
 ```
 
-This generates all required files, creates the project, and generates a secretless publish workflow using GitHub Actions OIDC. Skip to "Push and verify" below.
+This generates all required files and writes a secretless publish workflow using GitHub Actions OIDC. Skip to "Push and verify" below.
 
 ### Manual setup
 
-If you're setting up manually (without a bootstrap token), follow these steps:
+If you're setting up manually (without `nrdocs init`), follow these steps:
 
 ### 1. Create project.yml
 
@@ -136,7 +136,7 @@ Now every push to `main` will automatically publish your docs.
 If a platform admin hasn't registered your project yet, they need to run:
 
 ```bash
-curl -X POST "$API_URL/projects" \
+curl -X POST "$API_URL/repos" \
   -H "Authorization: Bearer $API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
@@ -151,7 +151,7 @@ curl -X POST "$API_URL/projects" \
 Then approve it:
 
 ```bash
-curl -X POST "$API_URL/projects/$PROJECT_ID/approve" \
+curl -X POST "$API_URL/repos/$REPO_ID/approve" \
   -H "Authorization: Bearer $API_KEY"
 ```
 

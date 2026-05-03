@@ -35,17 +35,17 @@ jobs:
             exit 1
           fi
 
-          # Exchange OIDC for short-lived publish credentials (project_id + repo_publish_token)
+          # Exchange OIDC for short-lived publish credentials (repo_id + repo_publish_token)
           exchange_code=$(curl -s -o exchange.json -w '%{http_code}' -X POST -H "Authorization: Bearer $oidc_token" "${API_BASE}/oidc/publish-credentials")
           if [ "$exchange_code" -lt 200 ] || [ "$exchange_code" -ge 300 ]; then
             echo "::error::OIDC exchange failed with HTTP $exchange_code"
             cat exchange.json || true
             exit 1
           fi
-          NRDOCS_PROJECT_ID=$(jq -r '.project_id' < exchange.json)
+          NRDOCS_REPO_ID=$(jq -r '.repo_id' < exchange.json)
           NRDOCS_PUBLISH_TOKEN=$(jq -r '.repo_publish_token' < exchange.json)
-          if [ -z "$NRDOCS_PROJECT_ID" ] || [ "$NRDOCS_PROJECT_ID" = "null" ]; then
-            echo "::error::OIDC exchange did not return project_id"
+          if [ -z "$NRDOCS_REPO_ID" ] || [ "$NRDOCS_REPO_ID" = "null" ]; then
+            echo "::error::OIDC exchange did not return repo_id"
             cat exchange.json
             exit 1
           fi
@@ -104,7 +104,7 @@ jobs:
             }')
 
           # --- POST to Control Plane publish endpoint ---
-          echo "Publishing from $DOCS_DIR to ${API_BASE}/projects/${NRDOCS_PROJECT_ID}/publish ..."
+          echo "Publishing from $DOCS_DIR to ${API_BASE}/repos/${NRDOCS_REPO_ID}/publish ..."
 
           http_code=$(curl -s -o response.json -w '%{http_code}' \
             -X POST \
@@ -112,7 +112,7 @@ jobs:
             -H "Authorization: Bearer ${NRDOCS_PUBLISH_TOKEN}" \
             -H "X-Repo-Identity: github.com/${{ github.repository }}" \
             -d "$payload" \
-            "${API_BASE}/projects/${NRDOCS_PROJECT_ID}/publish")
+            "${API_BASE}/repos/${NRDOCS_REPO_ID}/publish")
 
           echo "Response status: ${http_code}"
           cat response.json

@@ -2,6 +2,18 @@
 
 This guide covers how to register a project, approve it, and publish documentation content.
 
+## Happy path (OIDC, recommended)
+
+End-to-end default flow:
+
+1. **Operator** registers a site with **`repo_identity`** set to `github.com/<owner>/<repo>` (same string GitHub Actions will send). Use **`nrdocs admin register`** from the docs repo or include `repo_identity` in **`POST /repos`** — `repo_url` alone is **not** enough for OIDC.
+2. **Operator** approves the registration (`POST /repos/:id/approve` or **`nrdocs admin approve <repo-id>`**). If the row still has no `repo_identity` (for example legacy data), run **`nrdocs admin mint-publish-token <repo-id> --repo-identity github.com/<owner>/<repo>`** — the control plane can persist **`repo_identity`** when minting if it was missing.
+3. **Operator** gives authors the **control plane base URL** and **repo id** (UUID; not the admin API key).
+4. **Author** runs **`nrdocs config set api-url '<url>'`** then **`nrdocs init --repo-id '<uuid>'`**, commits generated files, and **pushes** the configured publish branch.
+5. **GitHub Actions** runs the generated workflow: OIDC audience = control plane URL → **`POST /oidc/publish-credentials`** → **`POST /repos/:id/publish`**. No per-repo **`NRDOCS_PUBLISH_TOKEN`** secret is required.
+
+See [OIDC publishing](oidc-publishing/index.html) and [Administrator](administrator/index.html) for roles and edge cases.
+
 ## Before you start
 
 All Control Plane API requests require an API key in the `Authorization: Bearer <key>` header. This is not a Cloudflare-provided key — it's a secret you generated yourself during installation (see the [Installation guide](../installation/index.html), "Set secrets" section). It's the value you passed to `wrangler secret put API_KEY`.
@@ -19,13 +31,13 @@ wrangler secret put API_KEY --env control-plane
 
 Save this key somewhere safe — you'll need it for every admin API call.
 
-## Register a project
+## Register a repo (docs site)
 
 ```bash
 export API_URL="https://nrdocs-control-plane.YOUR_SUBDOMAIN.workers.dev"
 export API_KEY="the-key-you-generated-above"
 
-curl -X POST "$API_URL/projects" \
+curl -X POST "$API_URL/repos" \
   -H "Authorization: Bearer $API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
@@ -33,11 +45,12 @@ curl -X POST "$API_URL/projects" \
     "repo_url": "https://github.com/org/my-project",
     "title": "My Project Docs",
     "description": "Internal documentation",
-    "access_mode": "public"
+    "access_mode": "password",
+    "repo_identity": "github.com/org/my-project"
   }'
 ```
 
-The response includes the project `id` (a UUID). Save it — you need it for all subsequent API calls.
+The response includes the repo **`id`** (**`repo_id`**, a UUID). Save it — you need it for all subsequent API calls.
 
 ```json
 {
@@ -53,18 +66,19 @@ The response includes the project `id` (a UUID). Save it — you need it for all
 
 | Field | Required | Description |
 |---|---|---|
-| `slug` | yes | URL path segment (within the org). Immutable. Must be **unique per organization** (not globally). Reader URLs: `/<project>/…` for the default org, `/<org-slug>/<project>/…` for named orgs. |
+| `slug` | yes | URL path segment for the published site. Immutable. Must be **unique** in this deployment. Reader URLs: **`/<slug>/…`**. |
 | `repo_url` | yes | Canonical repository URL. Informational — not used for fetching. |
 | `title` | yes | Display title shown in the sidebar header. |
 | `description` | no | Project description. |
 | `access_mode` | yes | `public` or `password`. Can be changed later (repo-proof password flow or operator API). For sensitive docs, start with `password` mode. |
+| `repo_identity` | **required for OIDC** | Canonical `github.com/<owner>/<repo>` (lowercase host). Stored on the **repo** row; GitHub Actions OIDC looks up the site by this field. Omit only if you will never use OIDC (not recommended). |
 
-## Approve the project
+## Approve the registration
 
-New projects start in `awaiting_approval` status. They won't serve content or accept publishes until approved.
+New rows start in `awaiting_approval` status. They won't serve content or accept publishes until approved.
 
 ```bash
-curl -X POST "$API_URL/projects/$PROJECT_ID/approve" \
+curl -X POST "$API_URL/repos/$REPO_ID/approve" \
   -H "Authorization: Bearer $API_KEY"
 ```
 
@@ -93,54 +107,41 @@ jq -n \
   --arg nav_yml "$NAV_YML" \
   --argjson pages "$PAGES" \
   '{repo_content: {project_yml: $project_yml, nav_yml: $nav_yml, pages: $pages}}' \
-| curl -X POST "$API_URL/projects/$PROJECT_ID/publish" \
-  -H "Authorization: Bearer $API_KEY" \
+| curl -X POST "$API_URL/repos/$REPO_ID/publish" \
+  -H "Authorization: Bearer $REPO_PUBLISH_TOKEN" \
+  -H "X-Repo-Identity: github.com/org/my-project" \
   -H "Content-Type: application/json" \
   -d @-
 ```
 
 ### Automated publish (GitHub Actions)
 
-There are two ways to set up automated publishing, depending on how the project was onboarded:
-
-**If onboarded via `nrdocs init --token` (bootstrap token):**
-
-The CLI already generated `.github/workflows/publish-docs.yml`. The workflow uses **GitHub Actions OIDC** (secretless) to authenticate:
+The CLI-generated `.github/workflows/publish-docs.yml` workflow uses **GitHub Actions OIDC** (secretless) to authenticate:
 
 - Requests an OIDC token from GitHub with audience set to your Control Plane URL
-- Exchanges it at `POST /oidc/publish-credentials` for a short-lived repo publish token + project id
+- Exchanges it at `POST /oidc/publish-credentials` for a short-lived repo publish token + **`repo_id`**
 - Calls the standard publish endpoint using those short-lived credentials
 
-No per-repo `NRDOCS_PUBLISH_TOKEN` secret or `NRDOCS_PROJECT_ID` variable is required.
+No per-repo `NRDOCS_PUBLISH_TOKEN` secret or `NRDOCS_REPO_ID` variable is required.
 
 Just push to `main` and it publishes automatically.
-
-**If onboarded via admin API:**
-
-Copy `templates/publish-docs.yml` from the nrdocs repository into your project repository at `.github/workflows/publish-docs.yml` and set these repository secrets:
-
-| Secret | Value |
-|---|---|
-| `NRDOCS_API_URL` | Your Control Plane Worker URL |
-| `NRDOCS_API_KEY` | The API key you configured |
-
-Every push to `main` will automatically publish.
 
 #### Troubleshooting OIDC publish
 
 If publishing fails during the OIDC exchange step:
 
 - Ensure the Control Plane is deployed with `POST /oidc/publish-credentials`
-- Ensure the project is approved (`nrdocs admin approve <project-id>`)
-- Ensure the project was onboarded with the correct repo identity (`github.com/<owner>/<repo>`)
+- Ensure the repo row is **approved**
+- Ensure **`repo_identity`** matches the GitHub repo (`github.com/<owner>/<repo>`). Check **`nrdocs admin list`** — the **IDENTITY** column must not be blank. If it is, run **`nrdocs admin mint-publish-token <repo-id> --repo-identity github.com/<owner>/<repo>`** (or re-register with `repo_identity` in the create payload).
+- Ensure the **workflow’s `NRDOCS_API_URL`** (set when the author ran **`nrdocs init`**) is the same control plane where the registration exists.
 
 ## What happens during a publish
 
-1. The Control Plane validates the project is `approved`
+1. The Control Plane validates the repo is `approved`
 2. It parses `project.yml`, `nav.yml`, and optionally `allowed-list.yml`
 3. It validates the slug in `project.yml` matches the registered slug
 4. It renders all Markdown pages to HTML with navigation and TOC
-5. It uploads the artifacts to R2 under a versioned prefix (`publishes/<org-slug>/<project-slug>/<publish-id>/`)
+5. It uploads the artifacts to R2 under a versioned prefix (`publishes/<site-slug>/<publish-id>/`)
 6. It atomically updates the active publish pointer in D1
 7. It cleans up the previous publish artifacts from R2
 
@@ -153,31 +154,23 @@ After a successful `nrdocs init`, the CLI prints the final reader URL. After the
 The URL shape is:
 
 ```text
-https://<delivery-host>/<project-slug>/
+https://<delivery-host>/<site-slug>/
 ```
 
-for the default organization, or:
+If `nrdocs init` prints `<delivery URL unavailable>`, the Control Plane is missing `DELIVERY_URL`. The site can still publish, but users need the Delivery Worker hostname from the platform operator.
 
-```text
-https://<delivery-host>/<org-slug>/<project-slug>/
-```
-
-for named organizations.
-
-If `nrdocs init` prints `<delivery URL unavailable>`, the Control Plane is missing `DELIVERY_URL`. The project can still publish, but users need the Delivery Worker hostname from the platform operator.
-
-## Disable or delete a project
+## Disable or delete a registration
 
 ```bash
 # Disable — returns 404 to users, preserves all data
-curl -X POST "$API_URL/projects/$PROJECT_ID/disable" \
+curl -X POST "$API_URL/repos/$REPO_ID/disable" \
   -H "Authorization: Bearer $API_KEY"
 
 # Delete — removes D1 records, R2 artifacts, everything
-curl -X DELETE "$API_URL/projects/$PROJECT_ID" \
+curl -X DELETE "$API_URL/repos/$REPO_ID" \
   -H "Authorization: Bearer $API_KEY"
 ```
 
-Deletion proceeds in order: mark disabled (immediate 404), delete R2 artifacts, remove access config, delete D1 records. If R2 cleanup fails, the project is still inaccessible and the failure is logged for manual cleanup.
+Deletion proceeds in order: mark disabled (immediate 404), delete R2 artifacts, remove access config, delete D1 records. If R2 cleanup fails, the site is still inaccessible and the failure is logged for manual cleanup.
 
-For **which GitHub repos may publish**, revoking CI tokens, bootstrap quota, and D1 maintenance, see the [Administrator guide](administrator/index.html).
+For **which GitHub repos may publish**, revoking CI tokens, and D1 maintenance, see the [Administrator guide](administrator/index.html).

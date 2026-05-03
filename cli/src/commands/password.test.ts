@@ -39,7 +39,7 @@ describe('runPassword', () => {
         repo_identity: 'github.com/acme/docs',
         publish_branch: 'nrdocs',
         api_url: 'https://control.example.com',
-        project_id: 'proj-1',
+        repo_id: 'proj-1',
       }),
       'utf-8',
     );
@@ -49,6 +49,48 @@ describe('runPassword', () => {
   it('rejects unknown option', async () => {
     await runPassword(['set', '--bad-flag']);
     expect(process.exitCode).toBe(1);
+  });
+
+  it('accepts repo id from NRDOCS_REPO_ID when omitted from status.json', async () => {
+    process.chdir(mkdtempSync(join(tmpdir(), 'nrdocs-password-')));
+    mkdirSync('.nrdocs', { recursive: true });
+    writeFileSync(
+      join('.nrdocs', 'status.json'),
+      JSON.stringify({
+        repo_identity: 'github.com/acme/docs',
+        publish_branch: 'nrdocs',
+        api_url: 'https://control.example.com',
+      }),
+      'utf-8',
+    );
+    process.env.NRDOCS_REPO_ID = 'from-env-id';
+    process.env.NRDOCS_NEW_PASSWORD = 'pw';
+
+    globalThis.fetch = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 201,
+        text: async () => JSON.stringify({
+          challenge_id: 'ch-env',
+          public_token: 'pub',
+          private_token: 'priv',
+          verify_file_path: '.nrdocs/challenges/ch-env.json',
+        }),
+      } as Response)
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        text: async () => JSON.stringify({ ok: true }),
+      } as Response);
+
+    await runPassword(['set', '--no-auto-push']);
+
+    expect(globalThis.fetch).toHaveBeenCalled();
+    const body = JSON.parse((globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0][1].body as string);
+    expect(body.repo_id).toBe('from-env-id');
+    delete process.env.NRDOCS_REPO_ID;
+    delete process.env.NRDOCS_NEW_PASSWORD;
   });
 
   it('default auto-push allows untracked files and exits cleanly on refusal', async () => {

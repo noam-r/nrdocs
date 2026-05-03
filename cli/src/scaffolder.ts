@@ -7,7 +7,7 @@ export interface ScaffoldConfig {
   title: string;
   description: string;
   docsDir: string;
-  apiUrl: string;       // from bootstrap token iss claim
+  apiUrl: string;       // Control Plane base URL (workflow embeds this for OIDC audience)
   repoIdentity: string;
   publishBranch: string;
   accessMode?: 'public' | 'password';
@@ -84,12 +84,15 @@ jobs:
         env:
           NRDOCS_API_URL: ${config.apiUrl}
           NRDOCS_DOCS_DIR: \${{ vars.NRDOCS_DOCS_DIR || '${defaultDocsDir}' }}
+          # Optional: public delivery worker origin (no trailing slash). Use if Control Plane has no DELIVERY_URL.
+          NRDOCS_DELIVERY_URL: \${{ vars.NRDOCS_DELIVERY_URL || '' }}
           NRDOCS_MODE: \${{ github.event.inputs.mode || 'publish' }}
           NRDOCS_NEW_PASSWORD: \${{ github.event.inputs.password || '' }}
           NRDOCS_ACCESS_MODE: \${{ github.event.inputs.access_mode || '' }}
         run: |
           set -euo pipefail
           DOCS_DIR="\${NRDOCS_DOCS_DIR:-${defaultDocsDir}}"
+          export DOCS_DIR
           API_BASE="\${NRDOCS_API_URL%/}"
           MODE="\${NRDOCS_MODE:-publish}"
 
@@ -102,7 +105,7 @@ jobs:
             exit 1
           fi
 
-          # Repo-proof challenge verification (password management without gh)
+          # Repo-proof challenge verification FIRST (before register/publish).
           # If a challenge file is present in the commit, verify it and exit without publishing.
           if ls ".nrdocs/challenges/"*.json >/dev/null 2>&1; then
             verify_failed=0
@@ -146,25 +149,76 @@ jobs:
               fi
             done
             if [ "$verify_failed" -eq 1 ]; then
-              echo "::notice::Challenge verification run finished with non-fatal issues. Skipping publish for this run."
-            else
-              echo "Challenge(s) verified. Skipping publish."
+              echo "::error::Repo-proof verification failed. Until this returns HTTP 2xx, 'nrdocs password set' cannot apply your password (CLI keeps retrying 'Challenge not verified')."
+              exit 1
             fi
+            echo "Challenge(s) verified on the Control Plane. Skipping publish."
             exit 0
           fi
 
-          # Exchange OIDC for short-lived publish credentials (project_id + repo_publish_token)
-          exchange_code=$(curl -s -o exchange.json -w '%{http_code}' -X POST -H "Authorization: Bearer $oidc_token" "\${API_BASE}/oidc/publish-credentials")
-          if [ "$exchange_code" -lt 200 ] || [ "$exchange_code" -ge 300 ]; then
+          # Register project with Control Plane (GitHub OIDC, no API key). Idempotent.
+          reg_payload=$(ruby -ryaml -rjson -e 'require "yaml"; require "json"; d = YAML.load_file(File.join(ENV["DOCS_DIR"], "project.yml")); puts JSON.generate({"slug" => d["slug"], "title" => d["title"], "description" => d.fetch("description", "").to_s, "access_mode" => d["access_mode"], "repo_url" => "https://github.com/" + ENV.fetch("GITHUB_REPOSITORY")})')
+          reg_code=$(curl -s -o register_response.json -w '%{http_code}' \\
+            -X POST \\
+            -H "Content-Type: application/json" \\
+            -H "Authorization: Bearer $oidc_token" \\
+            --data-binary "$reg_payload" \\
+            "\${API_BASE}/oidc/register-project")
+          echo "Registration HTTP status: \${reg_code}"
+          cat register_response.json || true
+          if [ "$reg_code" -lt 200 ] || [ "$reg_code" -ge 300 ]; then
+            echo "::error::Project registration failed with HTTP \${reg_code}"
+            exit 1
+          fi
+          if command -v jq >/dev/null 2>&1 && [ -f register_response.json ]; then
+            reg_id=$(jq -r '.id // empty' register_response.json)
+            if [ -n "$reg_id" ] && [ "$reg_id" != "null" ]; then
+              if [ -n "\${GITHUB_OUTPUT:-}" ]; then
+                echo "nrdocs_project_id=$reg_id" >> "\$GITHUB_OUTPUT"
+              fi
+              if [ -n "\${GITHUB_STEP_SUMMARY:-}" ]; then
+                {
+                  echo "## nrdocs registration"
+                  echo "Internal project id (optional for local tooling): \`$reg_id\`"
+                } >> "\$GITHUB_STEP_SUMMARY"
+              fi
+            fi
+          fi
+
+          # Exchange OIDC for short-lived publish credentials (poll until approved in the same job)
+          POLL_SECS="\${NRDOCS_APPROVAL_POLL_INTERVAL:-30}"
+          MAX_WAIT="\${NRDOCS_APPROVAL_MAX_WAIT_SECS:-3600}"
+          elapsed=0
+          exchange_code=""
+          while true; do
+            exchange_code=$(curl -s -o exchange.json -w '%{http_code}' -X POST -H "Authorization: Bearer $oidc_token" "\${API_BASE}/oidc/publish-credentials")
+            if [ "$exchange_code" -ge 200 ] && [ "$exchange_code" -lt 300 ]; then
+              break
+            fi
+            if [ "$exchange_code" = "409" ]; then
+              err=$(jq -r '.error // empty' exchange.json 2>/dev/null || true)
+              case "$err" in
+                *"not approved"*)
+                  if [ "$elapsed" -ge "$MAX_WAIT" ]; then
+                    echo "::warning::Stopped waiting for approval after \${MAX_WAIT}s. Re-run the workflow or push after the operator approves."
+                    exit 0
+                  fi
+                  echo "::notice::Waiting for operator approval (\${elapsed}s / \${MAX_WAIT}s max, every \${POLL_SECS}s)..."
+                  sleep "$POLL_SECS"
+                  elapsed=$((elapsed + POLL_SECS))
+                  continue
+                  ;;
+              esac
+            fi
             echo "::error::OIDC exchange failed with HTTP $exchange_code"
             cat exchange.json || true
             exit 1
-          fi
+          done
           creds=$(cat exchange.json)
-          NRDOCS_PROJECT_ID=$(echo "$creds" | jq -r '.project_id')
+          NRDOCS_REPO_ID=$(echo "$creds" | jq -r '.repo_id')
           NRDOCS_PUBLISH_TOKEN=$(echo "$creds" | jq -r '.repo_publish_token')
-          if [ -z "$NRDOCS_PROJECT_ID" ] || [ "$NRDOCS_PROJECT_ID" = "null" ]; then
-            echo "::error::OIDC exchange did not return project_id"
+          if [ -z "$NRDOCS_REPO_ID" ] || [ "$NRDOCS_REPO_ID" = "null" ]; then
+            echo "::error::OIDC exchange did not return repo_id"
             echo "$creds"
             exit 1
           fi
@@ -188,7 +242,7 @@ jobs:
               -H "Content-Type: application/json" \\
               -H "Authorization: Bearer \${NRDOCS_PUBLISH_TOKEN}" \\
               --data-binary "@$pw_payload" \\
-              "\${API_BASE}/projects/\${NRDOCS_PROJECT_ID}/password")
+              "\${API_BASE}/repos/\${NRDOCS_REPO_ID}/password")
             echo "Response status: \${pw_code}"
             cat pw_response.json
             if [ "$pw_code" -lt 200 ] || [ "$pw_code" -ge 300 ]; then
@@ -216,7 +270,7 @@ jobs:
               -H "Content-Type: application/json" \\
               -H "Authorization: Bearer \${NRDOCS_PUBLISH_TOKEN}" \\
               --data-binary "@$am_payload" \\
-              "\${API_BASE}/projects/\${NRDOCS_PROJECT_ID}/access-mode")
+              "\${API_BASE}/repos/\${NRDOCS_REPO_ID}/access-mode")
             echo "Response status: \${am_code}"
             cat am_response.json
             if [ "$am_code" -lt 200 ] || [ "$am_code" -ge 300 ]; then
@@ -262,7 +316,7 @@ jobs:
             -H "Authorization: Bearer \${NRDOCS_PUBLISH_TOKEN}" \\
             -H "X-Repo-Identity: github.com/\${{ github.repository }}" \\
             --data-binary "@$payload_file" \\
-            "\${API_BASE}/projects/\${NRDOCS_PROJECT_ID}/publish")
+            "\${API_BASE}/repos/\${NRDOCS_REPO_ID}/publish")
 
           echo "Response status: \${http_code}"
           cat response.json
@@ -272,6 +326,35 @@ jobs:
             exit 1
           fi
           echo "Publish succeeded."
+          pub_url=$(jq -r 'if (.url == null or .url == "") then empty else .url end' response.json 2>/dev/null || true)
+          pub_slug=$(jq -r 'if (.slug == null or .slug == "") then empty else .slug end' response.json 2>/dev/null || true)
+          if [ -z "\$pub_url" ] && [ -n "\${NRDOCS_DELIVERY_URL:-}" ] && [ -n "\$pub_slug" ]; then
+            base="\${NRDOCS_DELIVERY_URL%/}"
+            pub_url="\${base}/\${pub_slug}/"
+          fi
+          if [ -n "\$pub_url" ]; then
+            echo "Reader URL: \$pub_url"
+            if [ -n "\${GITHUB_STEP_SUMMARY:-}" ]; then
+              {
+                echo "## Published documentation"
+                echo "Reader URL: \`\$pub_url\`"
+              } >> "\$GITHUB_STEP_SUMMARY"
+            fi
+          elif [ -n "\$pub_slug" ]; then
+            echo "::warning::Published, but no reader URL yet. Set DELIVERY_URL on the Control Plane Worker and redeploy, **or** add GitHub variable NRDOCS_DELIVERY_URL (delivery base URL, no trailing slash). Slug: \$pub_slug"
+            if [ -n "\${GITHUB_STEP_SUMMARY:-}" ]; then
+              {
+                echo "## Published documentation"
+                echo "Site slug: \`\$pub_slug\`"
+                echo ""
+                echo "Configure the public delivery base URL so the exact link appears:"
+                echo "- **Control Plane** Worker env: \`DELIVERY_URL\` (e.g. \`https://docs.example.com\`)"
+                echo "- **Or** repo variable: **Settings → Actions → Variables** → \`NRDOCS_DELIVERY_URL\`"
+                echo ""
+                echo "Reader path pattern: \`https://<your-delivery-host>/\${pub_slug}/\`"
+              } >> "\$GITHUB_STEP_SUMMARY"
+            fi
+          fi
 `;
 }
 

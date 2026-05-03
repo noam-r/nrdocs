@@ -2,7 +2,7 @@
 
 There is **one** `nrdocs` program (bundled Node binary or `tsx cli/src/main.ts` from a clone). It exposes:
 
-- **`nrdocs init`** — bootstrap-token onboarding for documentation authors
+- **`nrdocs init`** — repo-owner initialization (local scaffolding + workflow)
 - **`nrdocs import`** — convert existing docs platforms into nrdocs local files
 - **`nrdocs status`** — show local setup, approval, publish state, and docs URL
 - **`nrdocs admin`** — Control Plane operator commands (API key in `.env`; see below)
@@ -10,7 +10,14 @@ There is **one** `nrdocs` program (bundled Node binary or `tsx cli/src/main.ts` 
 If you own a documentation repo but do not operate the nrdocs control plane, the path is:
 
 1. If you already have MkDocs content, optionally run **`nrdocs import mkdocs`** first.
-2. Run **`nrdocs init --token '<bootstrap-token>'`** once from your repo.
+2. Set the Control Plane URL once (recommended), then init with the **repo id** your operator assigned:
+
+   ```bash
+   nrdocs config set api-url '<control-plane-url>'
+   nrdocs init --repo-id '<repo-id>'
+   ```
+
+   You can always override per run with `--api-url` (for multi-control-plane setups or debugging).
 3. Run **`nrdocs status`** to confirm setup and see the publication URL.
 4. Publish by pushing to GitHub. The generated workflow runs the publish.
 
@@ -30,17 +37,19 @@ With **no arguments**, `nrdocs` prints a **short** repo-owner hint. **`nrdocs --
 
 ### init
 
-Onboard a repository using a bootstrap token. Runs a flow: preflight checks, token validation, interactive prompting (or non-interactive flags), **remote project creation**, **local file scaffolding**, and non-secret status metadata. The generated publish workflow uses **GitHub Actions OIDC** (no per-repo secrets/variables required).
+Initialize a repository for OIDC-based publishing. Runs a flow: preflight checks, interactive prompting (or non-interactive flags), **local file scaffolding**, and non-secret status metadata. The generated publish workflow uses **GitHub Actions OIDC** (no per-repo secrets/variables required).
 
 ```bash
-nrdocs init --token <bootstrap-token>
+nrdocs config set api-url <control-plane-url>
+nrdocs init --repo-id <repo-id>
 ```
 
 **Flags:**
 
 | Flag | Required | Description |
 |---|---|---|
-| `--token <token>` | yes | Bootstrap token issued by your organization admin |
+| `--api-url <url>` | optional | Control Plane URL (can be set globally via `nrdocs config set api-url`) |
+| `--repo-id <uuid>` | yes | Registered repo id (UUID) from your operator. **`--project-id`** is accepted as an alias. |
 | `--slug <value>` | no | Project slug (for non-interactive use) |
 | `--title <value>` | no | Project title (for non-interactive use) |
 | `--repo-identity <value>` | no | Repository identity in format `github.com/owner/repo` (for non-interactive use) |
@@ -53,23 +62,22 @@ In interactive mode, the CLI infers values from the git remote and prompts for c
 
 **What it does:**
 
-1. Verifies you're in a git repo and the token is a valid bootstrap token
+1. Verifies you're in a git repo
 2. (Optional) If `gh` is installed and authenticated, runs a preflight for GitHub API access used by some optional flows
-3. Validates the token against the control plane, displays org name and remaining quota
-4. Infers repo identity, slug, and title from the git remote; prompts for confirmation
-5. Creates the project on the control plane (quota is reserved atomically; DB writes are transactional)
-6. Generates `project.yml`, `nav.yml`, `content/home.md`, and `.github/workflows/publish-docs.yml`
-7. The generated workflow publishes using GitHub Actions OIDC and a Control Plane exchange endpoint (`POST /oidc/publish-credentials`)
+3. Infers repo identity, slug, and title from the git remote; prompts for confirmation
+4. Writes `project.yml`, `nav.yml`, `content/home.md`, and `.github/workflows/publish-docs.yml`
+5. Writes `.nrdocs/status.json` with non-secret metadata (Control Plane URL, repo id, repo identity, publish branch)
+6. The generated workflow publishes using GitHub Actions OIDC and a Control Plane exchange endpoint (`POST /oidc/publish-credentials`)
 
 If local scaffolding fails after the project was created remotely, the project already exists on the server; the CLI prints a short note so you can clean up if needed.
 
 **Generated workflow:** The generated `publish-docs.yml` requests a GitHub OIDC token (`id-token: write`), exchanges it at `POST /oidc/publish-credentials`, then publishes using the returned short-lived repo publish token. The workflow still sends the `X-Repo-Identity` header (`github.com/${{ github.repository }}`) to bind publishes to the repo identity. The API URL is embedded directly in the workflow file. It runs on pushes to the configured publish branch. During interactive init, the default is the current checked-out branch, so after `nrdocs import mkdocs` it is usually **`nrdocs`**; for ordinary repos where docs live on the default branch, use **`main`**.
 
-**Interrupted init:** If init was interrupted after the Control Plane created the project, rerun the same command with the same token from the same repo. For the same unpublished project and repo identity, the Control Plane recovers the existing project and mints a replacement publish token without consuming another bootstrap quota slot.
+**Interrupted init:** If init was interrupted after writing some files, rerun the same command; it will regenerate the canonical scaffold and update `.nrdocs/status.json`.
 
 ### publish
 
-There is no local **`nrdocs publish`** command for documentation repo owners. After **`nrdocs init`**, publishing is intentionally handled by GitHub Actions on pushes to the configured publish branch, using the generated workflow and repository secret.
+There is no local **`nrdocs publish`** command for documentation repo owners. After **`nrdocs init`**, publishing is intentionally handled by GitHub Actions on pushes to the configured publish branch, using the generated workflow and OIDC exchange (no per-repo secrets/variables).
 
 ```bash
 git push
@@ -79,19 +87,19 @@ If you run **`nrdocs publish`**, the CLI explains this and points platform opera
 
 ### status
 
-Shows whether the current repository is initialized for nrdocs, whether the Control Plane project is approved, whether a successful publish exists, and the final docs URL.
+Shows whether the current repository is initialized for nrdocs, whether the Control Plane repo row is approved, whether a successful publish exists, and the final docs URL.
 
 ```bash
 nrdocs status
 ```
 
-`nrdocs init` writes non-secret metadata to **`.nrdocs/status.json`** so this command can check remote status without requiring **`NRDOCS_API_KEY`**. Existing repositories can also set **`NRDOCS_API_URL`** and **`NRDOCS_PROJECT_ID`** in the shell or a local `.env`.
+`nrdocs init` writes non-secret metadata to **`.nrdocs/status.json`** so this command can check remote status without requiring **`NRDOCS_API_KEY`**. Existing repositories can also set **`NRDOCS_API_URL`** and **`NRDOCS_REPO_ID`** in the shell or a local `.env`.
 
 Useful flags and environment:
 
 - **`--docs-dir <dir>`**: read project config from a non-default docs directory.
 - **`NRDOCS_DOCS_DIR`**: fallback docs directory when the flag is omitted.
-- **`NRDOCS_API_URL`** and **`NRDOCS_PROJECT_ID`**: override the Control Plane URL/project ID used for the remote status check.
+- **`NRDOCS_API_URL`** and **`NRDOCS_REPO_ID`**: override the Control Plane URL and repo id used for the remote status check.
 
 ### import
 
@@ -116,7 +124,7 @@ Common flags:
 - **`--accept-unsupported-customizations`**: continue when MkDocs customizations cannot be imported.
 - **`--force`**: switch to an existing target branch and overwrite generated files that differ.
 
-After import, review the generated files and run **`nrdocs init --token '<bootstrap-token>' --docs-dir <out-dir>`** from the generated branch to complete onboarding. The publish branch prompt should default to that branch, usually **`nrdocs`**. See [Importing MkDocs](./import-mkdocs/index.html) for the full guide.
+After import, review the generated files and run **`nrdocs init --api-url '<control-plane-url>' --repo-id '<repo-id>' --docs-dir <out-dir>`** from the generated branch to complete initialization. The publish branch prompt should default to that branch, usually **`nrdocs`**. See [Importing MkDocs](./import-mkdocs/index.html) for the full guide.
 
 ---
 
@@ -124,19 +132,13 @@ After import, review the generated files and run **`nrdocs init --token '<bootst
 
 Platform operators manage projects with **`nrdocs admin <command>`**. Most calls use **`NRDOCS_API_KEY`** (Bearer) against the Control Plane.
 
-**`nrdocs admin publish`** is different: the publish endpoint accepts a **repo publish JWT** only. Set **`NRDOCS_PUBLISH_TOKEN`** (and optionally **`NRDOCS_REPO_IDENTITY`** if the token is bound to a repository). Repo owners normally publish via GitHub Actions **OIDC exchange** (no per-repo secret). In the manual admin flow, **`nrdocs admin mint-publish-token <project-id>`** mints a JWT for operator-driven publishing.
+**`nrdocs admin publish`** is different: the publish endpoint accepts a **repo publish JWT** only. Set **`NRDOCS_PUBLISH_TOKEN`** (and optionally **`NRDOCS_REPO_IDENTITY`** if the token is bound to a repository). Repo owners normally publish via GitHub Actions **OIDC exchange** (no per-repo secret). In the manual admin flow, **`nrdocs admin mint-publish-token <repo-id>`** mints a JWT for operator-driven publishing.
 
 **CI:** if **`CI`** or **`GITHUB_ACTIONS`** is set, **`nrdocs admin`** refuses unless **`NRDOCS_ALLOW_ADMIN_IN_CI=1`**, except **`nrdocs admin --help`**, which always works.
 
 ### Who runs `nrdocs admin`
 
-Repo owners should not run **`nrdocs admin`** in the normal product flow. The platform operator gives the repo owner a bootstrap token; the repo owner runs:
-
-```bash
-nrdocs init --token '<bootstrap-token>'
-```
-
-After that, publishing happens from the generated GitHub Actions workflow when the repo owner pushes changes.
+Repo owners should not run **`nrdocs admin`** in the normal product flow. Operators register and approve the project; repo owners run **`nrdocs init`** and publish by pushing to GitHub.
 
 **`nrdocs admin` is for platform operators only.** It exists for operating the control plane: approving, disabling, deleting, inspecting projects, minting/rotating publish tokens, or doing a manual operator publish.
 
@@ -149,7 +151,7 @@ After that, publishing happens from the generated GitHub Actions workflow when t
 
 Operators use this rule:
 
-- Run API-only commands (**`init`**, **`status`**, **`approve`**, **`disable`**, **`delete`**, **`set-password`**, **`mint-publish-token`**) from any operator workspace that has the right environment values.
+- Run API-only admin commands (**`status`**, **`approve`**, **`disable`**, **`delete`**, **`set-password`**, **`mint-publish-token`**) from any operator workspace that has the right environment values.
 - Run docs-reading admin commands (**`register`**, **`project-init`**, **`publish`**) only when doing an operator-managed or manual path. Run them from the documentation repo root, where **`docs/project.yml`**, **`docs/nav.yml`**, and **`docs/content/`** live. Or run them from another directory and set **`NRDOCS_DOCS_DIR`** to the docs directory path.
 
 Recommended operator setup: keep a private, uncommitted **`.env`** in the nrdocs platform checkout or another operator-only workspace for API-only commands. If an operator needs to manually register or publish a specific docs repo, either run from that docs repo with secrets supplied via the shell, or point **`NRDOCS_DOCS_DIR`** at that repo’s docs directory. Never commit **`.env`** or put **`NRDOCS_API_KEY`** in docs-repo CI.
@@ -174,7 +176,7 @@ Open `.env` in your editor:
 ```
 NRDOCS_API_URL=https://nrdocs-control-plane.YOUR_SUBDOMAIN.workers.dev
 NRDOCS_API_KEY=your-api-key-here
-NRDOCS_PROJECT_ID=
+NRDOCS_REPO_ID=
 NRDOCS_DOCS_DIR=docs
 ```
 
@@ -182,47 +184,33 @@ NRDOCS_DOCS_DIR=docs
 |---|---|---|
 | `NRDOCS_API_URL` | yes | The URL of your deployed Control Plane Worker. Wrangler prints this when you run `wrangler deploy --env control-plane`. |
 | `NRDOCS_API_KEY` | yes | The admin API key you generated during installation and set via `wrangler secret put API_KEY`. This is not a Cloudflare-provided key — it's a secret you created yourself. |
-| `NRDOCS_PROJECT_ID` | optional fallback | The project UUID. Prefer passing project IDs directly to commands, e.g. **`nrdocs admin approve <project-id>`**. Set this only for repeated commands against the same project. |
+| `NRDOCS_REPO_ID` | optional fallback | The registered repo UUID. Prefer passing repo ids directly to commands, e.g. **`nrdocs admin approve <repo-id>`**. Set this only for repeated commands against the same site. |
 | `NRDOCS_DOCS_DIR` | no | Path to your docs directory relative to the **current working directory**. Defaults to `docs`. |
-| `NRDOCS_PUBLISH_TOKEN` | for **`admin publish` only** | Repo publish JWT (`nrdocs init`, docs-repo secret, **`nrdocs admin approve <project-id>`**, or **`nrdocs admin mint-publish-token`**). Not the admin API key. |
+| `NRDOCS_PUBLISH_TOKEN` | for **`admin publish` only** | Repo publish JWT minted by the Control Plane (for example **`nrdocs admin approve <repo-id>`** or **`nrdocs admin mint-publish-token`**). Not the admin API key. |
 | `NRDOCS_REPO_IDENTITY` | no | Sent as **`X-Repo-Identity`** on publish if your token enforces repo binding (for example `github.com/org/repo`). |
 | `NRDOCS_SITE_URL` | no | After a successful publish, the CLI prints **`${NRDOCS_SITE_URL}/<slug>/`**. |
-| `NRDOCS_REPO_URL` | no | Optional override for **`admin register`** `repo_url` (default `https://github.com/local/<slug>`). |
+| `NRDOCS_REPO_URL` | no | Optional override for **`admin register`** `repo_url` (default inferred from git `origin`; fallback `https://github.com/local/<slug>` only when no repo URL can be inferred). |
 | `NRDOCS_NEW_PASSWORD` | no | Non-interactive **`admin set-password`** (otherwise TTY reads the password). |
 
-The `.env` file is gitignored — your secrets stay local. The CLI loads the first **`.env`** found walking **upward** from the current working directory (without overriding variables already set in the environment).
+The `.env` file is gitignored — your secrets stay local. **`nrdocs admin`** (and **`nrdocs status`**, **`nrdocs upgrade`**, **`nrdocs password`**) load the first **`.env`** found walking **upward** from the current working directory (without overriding variables already set in the environment). **`nrdocs init` does not load `.env` by itself** — set **`NRDOCS_API_URL`** in your shell, or use **`nrdocs config set api-url`**, or pass **`--api-url`**.
 
-For repo-owner onboarding, **`nrdocs init`** prints the final reader URL when the Control Plane has `DELIVERY_URL` configured. Default org projects publish at **`<DELIVERY_URL>/<slug>/`**; named org projects publish at **`<DELIVERY_URL>/<org-slug>/<slug>/`**.
+### Control Plane URL resolution (`nrdocs init`, tokenless)
+
+| Priority | Source |
+|----------|---------|
+| 1 | `--api-url <url>` |
+| 2 | `NRDOCS_API_URL` in the process environment |
+| 3 | `nrdocs config set api-url` → `~/.nrdocs/config.json` (`default_api_url`) |
+
+Use the **same** base URL your operator used when registering the repo so **`nrdocs init`** and the generated GitHub Actions workflow talk to the correct control plane.
+
+For repo-owner onboarding, **`nrdocs init`** prints the final reader URL when the Control Plane has `DELIVERY_URL` configured. Sites publish at **`<DELIVERY_URL>/<slug>/`** (single-tenant flat routing).
 
 ## `nrdocs admin` subcommands
 
-### admin init
-
-Creates a bootstrap token for repo-owner onboarding. Run this from an operator workspace with `NRDOCS_API_URL` and `NRDOCS_API_KEY`, then send the printed token to the repo owner over a secure channel.
-
-```bash
-nrdocs admin init --org default
-```
-
-Options:
-
-| Flag | Description |
-|---|---|
-| `--org <slug>` | Organization slug, default `default` |
-| `--max-repos <n>` | Number of repositories this token may onboard, default `1` |
-| `--expires-in-days <n>` | Token lifetime, default `7` |
-| `--created-by <label>` | Audit label, default `admin_cli` |
-| `--json` | Print raw JSON response |
-
-The repo owner then runs:
-
-```bash
-nrdocs init --token '<bootstrap-token>'
-```
-
 ### admin project-init
 
-Advanced/manual shortcut for operator-managed projects. Registers a project from local docs files, approves it, and mints a publish token. Prefer bootstrap onboarding for normal repo-owner setup.
+Advanced/manual shortcut for operator-managed projects. Registers a project from local docs files, approves it, and mints a publish token.
 
 ```bash
 nrdocs admin project-init
@@ -242,10 +230,17 @@ Reads from:
 - `.env` — `NRDOCS_API_URL`, `NRDOCS_API_KEY`
 - `docs/project.yml` — `slug`, `title`, `description`, `access_mode`
 
-The command parses your `project.yml` and sends a registration request to the Control Plane. On success, it prints the new project UUID:
+The command also resolves repo binding for OIDC publishing:
+
+- `repo_identity` is resolved from `--repo-identity`, `docs/project.yml` (`repo_identity:`), or git `origin`.
+- `repo_url` is resolved from `--repo-url`, `NRDOCS_REPO_URL`, or git `origin`.
+
+If `repo_identity` cannot be resolved, `admin register` fails early with a clear message (this prevents creating projects that cannot be matched by OIDC exchange).
+
+The command parses your `project.yml` and sends a registration request to the Control Plane. On success, it prints the new **repo id** (UUID):
 
 ```
-Registering project: nrdocs
+Registering docs site: nrdocs
 Success (201)
 {
   "id": "550e8400-e29b-41d4-a716-446655440000",
@@ -254,19 +249,19 @@ Success (201)
   ...
 }
 
-Project ID: 550e8400-e29b-41d4-a716-446655440000
+Repo ID: 550e8400-e29b-41d4-a716-446655440000
 Use it directly:
   nrdocs admin approve 550e8400-e29b-41d4-a716-446655440000
 
 Or keep it in your private .env for repeated commands:
-  NRDOCS_PROJECT_ID=550e8400-e29b-41d4-a716-446655440000
+  NRDOCS_REPO_ID=550e8400-e29b-41d4-a716-446655440000
 ```
 
-Use the ID directly for the next command, or copy it into your private `.env` if you will run many commands against the same project.
+Use the id directly for the next command, or copy it into your private `.env` if you will run many commands against the same registration.
 
 ### admin list
 
-Lists projects. By default, this shows only **approved** projects.
+Lists registered repos. By default, this shows only **approved** repos.
 
 ```bash
 nrdocs admin list
@@ -296,23 +291,30 @@ Filters:
 Approves a registered project, transitioning it from `awaiting_approval` to `approved`, then mints a repo publish token by default. Only approved projects can accept publishes and serve content.
 
 ```bash
-nrdocs admin approve <project-id>
-nrdocs admin approve <project-id> --repo-identity github.com/myorg/myrepo
+nrdocs admin approve <repo-id>
+nrdocs admin approve <repo-id> --repo-identity github.com/myorg/myrepo
 ```
 
-Reads from: `.env` — `NRDOCS_API_URL`, `NRDOCS_API_KEY`. The project ID is positional, with `NRDOCS_PROJECT_ID` as an optional fallback.
+Reads from: `.env` — `NRDOCS_API_URL`, `NRDOCS_API_KEY`. The project ID is positional, with `NRDOCS_REPO_ID` as an optional fallback.
+
+The CLI runs approval in stages:
+
+- `[approve]` approves the project
+- `[mint-token]` mints the repo publish JWT
+
+If minting fails after approval, the CLI prints a one-line retry command. The project remains approved (there is no rollback).
 
 If the project already has **`repo_identity`**, no extra flag is needed. Otherwise pass **`--repo-identity`** so the token is bound to the correct GitHub repo. Use **`--no-mint-publish-token`** only for the rare status-only approval case.
 
 ### admin mint-publish-token
 
-Calls **`POST /projects/:id/publish-token`** with **`NRDOCS_API_KEY`**. Creates a **repo publish** JWT in the control plane (same kind CI uses) so you can set **`NRDOCS_PUBLISH_TOKEN`** for **`admin publish`**.
+Calls **`POST /repos/:id/publish-token`** with **`NRDOCS_API_KEY`**. Creates a **repo publish** JWT in the control plane (same kind CI uses) so you can set **`NRDOCS_PUBLISH_TOKEN`** for **`admin publish`**.
 
 You normally do **not** need this immediately after **`approve`**, because **`approve`** mints the first publish token by default. Use this command for token rotation or recovery.
 
 ```bash
-nrdocs admin mint-publish-token <project-id>
-nrdocs admin mint-publish-token <project-id> --repo-identity github.com/myorg/myrepo
+nrdocs admin mint-publish-token <repo-id>
+nrdocs admin mint-publish-token <repo-id> --repo-identity github.com/myorg/myrepo
 ```
 
 If the project row already has **`repo_identity`**, you can use an empty JSON body (the CLI sends `{}`). Otherwise pass **`--repo-identity`** or set **`NRDOCS_REPO_IDENTITY`**. The project must be **`approved`**.
@@ -322,11 +324,11 @@ If the project row already has **`repo_identity`**, you can use an empty JSON bo
 Reads all files from your docs directory, packages them into a JSON payload, and sends it to the Control Plane's publish endpoint. The Control Plane then builds the HTML and uploads it to R2.
 
 ```bash
-nrdocs admin publish <project-id>
+nrdocs admin publish <repo-id>
 ```
 
 Reads from:
-- `.env` — `NRDOCS_API_URL`, `NRDOCS_PUBLISH_TOKEN`, `NRDOCS_DOCS_DIR` (and optional `NRDOCS_PROJECT_ID`, `NRDOCS_REPO_IDENTITY`, `NRDOCS_SITE_URL`)
+- `.env` — `NRDOCS_API_URL`, `NRDOCS_PUBLISH_TOKEN`, `NRDOCS_DOCS_DIR` (and optional `NRDOCS_REPO_ID`, `NRDOCS_REPO_IDENTITY`, `NRDOCS_SITE_URL`)
 - `docs/project.yml` — sent as-is to the Control Plane
 - `docs/nav.yml` — sent as-is to the Control Plane
 - `docs/allowed-list.yml` — sent if present, otherwise null
@@ -335,7 +337,7 @@ Reads from:
 The command:
 1. Validates that `project.yml`, `nav.yml`, and `content/` exist in the docs directory
 2. Reads all files and constructs the JSON payload
-3. POSTs it to `$NRDOCS_API_URL/projects/<project-id>/publish`
+3. POSTs it to `$NRDOCS_API_URL/repos/<repo-id>/publish`
 4. Prints the result (success with publish ID, or failure with error details)
 
 The project must be in `approved` status. If it's still `awaiting_approval` or has been `disabled`, the publish will be rejected.
@@ -345,17 +347,17 @@ The project must be in `approved` status. If it's still `awaiting_approval` or h
 Fetches and displays the current project details from the Control Plane.
 
 ```bash
-nrdocs admin status <project-id>
+nrdocs admin status <repo-id>
 ```
 
-Reads from: `.env` — `NRDOCS_API_URL`, `NRDOCS_API_KEY`. The project ID is positional, with `NRDOCS_PROJECT_ID` as an optional fallback.
+Reads from: `.env` — `NRDOCS_API_URL`, `NRDOCS_API_KEY`. The project ID is positional, with `NRDOCS_REPO_ID` as an optional fallback.
 
 ### admin set-password
 
 Sets or updates the password for a **`password`** access-mode project.
 
 ```bash
-nrdocs admin set-password <project-id>
+nrdocs admin set-password <repo-id>
 ```
 
 Uses **`NRDOCS_API_KEY`**. On a TTY, reads the password without echoing; in automation, set **`NRDOCS_NEW_PASSWORD`**.
@@ -365,20 +367,20 @@ Uses **`NRDOCS_API_KEY`**. On a TTY, reads the password without echoing; in auto
 Disables a project. Disabled projects return 404 to all readers and reject publish requests. All data (D1 records, R2 artifacts) is preserved — you can re-approve the project later.
 
 ```bash
-nrdocs admin disable <project-id>
+nrdocs admin disable <repo-id>
 ```
 
-Reads from: `.env` — `NRDOCS_API_URL`, `NRDOCS_API_KEY`. The project ID is positional, with `NRDOCS_PROJECT_ID` as an optional fallback.
+Reads from: `.env` — `NRDOCS_API_URL`, `NRDOCS_API_KEY`. The project ID is positional, with `NRDOCS_REPO_ID` as an optional fallback.
 
 ### admin delete
 
 Permanently deletes a project and all associated data: D1 records, R2 artifacts, and access configuration. This cannot be undone.
 
 ```bash
-nrdocs admin delete <project-id>
+nrdocs admin delete <repo-id>
 ```
 
-Reads from: `.env` — `NRDOCS_API_URL`, `NRDOCS_API_KEY`. The project ID is positional, with `NRDOCS_PROJECT_ID` as an optional fallback.
+Reads from: `.env` — `NRDOCS_API_URL`, `NRDOCS_API_KEY`. The project ID is positional, with `NRDOCS_REPO_ID` as an optional fallback.
 
 Prompts for confirmation before proceeding:
 
@@ -408,10 +410,10 @@ nrdocs admin register
 # Copy the project ID from the output
 
 # 3. Approve it
-nrdocs admin approve <project-id> --repo-identity github.com/myorg/myrepo
+nrdocs admin approve <repo-id> --repo-identity github.com/myorg/myrepo
 
 # 4. Publish
-nrdocs admin publish <project-id>
+nrdocs admin publish <repo-id>
 ```
 
 ### Subsequent publishes
@@ -419,7 +421,7 @@ nrdocs admin publish <project-id>
 After the initial setup, publishing is a single command:
 
 ```bash
-nrdocs admin publish <project-id>
+nrdocs admin publish <repo-id>
 ```
 
 Edit your Markdown files, run publish, and the live site updates.
@@ -429,8 +431,8 @@ Edit your Markdown files, run publish, and the live site updates.
 You can also run the CLI through npm:
 
 ```bash
-npm run nrdocs -- admin publish <project-id>
-npm run nrdocs -- admin status <project-id>
+npm run nrdocs -- admin publish <repo-id>
+npm run nrdocs -- admin status <repo-id>
 npm run nrdocs -- admin --help
 ```
 
@@ -440,9 +442,9 @@ npm run nrdocs -- admin --help
 |---|---|---|
 | `NRDOCS_API_URL is not set` | `.env` is missing or `NRDOCS_API_URL` is empty | Create `.env` from `.env.example` and fill in the URL |
 | `NRDOCS_API_KEY is not set` | `NRDOCS_API_KEY` is empty in `.env` | Add your API key to `.env` |
-| Missing project id | You did not pass a project ID and `NRDOCS_PROJECT_ID` is empty | Run **`admin register`** first, then pass the printed ID, e.g. **`nrdocs admin approve <project-id>`** |
+| Missing repo id | You did not pass a repo id and `NRDOCS_REPO_ID` is empty | Run **`admin register`** first, then pass the printed id, e.g. **`nrdocs admin approve <repo-id>`** |
 | Refusing admin CLI in CI | `GITHUB_ACTIONS` or `CI` is set | Do not use the platform API key in doc-repo workflows; for platform-repo jobs only, set **`NRDOCS_ALLOW_ADMIN_IN_CI=1`** |
-| `NRDOCS_PUBLISH_TOKEN is not set` | **`admin publish`** needs the repo publish JWT | Run **`nrdocs admin approve <project-id>`** for new projects, **`nrdocs admin mint-publish-token <project-id>`** for rotation/recovery, or copy from **`nrdocs init`** / docs repo **`NRDOCS_PUBLISH_TOKEN`** secret |
+| `NRDOCS_PUBLISH_TOKEN is not set` | **`admin publish`** needs the repo publish JWT | Run **`nrdocs admin approve <repo-id>`** for new projects, or **`nrdocs admin mint-publish-token <repo-id>`** for rotation/recovery |
 | `project.yml not found` | The docs directory doesn't have a `project.yml` | Check `NRDOCS_DOCS_DIR` in `.env` and make sure the file exists |
 | `Failed (409)` on register | A project with that slug already exists **in the same organization** | Use a different slug in `project.yml`, or delete the existing project first |
-| `Failed (409)` on publish | Project is not in `approved` status | Run **`admin approve <project-id>`** first |
+| `Failed (409)` on publish | Project is not in `approved` status | Run **`admin approve <repo-id>`** first |

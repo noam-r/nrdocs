@@ -1,9 +1,9 @@
 // ── Enums ────────────────────────────────────────────────────────────
 
-/** Lifecycle status of a project. */
-export type ProjectStatus = 'awaiting_approval' | 'approved' | 'disabled';
+/** Lifecycle status of a registered repo (docs site). */
+export type RepoStatus = 'awaiting_approval' | 'approved' | 'disabled';
 
-/** Access protection mode for a project. */
+/** Access protection mode for a published site. */
 export type AccessMode = 'public' | 'password';
 
 /** Operational event types recorded in the audit log. */
@@ -16,58 +16,29 @@ export type EventType =
   | 'publish_success'
   | 'publish_failure'
   | 'publish_token_mint'
+  | 'repo_identity_bound'
   | 'login_failure'
   | 'repo_proof_challenge_issued'
   | 'repo_proof_challenge_verify_success'
   | 'repo_proof_password_set_success'
   | 'repo_proof_disable_password_success';
 
-// ── Organization types ────────────────────────────────────────────────
-
-/** Lifecycle status of an organization. */
-export type OrganizationStatus = 'active' | 'disabled';
-
-/** A fully-hydrated organization record as stored in D1. */
-export interface Organization {
-  id: string;
-  slug: string;
-  name: string;
-  status: OrganizationStatus;
-  created_at: string;
-  updated_at: string;
-}
-
 // ── Token types ──────────────────────────────────────────────────────
-
-/** Lifecycle status of a bootstrap token. */
-export type BootstrapTokenStatus = 'active' | 'revoked' | 'expired';
-
-/** A bootstrap token record scoped to an organization. */
-export interface BootstrapToken {
-  id: string;
-  jti: string;
-  org_id: string;
-  status: BootstrapTokenStatus;
-  created_by: string;
-  created_at: string;
-  expires_at: string;
-  max_repos: number;
-  repos_issued_count: number;
-  last_used_at: string | null;
-}
 
 /** Lifecycle status of a repo publish token. */
 export type RepoPublishTokenStatus = 'active' | 'revoked' | 'expired';
 
-/** A repo publish token bound to one organization and one project. */
+/** How the repo publish JWT was created. */
+export type RepoPublishTokenSource = 'oidc' | 'mint';
+
+/** A repo publish token bound to one registered repo. */
 export interface RepoPublishToken {
   id: string;
   jti: string;
-  org_id: string;
-  project_id: string;
+  repo_id: string;
   repo_identity: string;
   status: RepoPublishTokenStatus;
-  created_from_bootstrap_jti: string;
+  token_source: RepoPublishTokenSource;
   created_at: string;
   expires_at: string;
   last_used_at: string | null;
@@ -89,7 +60,7 @@ export type RepoProofChallengeStatus =
 
 export interface RepoProofChallenge {
   id: string;
-  project_id: string;
+  repo_id: string;
   repo_identity: string;
   action: RepoProofChallengeAction;
   public_token: string;
@@ -107,34 +78,32 @@ export interface RepoProofChallenge {
   last_denial_reason: string | null;
 }
 
-// ── Project types ────────────────────────────────────────────────────
+// ── Repo types ───────────────────────────────────────────────────────
 
-/** A fully-hydrated project record as stored in D1. */
-export interface Project {
+/** A registered documentation site row in D1. */
+export interface Repo {
   id: string;
   slug: string;
   repo_url: string;
   title: string;
   description: string;
-  status: ProjectStatus;
+  status: RepoStatus;
   access_mode: AccessMode;
   active_publish_pointer: string | null;
   password_hash: string | null;
   password_version: number;
-  org_id: string;
   repo_identity: string | null;
   created_at: string;
   updated_at: string;
 }
 
-/** Payload for registering a new project (before ID / timestamps are assigned). */
-export interface NewProject {
+/** Payload for registering a new repo. */
+export interface NewRepo {
   slug: string;
   repo_url: string;
   title: string;
   description: string;
   access_mode: AccessMode;
-  org_id?: string;
   repo_identity?: string | null;
 }
 
@@ -143,7 +112,7 @@ export interface NewProject {
 /** A single row in the `access_policy_entries` table. */
 export interface AccessPolicyEntry {
   id: string;
-  scope_type: 'platform' | 'project';
+  scope_type: 'platform' | 'repo';
   scope_value: string;
   subject_type: 'email' | 'domain';
   subject_value: string;
@@ -157,7 +126,7 @@ export interface AccessPolicyEntry {
 /** A single row in the `operational_events` table. */
 export interface OperationalEvent {
   id: string;
-  project_id: string | null;
+  repo_id: string | null;
   event_type: EventType;
   detail: string | null;
   created_at: string;
@@ -169,8 +138,8 @@ export interface OperationalEvent {
 export interface SessionTokenPayload {
   /** Token format version. */
   v: number;
-  /** Project ID (internal UUID, not the slug). */
-  pid: string;
+  /** Repo ID (internal UUID). */
+  rid: string;
   /** Issued-at timestamp (seconds since epoch). */
   iat: number;
   /** Expiry timestamp (seconds since epoch). */
@@ -181,12 +150,12 @@ export interface SessionTokenPayload {
 
 /** Result of validating a session token. */
 export type TokenValidationResult =
-  | { valid: true; projectId: string }
+  | { valid: true; repoId: string }
   | { valid: false; reason: string };
 
-// ── Repo config types ────────────────────────────────────────────────
+// ── Repo config types (docs/project.yml in a Git repo) ───────────────
 
-/** Schema for `project.yml` in a project repository. */
+/** Schema for `project.yml` in a documentation repository. */
 export interface ProjectConfig {
   slug: string;
   title: string;
@@ -203,17 +172,17 @@ export interface NavItem {
   children?: NavItem[];
 }
 
-/** Schema for `nav.yml` in a project repository. */
+/** Schema for `nav.yml`. */
 export interface NavConfig {
   nav: NavItem[];
 }
 
-/** Schema for `allowed-list.yml` in a project repository. */
+/** Schema for `allowed-list.yml`. */
 export interface AllowedListConfig {
   allow: string[];
 }
 
-/** YAML frontmatter for a Markdown content page. All fields are optional. */
+/** YAML frontmatter for a Markdown content page. */
 export interface PageFrontmatter {
   title?: string;
   order?: number;

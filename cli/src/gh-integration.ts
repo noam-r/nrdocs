@@ -154,14 +154,14 @@ export async function ghCheckActionsConfigWriteAccess(): Promise<GhActionsCapabi
 /**
  * Build the manual gh commands for fallback display.
  * Returns formatted string with `gh secret set NRDOCS_PUBLISH_TOKEN`
- * and `gh variable set NRDOCS_PROJECT_ID` commands.
+ * and `gh variable set NRDOCS_REPO_ID` commands.
  */
 export function buildManualGhCommands(
   publishToken: string,
-  projectId: string,
+  repoId: string,
 ): string {
   return [
     `echo '${publishToken}' | gh secret set NRDOCS_PUBLISH_TOKEN`,
-    `gh variable set NRDOCS_PROJECT_ID --body '${projectId}'`,
+    `gh variable set NRDOCS_REPO_ID --body '${repoId}'`,
   ].join('\n');
 }

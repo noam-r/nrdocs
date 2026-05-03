@@ -12,7 +12,9 @@
     "preview": "tsx scripts/preview.ts",
     "nrdocs:cli": "tsx cli/src/main.ts",
     "nrdocs": "bash scripts/nrdocs.sh",
-    "setup": "bash scripts/setup.sh"
+    "setup": "bash scripts/setup.sh",
+    "apply-d1-remote": "bash scripts/apply-d1-remote.sh",
+    "d1:recreate": "bash scripts/d1-recreate.sh"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20250214.0",

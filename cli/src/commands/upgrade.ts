@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import { parseProjectConfig } from '../config-parser';
 import { generatePublishWorkflow, type ScaffoldConfig } from '../scaffolder';
 import { loadDotEnvFromAncestors } from './admin';
+import { getDefaultApiUrl } from '../global-state';
 
 interface StatusMetadata {
   api_url?: string;
@@ -62,7 +63,7 @@ export async function runUpgrade(args: string[]): Promise<void> {
     process.env.NRDOCS_DOCS_DIR?.trim() ??
     metadata?.docs_dir ??
     'docs';
-  const apiUrl = process.env.NRDOCS_API_URL?.trim() || metadata?.api_url || '';
+  const apiUrl = process.env.NRDOCS_API_URL?.trim() || metadata?.api_url || getDefaultApiUrl() || '';
   const publishBranch = parseFlag(args, '--publish-branch') ??
     metadata?.publish_branch ??
     'main';

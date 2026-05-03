@@ -63,6 +63,8 @@ Reader
             └─ serve static files from R2
 ```
 
+For a **step-by-step walkthrough** of the platform **operator** path (register, approve, hand off) and the **repository owner** path (`nrdocs config`, `nrdocs init`, push), with CLI commands called out in context, see **[FLOW.md](FLOW.md)**.
+
 ## Example use cases
 
 ### Public docs for a private codebase
@@ -90,7 +92,6 @@ A platform operator can run nrdocs once and let multiple repo owners publish doc
 ```text
 docs.example.com/project-a/
 docs.example.com/project-b/
-docs.example.com/acme/project-c/
 ```
 
 ## Who is nrdocs for?
@@ -101,8 +102,8 @@ You own a project repo and want to publish its docs.
 
 You should be able to:
 
-1. receive a bootstrap token from your platform operator
-2. run `nrdocs init`
+1. receive the Control Plane URL and repo id from your platform operator
+2. run `nrdocs init` in your repo
 3. commit the generated docs structure and workflow
 4. push the docs branch
 5. get a hosted docs URL
@@ -118,8 +119,7 @@ You are responsible for:
 * deploying the Control Plane Worker
 * deploying the Delivery Worker
 * configuring D1 and R2
-* issuing bootstrap tokens
-* approving projects
+* registering and approving documentation sites (deciding which repos may publish)
 * managing platform secrets
 * keeping the platform API key private
 
@@ -156,14 +156,26 @@ For full deployment details, see the installation guide.
 
 ### 2. Onboard a repository
 
-If you are a repo owner and received a bootstrap token from your operator:
+If you are a repo owner, you need two **non-secret** values from whoever runs your nrdocs deployment:
+
+1. **Control Plane URL** — the HTTPS origin of the Control Plane Worker (same value operators set as `NRDOCS_API_URL`).
+2. **Repo id** — a **UUID** that identifies your registered docs site in the control plane database. It is **not** the docs slug in `project.yml`; it is assigned when the operator creates the registration on the server.
+
+**Where the repo id comes from**
+
+| Who you are | How you get the id |
+|-------------|-------------------|
+| **Repo owner** (normal case) | You **cannot look it up** without operator access. Ask your platform operator to send the UUID after they register your repository. |
+| **Platform operator** | Create the registration, then read the id from the **`id` field** in the `POST /repos` JSON response, or from the CLI: **`nrdocs admin register`** prints `Repo ID: …`, and **`nrdocs admin list`** lists it in the **ID** column (use `--all` if it is not approved yet). Approve with `nrdocs admin approve <repo-id>`, then hand the same UUID to the repo owner with the Control Plane URL. |
+| **Already ran `nrdocs init` on this clone** | Open **`.nrdocs/status.json`** (`repo_id` field), or run **`nrdocs status`**. |
 
 ```bash
-nrdocs init --token <bootstrap-token>
+nrdocs config set api-url <control-plane-url>
+nrdocs init --repo-id <repo-id>
 nrdocs status
 ```
 
-`nrdocs init` scaffolds the documentation structure, registers the project, and generates a GitHub Actions workflow for publishing.
+`nrdocs init` scaffolds the documentation structure and generates a GitHub Actions workflow for OIDC-based publishing.
 
 After that, commit and push:
 
@@ -195,29 +207,19 @@ Pages are plain Markdown. Page titles come from `nav.yml` labels, so frontmatter
 
 ## URL structure
 
-nrdocs serves many documentation projects under one shared hostname.
-
-For the default organization:
+Each deployment uses a single delivery hostname. Reader URLs are one segment after the host: the **site slug** (from `project.yml`), unique in that deployment.
 
 ```text
-docs.example.com/<project-slug>/...
+docs.example.com/<site-slug>/...
 ```
-
-For named organizations:
-
-```text
-docs.example.com/<org-slug>/<project-slug>/...
-```
-
-Project slugs are unique within an organization.
 
 ## Architecture
 
 nrdocs runs on Cloudflare:
 
-* **Delivery Worker** — serves reader traffic, resolves projects from URLs, enforces access policies, and serves static assets from R2.
-* **Control Plane Worker** — handles project registration, approval, publishing, lifecycle management, and access policy changes.
-* **D1** — stores project metadata, approval state, access policy, and live deployment pointers.
+* **Delivery Worker** — serves reader traffic at `/<site-slug>/…`, resolves the registered repo from the slug, enforces access policies, and serves static assets from R2.
+* **Control Plane Worker** — handles repo registration, approval, publishing, lifecycle management, and access policy changes.
+* **D1** — stores repo metadata, approval state, access policy, and live deployment pointers.
 * **R2** — stores generated static site artifacts.
 * **GitHub Actions** — publishes documentation from the source repository.
 
@@ -233,35 +235,36 @@ Reader ──GET──▶ Delivery Worker ──lookup D1──▶ serve from R2
 
 ## Access modes
 
-Each project can be served as:
+Each site can be served as:
 
 * **public** — anyone with the URL can read the docs
-* **password-protected** — readers must enter the project password before accessing the docs
+* **password-protected** — readers must enter the site password before accessing the docs
 
 More advanced access policies can be added later without changing the core publishing model.
 
 ## CLI
 
-The `nrdocs` CLI supports both repository-owner onboarding and platform-operator commands.
+The `nrdocs` CLI supports both repository-owner onboarding and platform-operator commands. The full product flow for both roles is documented in **[FLOW.md](FLOW.md)**.
 
 ### Repository-owner commands
 
 ```bash
-nrdocs init --token <bootstrap-token>
+nrdocs config set api-url <control-plane-url>
+nrdocs init --repo-id <repo-id>
 nrdocs status
 ```
 
-These commands are for project authors. They do not require the platform API key.
+These commands are for documentation repository authors. They do not require the platform API key.
 
 ### Operator commands
 
 ```bash
 nrdocs admin register
 nrdocs admin list
-nrdocs admin approve <project-id> --repo-identity github.com/org/repo
-nrdocs admin disable <project-id>
-nrdocs admin delete <project-id>
-nrdocs admin status <project-id>
+nrdocs admin approve <repo-id> --repo-identity github.com/org/repo
+nrdocs admin disable <repo-id>
+nrdocs admin delete <repo-id>
+nrdocs admin status <repo-id>
 nrdocs admin quick-guide
 ```
 

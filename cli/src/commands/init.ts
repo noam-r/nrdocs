@@ -1,10 +1,10 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { parseCliToken } from '../config-parser';
-import { bootstrapValidate, bootstrapOnboard, setProjectPasswordWithPublishToken } from '../api-client';
+import { setRepoPasswordWithPublishToken, getRepoStatus } from '../api-client';
 import { isValidSlug, inferSlug, inferTitle } from '../slug-validator';
 import { isInteractive, prompt, confirm } from '../prompts';
+import { getDefaultApiUrl } from '../global-state';
 import {
   generateProjectYml,
   generateNavYml,
@@ -198,11 +198,10 @@ function isValidPublishBranch(branch: string): boolean {
   return /^[A-Za-z0-9._/-]+$/.test(branch);
 }
 
-function publishedDocsUrl(baseUrl: string | undefined, orgSlug: string, projectSlug: string): string | undefined {
+function publishedDocsUrl(baseUrl: string | undefined, siteSlug: string): string | undefined {
   const base = baseUrl?.trim().replace(/\/$/, '');
   if (!base) return undefined;
-  const path = orgSlug === 'default' ? projectSlug : `${orgSlug}/${projectSlug}`;
-  return `${base}/${path}/`;
+  return `${base}/${siteSlug}/`;
 }
 
 function writeStatusMetadata(metadata: Record<string, unknown>): void {
@@ -225,7 +224,8 @@ export async function runInit(args: string[]): Promise<void> {
   }
 
   // ── Parse flags ────────────────────────────────────────────────────
-  const token = parseFlag(args, '--token');
+  const flagApiUrl = parseFlag(args, '--api-url');
+  const flagRepoId = parseFlag(args, '--repo-id') ?? parseFlag(args, '--project-id');
   const flagSlug = parseFlag(args, '--slug');
   const flagTitle = parseFlag(args, '--title');
   const flagRepoIdentity = parseFlag(args, '--repo-identity');
@@ -238,14 +238,6 @@ export async function runInit(args: string[]): Promise<void> {
   const skipGhPermissionCheck = hasFlag(args, '--skip-gh-permission-check');
   const publishBranchDefault = inferPublishBranchDefault(flagPublishBranch);
 
-  if (!token) {
-    console.error(
-      'Error: Missing required flag: --token <token>\n\nUsage: nrdocs init --token <token>',
-    );
-    process.exitCode = 1;
-    return;
-  }
-
   // ══════════════════════════════════════════════════════════════════
   // Phase 1: Preflight Checks
   // ══════════════════════════════════════════════════════════════════
@@ -257,27 +249,19 @@ export async function runInit(args: string[]): Promise<void> {
     return;
   }
 
-  // 1b. Parse and validate token
-  let tokenPayload: ReturnType<typeof parseCliToken>;
-  try {
-    tokenPayload = parseCliToken(token);
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    console.error(`Error: ${message}`);
-    process.exitCode = 1;
-    return;
-  }
-
-  // 1c. Enforce typ === 'org_bootstrap'
-  if (tokenPayload.typ !== 'org_bootstrap') {
+  // 1b. Resolve API base URL
+  const apiBaseUrl = flagApiUrl?.trim() || process.env.NRDOCS_API_URL?.trim() || getDefaultApiUrl() || '';
+  if (!apiBaseUrl) {
     console.error(
-      `Error: Only bootstrap tokens are accepted for the init command. This token has type '${tokenPayload.typ}'.`,
+      'Error: Missing Control Plane URL.\n\n' +
+        'Set one of:\n' +
+        '  - --api-url https://<control-plane-worker>\n' +
+        '  - NRDOCS_API_URL in the environment\n' +
+        '  - nrdocs config set api-url <url>  (stored in ~/.nrdocs/config.json)\n',
     );
     process.exitCode = 1;
     return;
   }
-
-  const apiBaseUrl = tokenPayload.iss;
 
   // 1d. Detect git remote
   const remoteUrl = detectGitRemote();
@@ -296,27 +280,11 @@ export async function runInit(args: string[]): Promise<void> {
   void (await isGhAuthenticated());
 
   // ══════════════════════════════════════════════════════════════════
-  // Phase 2: Token Validation Handshake
+  // Phase 2: Optional repo id (operator-first / local status only)
   // ══════════════════════════════════════════════════════════════════
 
-  let orgName: string;
-  let orgSlug: string;
-  let remainingQuota: number;
   let deliveryBaseUrl: string | undefined;
-  try {
-    const validation = await bootstrapValidate(apiBaseUrl, token);
-    orgName = validation.org_name;
-    orgSlug = validation.org_slug;
-    remainingQuota = validation.remaining_quota;
-    deliveryBaseUrl = validation.delivery_url;
-    console.log(`\nOrganization: ${orgName}`);
-    console.log(`Remaining project quota: ${remainingQuota}`);
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    console.error(`Error: ${message}`);
-    process.exitCode = 1;
-    return;
-  }
+  const repoIdFromEnv = flagRepoId?.trim() || process.env.NRDOCS_REPO_ID?.trim() || '';
 
   // ══════════════════════════════════════════════════════════════════
   // Phase 3: Local Repository Discovery
@@ -351,7 +319,7 @@ export async function runInit(args: string[]): Promise<void> {
     docsDir = flagDocsDir ?? 'docs';
     description = flagDescription ?? '';
     publishBranch = publishBranchDefault;
-    accessMode = (flagAccessMode as 'public' | 'password' | null) ?? 'password';
+    accessMode = (flagAccessMode as 'public' | 'password' | null) ?? 'public';
   } else {
     // Interactive mode: prompt with inferred defaults
 
@@ -408,12 +376,12 @@ export async function runInit(args: string[]): Promise<void> {
 
     // 3f. Access mode
     console.log('\nAccess mode controls reader access to your published docs.');
-    console.log('  - public: anyone can read');
-    console.log('  - password: readers must login with a shared password');
+    console.log('  - public: anyone can read (recommended to start)');
+    console.log('  - password: readers must sign in with a shared password you set after first publish');
     let validAccessMode = false;
-    accessMode = 'password';
+    accessMode = 'public';
     while (!validAccessMode) {
-      const value = (await prompt('Access mode (public|password)', flagAccessMode ?? 'password')).trim();
+      const value = (await prompt('Access mode (public|password)', flagAccessMode ?? 'public')).trim();
       if (value === 'public' || value === 'password') {
         accessMode = value;
         validAccessMode = true;
@@ -463,33 +431,60 @@ export async function runInit(args: string[]): Promise<void> {
     return;
   }
 
+  if (accessMode === 'password') {
+    console.log('');
+    console.log('Password mode: after the first successful publish, set the shared reader password:');
+    console.log('  nrdocs password set');
+    console.log('Your operator can set it with: nrdocs admin set-password <repo-id>');
+    console.log('Until a password is set, readers cannot complete sign-in for this site.');
+  }
+
   // ══════════════════════════════════════════════════════════════════
-  // Phase 4: Remote Project Creation (Onboard)
+  // Phase 4: Optional — validate linked Control Plane project (--repo-id)
   // ══════════════════════════════════════════════════════════════════
 
-  let projectId: string;
-  let repoPublishToken: string;
-  try {
-    const onboardResult = await bootstrapOnboard(apiBaseUrl, token, {
-      slug,
-      title,
-      description,
-      repo_identity: repoIdentity,
-      access_mode: accessMode,
-    });
-    projectId = onboardResult.project_id;
-    repoPublishToken = onboardResult.repo_publish_token;
-    deliveryBaseUrl = onboardResult.delivery_url ?? deliveryBaseUrl;
-    if (onboardResult.recovered) {
-      console.log(
-        '\nRecovered an existing unpublished project created by this bootstrap token. Continuing local setup.',
-      );
+  const repoId = repoIdFromEnv;
+  const repoPublishToken: string | null = null;
+
+  if (repoIdFromEnv) {
+    try {
+      const remote = await getRepoStatus(apiBaseUrl, repoId);
+      deliveryBaseUrl = remote.delivery_url ?? deliveryBaseUrl ?? undefined;
+      const remoteRepoIdentity = (remote.repo_identity ?? '').trim();
+      if (!remoteRepoIdentity) {
+        console.error('Error: Registered repo is missing repo_identity on the Control Plane.');
+        console.error('GitHub Actions OIDC resolves the repo via that field (repo_url alone is not enough).');
+        console.error('');
+        console.error('Use the same control plane URL as register/approve: --api-url, NRDOCS_API_URL, or ~/.nrdocs (nrdocs config set api-url).');
+        console.error('');
+        if (remote.status === 'approved') {
+          console.error('This repo is already approved; approving again will not change repo_identity.');
+          console.error('Operator: mint a publish token with the repo identity:');
+          console.error(`  nrdocs admin mint-publish-token ${repoId} --repo-identity github.com/<owner>/<repo>`);
+          console.error('If that fails with a unique conflict, delete or retarget the other repo row, then retry.');
+        } else {
+          console.error('Operator: approve with repo identity (status must be awaiting_approval):');
+          console.error(`  nrdocs admin approve ${repoId} --repo-identity github.com/<owner>/<repo>`);
+        }
+        process.exitCode = 1;
+        return;
+      }
+      if (remoteRepoIdentity !== repoIdentity) {
+        console.error('Error: Control Plane repo_identity does not match this git repository.');
+        console.error(`  Repo id: ${repoId}`);
+        console.error(`  Control Plane repo_identity: ${remoteRepoIdentity}`);
+        console.error(`  Local repo_identity:         ${repoIdentity}`);
+        console.error('');
+        console.error('Fix: run init from the correct repo, or ask your operator to fix repo_identity on the server.');
+        process.exitCode = 1;
+        return;
+      }
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      console.error(`Error: Could not load repo status from Control Plane: ${message}`);
+      process.exitCode = 1;
+      return;
     }
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    console.error(`Error: ${message}`);
-    process.exitCode = 1;
-    return;
   }
 
   // ══════════════════════════════════════════════════════════════════
@@ -556,17 +551,19 @@ export async function runInit(args: string[]): Promise<void> {
 
   if (scaffoldingAborted) {
     console.error('\nInit cancelled. No local files or GitHub secrets were changed.');
+    if (repoIdFromEnv) {
+      console.error(
+        'A linked Control Plane project was validated before this local conflict was detected.',
+      );
+      console.error(`Repo ID: ${repoId}`);
+      console.error(
+        'If you do not want that project, ask your platform operator to delete it from the control plane.',
+      );
+    }
     console.error(
-      'The remote project was already created before this local conflict was detected.',
+      'To continue, align the existing files to match your intended settings, or rerun init with:',
     );
-    console.error(`Project ID: ${projectId}`);
-    console.error(
-      'To continue, either align the existing files to match your intended settings, or rerun init with:',
-    );
-    console.error('  nrdocs init --token <token> --overwrite-scaffold');
-    console.error(
-      'If you do not want this project, ask your platform operator to delete it from the control plane.',
-    );
+    console.error('  nrdocs init --overwrite-scaffold');
     process.exitCode = 1;
     return;
   } else {
@@ -601,10 +598,9 @@ export async function runInit(args: string[]): Promise<void> {
       }
 
       writeStatusMetadata({
-        project_id: projectId,
+        ...(repoIdFromEnv ? { repo_id: repoId } : {}),
         api_url: apiBaseUrl,
         delivery_url: deliveryBaseUrl ?? null,
-        org_slug: orgSlug,
         slug,
         docs_dir: docsDir,
         publish_branch: publishBranch,
@@ -620,9 +616,11 @@ export async function runInit(args: string[]): Promise<void> {
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       console.error(`Error: Could not write files: ${message}`);
-      console.error(
-        'Note: The project is already registered on the server. Remove it from the control plane if you abandon this checkout.',
-      );
+      if (repoIdFromEnv) {
+        console.error(
+          'Note: The linked Control Plane project still exists. Remove it from the control plane if you abandon this checkout.',
+        );
+      }
       process.exitCode = 1;
       return;
     }
@@ -633,27 +631,35 @@ export async function runInit(args: string[]): Promise<void> {
   void skipCiCheck;
   if (accessMode === 'password') {
     console.log('\nPassword mode selected.');
-    try {
-      const password = await readPasswordHidden('Set initial docs password: ');
-      const confirmPassword = process.env.NRDOCS_NEW_PASSWORD
-        ? password
-        : await readPasswordHidden('Confirm password: ');
-      if (!password) {
-        console.error('Error: Password cannot be empty.');
-        process.exitCode = 1;
-        return;
+    if (repoPublishToken) {
+      try {
+        const password = await readPasswordHidden('Set initial docs password: ');
+        const confirmPassword = process.env.NRDOCS_NEW_PASSWORD
+          ? password
+          : await readPasswordHidden('Confirm password: ');
+        if (!password) {
+          console.error('Error: Password cannot be empty.');
+          process.exitCode = 1;
+          return;
+        }
+        if (password !== confirmPassword) {
+          console.error('Error: Passwords do not match.');
+          process.exitCode = 1;
+          return;
+        }
+        await setRepoPasswordWithPublishToken(apiBaseUrl, repoId, repoPublishToken, password);
+        console.log('✓ Initial password configured.');
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : String(err);
+        console.log(`Warning: Could not set initial password during init: ${message}`);
+        console.log('You can finish this step later with: nrdocs password set');
       }
-      if (password !== confirmPassword) {
-        console.error('Error: Passwords do not match.');
-        process.exitCode = 1;
-        return;
-      }
-      await setProjectPasswordWithPublishToken(apiBaseUrl, projectId, repoPublishToken, password);
-      console.log('✓ Initial password configured.');
-    } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : String(err);
-      console.log(`Warning: Could not set initial password during init: ${message}`);
-      console.log('You can finish this step later with: nrdocs password set');
+    } else {
+      console.log(
+        'Note: init cannot set the initial password without a publish JWT.\n' +
+          'Ask your operator to run: nrdocs admin set-password <repo-id>\n' +
+          'Or, as the repo owner, run: nrdocs password set (repo-proof challenge flow).',
+      );
     }
   } else {
     void repoPublishToken;
@@ -663,25 +669,32 @@ export async function runInit(args: string[]): Promise<void> {
   // Success Summary
   // ══════════════════════════════════════════════════════════════════
 
-  console.log('\n✓ Project onboarded successfully!\n');
-  console.log(`  Project slug:   ${slug}`);
-  console.log(`  Organization:   ${orgName}`);
+  console.log('\n✓ Documentation repo scaffolded successfully!\n');
+  console.log(`  Site slug:      ${slug}`);
   console.log(`  Repo identity:  ${repoIdentity}`);
   console.log(`  Docs directory: ${docsDir}`);
   console.log(`  Publish branch: ${publishBranch}`);
-  const docsUrl = publishedDocsUrl(deliveryBaseUrl, orgSlug, slug);
+  const docsUrl = publishedDocsUrl(deliveryBaseUrl, slug);
   if (docsUrl) {
     console.log(`  Docs URL:       ${docsUrl}`);
   } else {
-    console.log('  Docs URL:       <delivery URL unavailable>');
-    console.log('                  Ask your platform operator for the Delivery Worker URL.');
+    console.log('  Docs URL:       <not known until publish or delivery URL is configured>');
+    console.log(`                  Pattern: https://<delivery-host>/${slug}/ — check the GitHub Actions summary after publish, or run nrdocs status after linking (--repo-id).`);
   }
 
   console.log('\nNext steps:');
   console.log('  1. Review the generated files');
   console.log('  2. Commit the changes: git add -A && git commit -m "Initialize nrdocs"');
-  console.log(`  3. Push to ${publishBranch} to trigger the first publish: git push origin ${publishBranch}`);
+  console.log(
+    `  3. Push to ${publishBranch}: git push origin ${publishBranch} — CI registers and waits for approval, then publishes.`,
+  );
+  console.log(
+    '  4. Find the reader URL in the workflow summary / logs (Reader URL) once DELIVERY_URL is set on the Control Plane.',
+  );
+  console.log('     Optional: nrdocs init --repo-id <uuid> then nrdocs status for the same URL from the API.');
   if (docsUrl) {
-    console.log(`  4. After the workflow succeeds, visit: ${docsUrl}`);
+    console.log(`  5. Open: ${docsUrl}`);
+  } else if (accessMode === 'password') {
+    console.log('  5. After publish: run nrdocs password set (or ask your operator to set-password).');
   }
 }

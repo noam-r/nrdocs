@@ -8,7 +8,7 @@ The importer is **convert-only**. It does not create a remote project, mint toke
 
 ```bash
 nrdocs import mkdocs
-nrdocs init --token '<bootstrap-token>' --docs-dir docs
+nrdocs init --api-url '<control-plane-url>' --repo-id '<repo-id>' --docs-dir docs
 git add .
 git commit -m "Import docs into nrdocs"
 git push -u origin nrdocs
@@ -31,7 +31,7 @@ Do not merge the `nrdocs` branch into your development branch unless you intenti
 
 The workflow publishes from the generated branch and reads docs from the importer output directory. It authenticates using **GitHub Actions OIDC** and does not require per-repo secrets/variables for publishing.
 
-Because import is local-only, you still need to run `nrdocs init --token ...` after import to create the remote project and bind it to the repo identity.
+Because import is local-only, you still need to run `nrdocs init` after import to write the workflow and local metadata for the operator-approved project.
 
 ## Options
 

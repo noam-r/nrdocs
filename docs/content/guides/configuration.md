@@ -21,7 +21,7 @@ Secrets are set via `wrangler secret put` and stored in Cloudflare's encrypted s
 |---|---|---|
 | `HMAC_SIGNING_KEY` | Both | Signs and verifies session tokens (HMAC-SHA256). Must be identical in both Workers. |
 | `API_KEY` | Control Plane only | Authenticates all admin API requests. Sent as `Authorization: Bearer <key>`. |
-| `TOKEN_SIGNING_KEY` | Control Plane only | Signs bootstrap tokens and repo publish tokens (JWT). |
+| `TOKEN_SIGNING_KEY` | Control Plane only | Signs repo publish tokens (JWT). |
 | `DELIVERY_URL` | Control Plane only | Public Delivery Worker base URL. Used by `nrdocs init` to print the final docs URL. |
 
 ### Setting secrets
@@ -66,9 +66,17 @@ Each project has an access mode set at registration:
 The access mode **can** be changed later:
 
 - **Repo owners** can set or disable a password using the repo-proof flow (`nrdocs password set` / `nrdocs password disable`).
-- **Operators** can also change access mode via the Control Plane API (`POST /projects/:id/access-mode`).
+- **Operators** can also change access mode via the Control Plane API (`POST /repos/:id/access-mode`).
 
-If you onboard with `nrdocs init`, the recommended default is to start in `password` mode and set the initial password during `init` so content is never briefly exposed publicly.
+If you initialize a repo with `nrdocs init`, the recommended default is to start in `password` mode and ensure a password is set **before the first publish** (operator: `nrdocs admin set-password <repo-id>`, or repo owner: `nrdocs password set`).
+
+For **password** sites, the delivery worker redirects `https://<host>/<slug>` to `https://<host>/<slug>/` (308) so the site root always matches the trailing-slash URL used for static content and login redirects. Bookmarks and links should prefer the trailing-slash form.
+
+### Delivery host root (`/`)
+
+`GET` or `HEAD` on the delivery origin with path **`/`** (no repo slug) serves a **platform homepage** from the same R2 bucket as publishes, default object key **`site/index.html`**. This repository includes a starter page at **`site/index.html`** (tracked in git; other paths under `site/` remain ignored for generator output). Upload it with for example `wrangler r2 object put nrdocs-content/site/index.html --file=./site/index.html`. Links inside the page should use paths like `/<repo-slug>/` (trailing slash on the site root is recommended).
+
+Override the key with **`HOME_PAGE_R2_KEY`** on the delivery Worker, or set **`HOME_PAGE_R2_KEY`** to an empty string to disable the homepage and return **404** on `/`.
 
 ## Project lifecycle
 

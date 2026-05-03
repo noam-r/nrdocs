@@ -5,7 +5,7 @@ This page is the short operator cheat sheet. It is for **platform operators**, n
 Repo owners normally run:
 
 ```bash
-nrdocs init --token '<bootstrap-token>'
+nrdocs init --api-url '<control-plane-url>' --repo-id '<repo-id>'
 git push
 ```
 
@@ -23,12 +23,6 @@ export NRDOCS_API_KEY='<operator-api-key>'
 Never commit `.env`. Never put `NRDOCS_API_KEY` in a documentation repository workflow.
 
 ## Common commands
-
-```bash
-nrdocs admin init --org default
-```
-
-Create a bootstrap token for repo-owner onboarding. Send the printed token to the repo owner over a secure channel; they run `nrdocs init --token '<bootstrap-token>'` from their docs repo.
 
 ```bash
 nrdocs admin list
@@ -65,9 +59,25 @@ Set or update the password for a password-protected project.
 
 ## Recommended onboarding
 
-1. Operator runs `nrdocs admin init --org default` from an operator workspace.
-2. Repo owner runs `nrdocs init --token '<bootstrap-token>'` from their repository.
-3. Repo owner pushes to the configured publish branch.
+1. Operator registers the project from a docs repo checkout (or with `NRDOCS_DOCS_DIR` pointing at the docs directory):
+
+   ```bash
+   nrdocs admin register
+   ```
+
+2. Operator approves it (and mints an initial publish token for manual operator publishing if needed):
+
+   ```bash
+   nrdocs admin approve <project-id> --repo-identity github.com/org/repo
+   ```
+
+3. Operator gives the repo owner the **Control Plane URL** and the **project id** (not secrets).
+4. Repo owner runs:
+
+   ```bash
+   nrdocs init --api-url '<control-plane-url>' --repo-id '<repo-id>'
+   git push
+   ```
 
 This path creates the project, writes the GitHub Actions workflow, and uses OIDC-based publishing (no per-repo secrets/variables), while avoiding sharing the admin API key with repo owners.
 

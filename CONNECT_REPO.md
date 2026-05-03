@@ -4,98 +4,21 @@ This document is an instruction guide for LLM agents. It describes the exact ste
 
 ## Context
 
-nrdocs is a documentation publishing platform. It takes Markdown files from a repository, builds them into an HTML site with sidebar navigation and in-page TOC, and serves them under the docs hostname. **URLs:** projects in the default org use `https://docs.example.com/<project-slug>/…`; projects in a named org use `https://docs.example.com/<org-slug>/<project-slug>/…`. Project slugs are unique **per organization**, not globally.
+nrdocs is a documentation publishing platform. It takes Markdown files from a repository, builds them into an HTML site with sidebar navigation and in-page TOC, and serves them under the docs hostname. **URLs:** `https://<delivery-host>/<site-slug>/…` (single-tenant; slugs are unique in the deployment).
 
 This doc involves **two different personas**. Do not mix them when giving instructions:
 
-- **Platform operator (admin)**: runs the Control Plane, has `NRDOCS_API_KEY`, can approve/register projects.
+- **Platform operator (admin)**: runs the Control Plane, has `NRDOCS_API_KEY`, can register and approve sites.
 - **Repository owner (author)**: owns a GitHub docs repo, does **not** have `NRDOCS_API_KEY`, only runs `nrdocs init` and pushes to GitHub.
 
 Goal: connect a GitHub repository so its documentation is published automatically by GitHub Actions.
 
-There are two onboarding paths:
+Single onboarding path (operator-only registration):
 
-- **Path A (recommended): bootstrap token onboarding** — operator issues a bootstrap token; repo owner runs `nrdocs init --token ...`.
-- **Path B (operator-only): admin API onboarding** — operator manually registers/approves a project and wires a workflow (use only for recovery or operator-managed repos).
+- **Operator** registers and approves the site (and sets password if needed).
+- **Repo owner** runs tokenless `nrdocs init` to generate local files + the secretless OIDC workflow, then pushes.
 
-## Path A: Bootstrap Token Onboarding (recommended)
-
-### Who does what
-
-- **Operator**: issues a bootstrap token and (if required by your policy) approves the project.
-- **Repo owner**: runs `nrdocs init --token ...`, commits files, pushes to GitHub.
-
-### Repo owner instructions (the only steps they need)
-
-1. Get a bootstrap token from your operator.
-2. From the repo root:
-
-```bash
-nrdocs init --token <bootstrap-token>
-git add -A
-git commit -m "Initialize nrdocs"
-git push
-```
-
-3. Check GitHub Actions for the “Publish Docs to nrdocs” run.
-
-Important: the repo owner does **not** need `NRDOCS_API_KEY`.
-
-### What you need from the user
-
-| Value | What it is | Example |
-|---|---|---|
-| Bootstrap token | An org-scoped JWT issued by an admin | `eyJhbGciOi...` |
-
-That's it. Everything else is inferred or prompted interactively.
-
-### Run the init command
-
-```bash
-nrdocs init --token <bootstrap-token>
-```
-
-The CLI will:
-1. Validate the token against the control plane
-2. Detect the git remote and infer repo identity, slug, and title
-3. Prompt the user to confirm or override each value
-4. Create the project on the control plane (and bind it to the repo identity)
-5. Generate `project.yml`, `nav.yml`, `content/home.md`, and `.github/workflows/publish-docs.yml`
-6. Generate a secretless publish workflow using GitHub Actions OIDC (no per-repo secrets/variables)
-
-For non-interactive use (CI, scripts):
-
-```bash
-nrdocs init --token <token> --slug my-project --title "My Project" --repo-identity github.com/org/repo --docs-dir docs --publish-branch docs --description "My docs"
-```
-
-### After init
-
-The user just needs to:
-1. Review the generated files
-2. Commit: `git add -A && git commit -m "Initialize nrdocs"`
-3. Push to the workflow branch (default `main`, or your `--publish-branch` value): `git push origin <publish-branch>`
-
-The GitHub Actions workflow triggers automatically and publishes the docs.
-
-### Generated workflow differences
-
-The bootstrap-generated workflow uses **GitHub Actions OIDC** to obtain short-lived publish credentials on each run:
-
-- Job permissions include `id-token: write`
-- The workflow exchanges the GitHub OIDC token at `POST /oidc/publish-credentials`
-- The Control Plane returns `{ project_id, repo_publish_token }`
-- The publish call still sends `X-Repo-Identity: github.com/${{ github.repository }}` for repo binding
-- The API URL is embedded directly in the workflow file (not a secret)
-
-For details and configuration requirements, see `docs/content/guides/oidc-publishing.md`.
-
-## Path B: Admin API Onboarding
-
-This path is **operator-only**. It exists for:
-
-- operator-managed projects where the repo owner will not run `nrdocs init`, or
-- recovery when a repo is already in a specific shape and you want to wire it manually.
+Repo owners do **not** need `NRDOCS_API_KEY`.
 
 ### What you need from the user
 
@@ -105,7 +28,7 @@ Before starting, the **operator** must have these values (from the nrdocs platfo
 |---|---|---|
 | `NRDOCS_API_URL` | URL of the Control Plane Worker | `https://nrdocs-control-plane.example.workers.dev` |
 | `NRDOCS_API_KEY` | Admin API key (set during nrdocs installation) | `0553c09...` (64-char hex string) |
-| `slug` | Project slug (lowercase, hyphens; **unique within the org** that owns the project) | `my-project` |
+| `slug` | Site slug (lowercase, hyphens; **unique** in this nrdocs deployment) | `my-project` |
 | `title` | Display title for the sidebar header | `My Project Docs` |
 | `access_mode` | `public` (open) or `password` (requires login) | `public` |
 | `docs_dir` | Where docs live in the repo (default: repo root `.`) | `docs` or `.` |
@@ -126,7 +49,7 @@ publish_enabled: true
 access_mode: <access_mode>
 ```
 
-All fields are required. The `slug` must be **unique within the project's organization** and determines the path segment for that project. Admin API registration today assigns the **default** org, so the public URL is `https://<delivery-host>/<slug>/` unless you use multi-tenant org routing (`/<org-slug>/<slug>/`).
+All fields are required. The `slug` must be **unique** in this deployment and determines the path segment. The public URL is `https://<delivery-host>/<slug>/`.
 
 ### nav.yml
 
@@ -232,9 +155,9 @@ jobs:
           if [ -z "$oidc_token" ] || [ "$oidc_token" = "null" ]; then echo "::error::Failed to acquire GitHub OIDC token"; exit 1; fi
 
           creds=$(curl -sSf -X POST -H "Authorization: Bearer $oidc_token" "${NRDOCS_API_URL}/oidc/publish-credentials")
-          NRDOCS_PROJECT_ID=$(echo "$creds" | jq -r '.project_id')
+          NRDOCS_REPO_ID=$(echo "$creds" | jq -r '.repo_id')
           NRDOCS_PUBLISH_TOKEN=$(echo "$creds" | jq -r '.repo_publish_token')
-          if [ -z "$NRDOCS_PROJECT_ID" ] || [ "$NRDOCS_PROJECT_ID" = "null" ]; then echo "::error::OIDC exchange did not return project_id"; echo "$creds"; exit 1; fi
+          if [ -z "$NRDOCS_REPO_ID" ] || [ "$NRDOCS_REPO_ID" = "null" ]; then echo "::error::OIDC exchange did not return repo_id"; echo "$creds"; exit 1; fi
           if [ -z "$NRDOCS_PUBLISH_TOKEN" ] || [ "$NRDOCS_PUBLISH_TOKEN" = "null" ]; then echo "::error::OIDC exchange did not return repo_publish_token"; echo "$creds"; exit 1; fi
 
           project_yml=$(jq -Rs '.' < "$DOCS_DIR/project.yml")
@@ -248,32 +171,36 @@ jobs:
             pages_json=$(echo "$pages_json" | jq --arg k "$key" --argjson v "$page_content" '. + {($k): $v}')
           done < <(find "$DOCS_DIR/content" -name '*.md' -type f -print0 | sort -z)
           payload=$(jq -n --argjson project_yml "$project_yml" --argjson nav_yml "$nav_yml" --argjson allowed_list_yml "$allowed_list_yml" --argjson pages "$pages_json" '{repo_content: {project_yml: $project_yml, nav_yml: $nav_yml, allowed_list_yml: $allowed_list_yml, pages: $pages}}')
-          http_code=$(curl -s -o response.json -w '%{http_code}' -X POST -H "Content-Type: application/json" -H "Authorization: Bearer ${NRDOCS_PUBLISH_TOKEN}" -H "X-Repo-Identity: github.com/${{ github.repository }}" -d "$payload" "${NRDOCS_API_URL}/projects/${NRDOCS_PROJECT_ID}/publish")
+          http_code=$(curl -s -o response.json -w '%{http_code}' -X POST -H "Content-Type: application/json" -H "Authorization: Bearer ${NRDOCS_PUBLISH_TOKEN}" -H "X-Repo-Identity: github.com/${{ github.repository }}" -d "$payload" "${NRDOCS_API_URL}/repos/${NRDOCS_REPO_ID}/publish")
           echo "Response status: ${http_code}"
           cat response.json
           if [ "$http_code" -lt 200 ] || [ "$http_code" -ge 300 ]; then echo "::error::Publish failed with HTTP ${http_code}"; exit 1; fi
           echo "Publish succeeded."
 ```
 
-## Step 3: Register the project with the Control Plane
+## Step 3: Register the site with the Control Plane
 
-This step requires the nrdocs CLI or a direct API call. The project must be registered and approved before publishing works.
+This step requires the nrdocs CLI or a direct API call. The repo row must be registered and approved before publishing works.
 
-### Option A: Using the nrdocs CLI (if available)
-
-If the user has the nrdocs repo cloned with the CLI set up:
+### Using the nrdocs CLI
 
 ```bash
 NRDOCS_DOCS_DIR=<docs_dir> nrdocs admin register
-# Copy the project ID from the output
-nrdocs admin approve <id> --repo-identity github.com/org/repo
+# Copy the repo id from the output
+nrdocs admin approve <repo-id> --repo-identity github.com/org/repo
+```
+Then give the repo owner the Control Plane URL and the repo id, and have them run:
+
+```bash
+nrdocs init --api-url '<control-plane-url>' --repo-id '<repo-id>'
+git push
 ```
 
-### Option B: Using curl
+### Using curl (operator alternative)
 
 ```bash
 # Register
-curl -X POST "$NRDOCS_API_URL/projects" \
+curl -X POST "$NRDOCS_API_URL/repos" \
   -H "Authorization: Bearer $NRDOCS_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
@@ -281,22 +208,23 @@ curl -X POST "$NRDOCS_API_URL/projects" \
     "repo_url": "https://github.com/<org>/<repo>",
     "title": "<title>",
     "description": "<description>",
-    "access_mode": "<access_mode>"
+    "access_mode": "<access_mode>",
+    "repo_identity": "github.com/<org>/<repo>"
   }'
 
-# Response includes "id" — save it as PROJECT_ID
+# Response includes "id" — save it as REPO_ID
 
 # Approve
-curl -X POST "$NRDOCS_API_URL/projects/$PROJECT_ID/approve" \
+curl -X POST "$NRDOCS_API_URL/repos/$REPO_ID/approve" \
   -H "Authorization: Bearer $NRDOCS_API_KEY"
 ```
 
-### For password-protected projects
+### For password-protected sites
 
 If `access_mode` is `password`, also set the password:
 
 ```bash
-curl -X POST "$NRDOCS_API_URL/projects/$PROJECT_ID/password" \
+curl -X POST "$NRDOCS_API_URL/repos/$REPO_ID/password" \
   -H "Authorization: Bearer $NRDOCS_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{"password": "<password>"}'
@@ -316,7 +244,7 @@ If docs are in a subdirectory (not repo root), add a **variable**:
 
 After all files are created and secrets are configured, push to `main`. The GitHub Actions workflow will trigger and publish the docs.
 
-The site will be available at `https://<delivery-worker-domain>/<slug>/` when the project lives in the **default** organization, or `https://<delivery-worker-domain>/<org-slug>/<slug>/` when using an explicit org segment.
+The site will be available at `https://<delivery-worker-domain>/<slug>/`.
 
 ## Checklist
 
@@ -326,7 +254,7 @@ Before telling the user it's done, verify:
 - [ ] `nav.yml` exists with at least one page
 - [ ] Every `path` in `nav.yml` has a corresponding `content/<path>.md` file
 - [ ] `.github/workflows/publish-docs.yml` exists
-- [ ] Project is registered and approved via the Control Plane API
+- [ ] The site is registered and approved via the Control Plane API, with **`repo_identity`** set to `github.com/<org>/<repo>` (required for OIDC)
 - [ ] If docs are in a subdirectory, NRDOCS_DOCS_DIR variable is set
 
 ## Common errors
@@ -335,7 +263,7 @@ Before telling the user it's done, verify:
 |---|---|---|
 | `Slug mismatch` | `slug` in project.yml doesn't match the registered slug | Make them identical |
 | `nav.yml references pages that do not exist` | A `path` in nav.yml has no matching `.md` file | Create the missing file or fix the path |
-| `Cannot publish project with status 'awaiting_approval'` | Project wasn't approved | Run the approve API call |
-| `A project with slug "X" already exists` | That slug is already used **in the same organization** | Choose a different slug (or a different org) |
-| `Publish failed with HTTP 401` | OIDC exchange failed or publish JWT is invalid | Ensure the Control Plane supports `POST /oidc/publish-credentials` and the project `repo_identity` matches `github.com/<owner>/<repo>` |
-| `No project is registered for repository github.com/<owner>/<repo>` | Project is missing `repo_identity` or points at a different repo | Set `repo_identity` on the project (or onboard via `nrdocs init` from the correct repo), then retry |
+| `Cannot publish project with status 'awaiting_approval'` | Site wasn't approved | Run the approve API call |
+| `A project with slug "X" already exists` | That slug is already used in this deployment | Choose a different slug |
+| `Publish failed with HTTP 401` | OIDC exchange failed or publish JWT is invalid | Ensure the Control Plane supports `POST /oidc/publish-credentials` and `repo_identity` matches `github.com/<owner>/<repo>` |
+| `No project is registered for repository github.com/<owner>/<repo>` | Row is missing `repo_identity` or points at a different repo | Set `repo_identity` at registration (or mint with `--repo-identity`), then retry |

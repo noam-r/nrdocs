@@ -2,107 +2,14 @@ export interface ApiError {
   error: string;
 }
 
-export interface BootstrapValidateResponse {
-  org_name: string;
-  org_slug: string;
-  remaining_quota: number;
-  expires_at: string;
-  delivery_url?: string;
-}
-
-export async function bootstrapValidate(
-  apiBaseUrl: string,
-  bootstrapToken: string,
-): Promise<BootstrapValidateResponse> {
-  let response: Response;
-  const url = `${apiBaseUrl}/bootstrap/init`;
-
-  try {
-    response = await fetch(url, {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${bootstrapToken}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({}),
-    });
-  } catch (_error: unknown) {
-    const reason = _error instanceof Error ? _error.message : 'Unknown error';
-    throw new Error(`Could not connect to ${url}: ${reason}`);
-  }
-
-  if (!response.ok) {
-    let errorMessage: string;
-    try {
-      const body = (await response.json()) as ApiError;
-      errorMessage = body.error;
-    } catch {
-      errorMessage = 'Unknown error';
-    }
-    throw new Error(`API request failed (${response.status}): ${errorMessage}`);
-  }
-
-  return (await response.json()) as BootstrapValidateResponse;
-}
-
-export interface BootstrapOnboardRequest {
+/** Public status from GET /status/:id (no API key). */
+export interface RepoStatusResponse {
+  repo_id: string;
   slug: string;
   title: string;
-  description: string;
-  repo_identity: string;
-  access_mode?: 'public' | 'password';
-}
-
-export interface BootstrapOnboardResponse {
-  project_id: string;
-  repo_publish_token: string;
-  delivery_url?: string;
-  recovered?: boolean;
-}
-
-export async function bootstrapOnboard(
-  apiBaseUrl: string,
-  bootstrapToken: string,
-  request: BootstrapOnboardRequest,
-): Promise<BootstrapOnboardResponse> {
-  let response: Response;
-  const url = `${apiBaseUrl}/bootstrap/onboard`;
-
-  try {
-    response = await fetch(url, {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${bootstrapToken}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(request),
-    });
-  } catch (_error: unknown) {
-    const reason = _error instanceof Error ? _error.message : 'Unknown error';
-    throw new Error(`Could not connect to ${url}: ${reason}`);
-  }
-
-  if (!response.ok) {
-    let errorMessage: string;
-    try {
-      const body = (await response.json()) as ApiError;
-      errorMessage = body.error;
-    } catch {
-      errorMessage = 'Unknown error';
-    }
-    throw new Error(`API request failed (${response.status}): ${errorMessage}`);
-  }
-
-  return (await response.json()) as BootstrapOnboardResponse;
-}
-
-export interface ProjectStatusResponse {
-  project_id: string;
-  slug: string;
-  title: string;
-  org_slug: string;
   status: 'awaiting_approval' | 'approved' | 'disabled';
   access_mode: 'public' | 'password';
+  repo_identity?: string | null;
   approved: boolean;
   published: boolean;
   active_publish_pointer: string | null;
@@ -111,12 +18,12 @@ export interface ProjectStatusResponse {
   updated_at: string;
 }
 
-export async function getProjectStatus(
+export async function getRepoStatus(
   apiBaseUrl: string,
-  projectId: string,
-): Promise<ProjectStatusResponse> {
+  repoId: string,
+): Promise<RepoStatusResponse> {
   let response: Response;
-  const url = `${apiBaseUrl.replace(/\/$/, '')}/status/${encodeURIComponent(projectId)}`;
+  const url = `${apiBaseUrl.replace(/\/$/, '')}/status/${encodeURIComponent(repoId)}`;
 
   try {
     response = await fetch(url);
@@ -136,17 +43,17 @@ export async function getProjectStatus(
     throw new Error(`API request failed (${response.status}): ${errorMessage}`);
   }
 
-  return (await response.json()) as ProjectStatusResponse;
+  return (await response.json()) as RepoStatusResponse;
 }
 
-export async function setProjectPasswordWithPublishToken(
+export async function setRepoPasswordWithPublishToken(
   apiBaseUrl: string,
-  projectId: string,
+  repoId: string,
   repoPublishToken: string,
   password: string,
 ): Promise<void> {
   let response: Response;
-  const url = `${apiBaseUrl.replace(/\/$/, '')}/projects/${encodeURIComponent(projectId)}/password`;
+  const url = `${apiBaseUrl.replace(/\/$/, '')}/repos/${encodeURIComponent(repoId)}/password`;
 
   try {
     response = await fetch(url, {

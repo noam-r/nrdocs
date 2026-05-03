@@ -44,8 +44,9 @@
 
 ## Publishing requirements
 
-- A project must be explicitly registered by admin API before it can publish.
-- Publishing is automatic after registration.
+- A project must be explicitly registered by the operator (admin API) before it can publish.
+- A project must be **approved** before it can publish or serve content.
+- Publishing is automatic after a git push triggers GitHub Actions (OIDC-based workflow).
 - Publishing must read repository config from the registered repository.
 - Publishing must update content and sync any relevant repository-derived desired state.
 - A project may publish only if it is approved/enabled.

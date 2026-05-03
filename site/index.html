@@ -1,0 +1,694 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="description" content="nrdocs is an open-source tool for publishing documentation from GitHub repositories while keeping docs with the code and controlling docs visibility independently." />
+  <title>nrdocs — Keep docs with the code</title>
+  <style>
+    :root {
+      --bg: #f7f7f4;
+      --surface: #ffffff;
+      --surface-alt: #efefe9;
+      --text: #171717;
+      --muted: #686860;
+      --line: #deded6;
+      --accent: #1f6feb;
+      --accent-dark: #174ea6;
+      --code-bg: #202124;
+      --code-text: #f5f5f0;
+      --max: 1120px;
+      --radius: 18px;
+      --shadow: 0 18px 50px rgba(20, 20, 20, 0.08);
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html {
+      scroll-behavior: smooth;
+    }
+
+    body {
+      margin: 0;
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.6;
+      -webkit-font-smoothing: antialiased;
+      text-rendering: optimizeLegibility;
+    }
+
+    a {
+      color: inherit;
+      text-decoration: none;
+    }
+
+    .site-header {
+      position: sticky;
+      top: 0;
+      z-index: 20;
+      border-bottom: 1px solid rgba(222, 222, 214, 0.8);
+      background: rgba(247, 247, 244, 0.88);
+      backdrop-filter: blur(16px);
+    }
+
+    .nav {
+      max-width: var(--max);
+      margin: 0 auto;
+      padding: 18px 24px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 24px;
+    }
+
+    .brand {
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+      font-weight: 720;
+      letter-spacing: -0.03em;
+      font-size: 20px;
+    }
+
+    .brand-mark {
+      width: 34px;
+      height: 34px;
+      border-radius: 10px;
+      display: grid;
+      place-items: center;
+      background: var(--text);
+      color: var(--surface);
+      font-size: 14px;
+      font-weight: 800;
+      letter-spacing: -0.05em;
+    }
+
+    .nav-links {
+      display: flex;
+      align-items: center;
+      gap: 22px;
+      color: var(--muted);
+      font-size: 14px;
+      font-weight: 560;
+    }
+
+    .nav-links a:hover {
+      color: var(--text);
+    }
+
+    .container {
+      max-width: var(--max);
+      margin: 0 auto;
+      padding: 0 24px;
+    }
+
+    .hero {
+      padding: 86px 0 64px;
+      display: grid;
+      grid-template-columns: minmax(0, 1.05fr) minmax(320px, 0.95fr);
+      gap: 54px;
+      align-items: center;
+    }
+
+    .eyebrow {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 7px 11px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: var(--surface);
+      color: var(--muted);
+      font-size: 13px;
+      font-weight: 620;
+      margin-bottom: 22px;
+    }
+
+    .eyebrow span {
+      width: 7px;
+      height: 7px;
+      border-radius: 999px;
+      background: #2da44e;
+    }
+
+    h1, h2, h3, p {
+      margin-top: 0;
+    }
+
+    h1 {
+      font-size: clamp(46px, 7vw, 82px);
+      line-height: 0.94;
+      letter-spacing: -0.075em;
+      margin-bottom: 26px;
+    }
+
+    .hero-copy {
+      font-size: clamp(18px, 2vw, 22px);
+      color: var(--muted);
+      max-width: 660px;
+      margin-bottom: 34px;
+    }
+
+    .hero-copy strong {
+      color: var(--text);
+      font-weight: 720;
+    }
+
+    .actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+      align-items: center;
+    }
+
+    .button {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 46px;
+      padding: 0 18px;
+      border-radius: 12px;
+      font-weight: 700;
+      border: 1px solid transparent;
+      transition: transform 160ms ease, background 160ms ease, border-color 160ms ease;
+    }
+
+    .button:hover {
+      transform: translateY(-1px);
+    }
+
+    .button.primary {
+      background: var(--text);
+      color: var(--surface);
+    }
+
+    .button.primary:hover {
+      background: #2c2c2c;
+    }
+
+    .button.secondary {
+      background: var(--surface);
+      color: var(--text);
+      border-color: var(--line);
+    }
+
+    .button.secondary:hover {
+      border-color: #c7c7bd;
+    }
+
+    .hero-card {
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: 26px;
+      box-shadow: var(--shadow);
+      overflow: hidden;
+    }
+
+    .terminal-top {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      padding: 16px 18px;
+      background: var(--surface-alt);
+      border-bottom: 1px solid var(--line);
+    }
+
+    .dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 999px;
+      background: #c9c9c1;
+    }
+
+    .terminal {
+      margin: 0;
+      background: var(--code-bg);
+      color: var(--code-text);
+      padding: 24px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+      font-size: 14px;
+      line-height: 1.75;
+      min-height: 330px;
+      overflow-x: auto;
+      white-space: pre;
+    }
+
+    .terminal code {
+      display: block;
+      background: transparent;
+      border: 0;
+      border-radius: 0;
+      padding: 0;
+      color: inherit;
+      font: inherit;
+    }
+
+    .terminal .muted {
+      color: #a8a8a0;
+    }
+
+    .terminal .ok {
+      color: #9be9a8;
+    }
+
+    .terminal .path {
+      color: #79c0ff;
+    }
+
+    section {
+      padding: 68px 0;
+    }
+
+    .section-head {
+      max-width: 760px;
+      margin-bottom: 34px;
+    }
+
+    .section-kicker {
+      color: var(--accent-dark);
+      font-size: 13px;
+      font-weight: 800;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      margin-bottom: 12px;
+    }
+
+    h2 {
+      font-size: clamp(32px, 5vw, 52px);
+      line-height: 1.02;
+      letter-spacing: -0.055em;
+      margin-bottom: 16px;
+    }
+
+    .section-copy {
+      color: var(--muted);
+      font-size: 18px;
+      max-width: 720px;
+    }
+
+    .grid {
+      display: grid;
+      gap: 18px;
+    }
+
+    .grid.three {
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+
+    .grid.four {
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+    }
+
+    .grid.two {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      padding: 24px;
+    }
+
+    .card h3 {
+      font-size: 20px;
+      letter-spacing: -0.03em;
+      margin-bottom: 10px;
+    }
+
+    .card p {
+      color: var(--muted);
+      margin-bottom: 0;
+    }
+
+    .big-card {
+      padding: 32px;
+      border-radius: 26px;
+    }
+
+    .workflow {
+      display: grid;
+      grid-template-columns: repeat(5, minmax(0, 1fr));
+      gap: 12px;
+      margin-top: 28px;
+    }
+
+    .step {
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      padding: 18px;
+      min-height: 142px;
+      position: relative;
+    }
+
+    .step-number {
+      display: inline-grid;
+      place-items: center;
+      width: 28px;
+      height: 28px;
+      border-radius: 9px;
+      background: var(--surface-alt);
+      color: var(--muted);
+      font-size: 13px;
+      font-weight: 800;
+      margin-bottom: 18px;
+    }
+
+    .step strong {
+      display: block;
+      line-height: 1.25;
+      letter-spacing: -0.02em;
+      margin-bottom: 8px;
+    }
+
+    .step span {
+      color: var(--muted);
+      font-size: 14px;
+      line-height: 1.45;
+      display: block;
+    }
+
+    .split {
+      display: grid;
+      grid-template-columns: 0.9fr 1.1fr;
+      gap: 28px;
+      align-items: start;
+    }
+
+    .list {
+      display: grid;
+      gap: 12px;
+      margin: 0;
+      padding: 0;
+      list-style: none;
+    }
+
+    .list li {
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      padding: 16px 18px;
+      color: var(--muted);
+    }
+
+    .list strong {
+      color: var(--text);
+    }
+
+    .callout {
+      background: var(--text);
+      color: var(--surface);
+      border-radius: 28px;
+      padding: 44px;
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 28px;
+      align-items: center;
+    }
+
+    .callout h2 {
+      color: var(--surface);
+      margin-bottom: 12px;
+    }
+
+    .callout p {
+      color: #d6d6cf;
+      max-width: 680px;
+      margin-bottom: 0;
+      font-size: 18px;
+    }
+
+    .callout .button {
+      background: var(--surface);
+      color: var(--text);
+      white-space: nowrap;
+    }
+
+    .footnote {
+      color: var(--muted);
+      font-size: 14px;
+      text-align: center;
+      padding: 34px 24px 48px;
+    }
+
+    code {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+      font-size: 0.92em;
+      background: var(--surface-alt);
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      padding: 0.16em 0.36em;
+    }
+
+    @media (max-width: 900px) {
+      .nav-links {
+        display: none;
+      }
+
+      .hero,
+      .split,
+      .callout {
+        grid-template-columns: 1fr;
+      }
+
+      .grid.three,
+      .grid.four,
+      .grid.two,
+      .workflow {
+        grid-template-columns: 1fr;
+      }
+
+      .hero {
+        padding-top: 60px;
+      }
+
+      .callout {
+        padding: 32px;
+      }
+    }
+
+    @media (max-width: 520px) {
+      .container,
+      .nav {
+        padding-left: 18px;
+        padding-right: 18px;
+      }
+
+      h1 {
+        font-size: 46px;
+      }
+
+      .terminal {
+        font-size: 12px;
+        padding: 18px;
+      }
+
+      .big-card,
+      .callout {
+        padding: 24px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <header class="site-header">
+    <nav class="nav" aria-label="Primary navigation">
+      <a class="brand" href="#top" aria-label="nrdocs home">
+        <span class="brand-mark">nr</span>
+        <span>nrdocs</span>
+      </a>
+      <div class="nav-links">
+        <a href="#why">Why</a>
+        <a href="#workflow">Workflow</a>
+        <a href="#use-cases">Use cases</a>
+        <a href="#open-source">Open source</a>
+        <a href="https://github.com/noam-r/nrdocs">GitHub</a>
+        <a href="https://nrdocs.quinovi.com/nrdocs">See it in action</a>
+      </div>
+    </nav>
+  </header>
+
+  <main id="top">
+    <div class="container">
+      <section class="hero" aria-labelledby="hero-title">
+        <div>
+          <div class="eyebrow"><span aria-hidden="true"></span> Open-source docs publishing</div>
+          <h1 id="hero-title">Keep docs with the code. Publish only the docs.</h1>
+          <p class="hero-copy">
+            <strong>nrdocs</strong> is an open-source publishing tool for documentation stored in GitHub repositories. Manage docs alongside your code, publish them without running servers, and choose whether the generated site is public or protected.
+          </p>
+          <div class="actions">
+            <a class="button primary" href="https://github.com/noam-r/nrdocs">View on GitHub</a>
+            <a class="button secondary" href="https://nrdocs.quinovi.com/nrdocs">See it in action</a>
+          </div>
+        </div>
+
+        <aside class="hero-card" aria-label="Example nrdocs workflow">
+          <div class="terminal-top" aria-hidden="true">
+            <span class="dot"></span>
+            <span class="dot"></span>
+            <span class="dot"></span>
+          </div>
+          <pre class="terminal"><code><span class="muted"># one-time per machine</span>
+nrdocs config set api-url 'https://&lt;control-plane&gt;.workers.dev'
+
+<span class="muted"># inside your project repo</span>
+<span class="muted"># if you already have MkDocs content:</span>
+nrdocs import mkdocs
+nrdocs init
+
+<span class="muted"># write docs like a normal person</span>
+git add .
+git commit -m "Add project docs"
+git push
+
+<span class="muted"># CI auto-registers, waits for operator approval, then publishes</span>
+<span class="ok">✓ docs published</span>
+<span class="path">https://&lt;delivery-host&gt;/&lt;site-slug&gt;/</span></code></pre>
+        </aside>
+      </section>
+    </div>
+
+    <section id="why">
+      <div class="container">
+        <div class="section-head">
+          <div class="section-kicker">The point</div>
+          <h2>Documentation gets worse when it lives somewhere else.</h2>
+          <p class="section-copy">
+            A separate docs repo sounds harmless until code changes, docs changes, reviews, releases, and ownership all start drifting apart. nrdocs lets docs stay in the project repo while publishing only the generated documentation site.
+          </p>
+        </div>
+
+        <div class="grid four">
+          <article class="card">
+            <h3>Docs live with code</h3>
+            <p>Keep documentation in the same repository as the implementation, where pull requests, ownership, and release work already happen.</p>
+          </article>
+          <article class="card">
+            <h3>Visibility is separate</h3>
+            <p>Use public or private repos. Publish public or protected docs. Those should be separate choices.</p>
+          </article>
+          <article class="card">
+            <h3>No servers to run</h3>
+            <p>nrdocs runs on Cloudflare Workers, D1, and R2. No VM, no container, no tiny forgotten server.</p>
+          </article>
+          <article class="card">
+            <h3>Access control built in</h3>
+            <p>Serve docs publicly, protect them with a password today, and support invite-only access by email in the future.</p>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <section id="workflow">
+      <div class="container">
+        <div class="section-head">
+          <div class="section-kicker">Workflow</div>
+          <h2>A normal Git workflow for documentation.</h2>
+          <p class="section-copy">
+            Write docs where the work happens. Review them with code changes. Push as usual. The first CI run auto-registers the site with OIDC, an operator approves, and the same run publishes and serves the generated site without requiring a server or a separate public mirror repository.
+          </p>
+        </div>
+
+        <div class="workflow" aria-label="nrdocs publishing workflow">
+          <div class="step">
+            <div class="step-number">1</div>
+            <strong>Write docs with code</strong>
+            <span>Keep Markdown in the project repo, close to the implementation it documents.</span>
+          </div>
+          <div class="step">
+            <div class="step-number">2</div>
+            <strong>Review and push</strong>
+            <span>Use the same GitHub review flow you already use for code changes.</span>
+          </div>
+          <div class="step">
+            <div class="step-number">3</div>
+            <strong>Build and publish</strong>
+            <span>The control plane validates and builds the documentation site.</span>
+          </div>
+          <div class="step">
+            <div class="step-number">4</div>
+            <strong>Store</strong>
+            <span>Static artifacts go to R2 and project state goes to D1.</span>
+          </div>
+          <div class="step">
+            <div class="step-number">5</div>
+            <strong>Serve</strong>
+            <span>The delivery worker serves public docs, password-protected docs, and future invite-only access.</span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="use-cases">
+      <div class="container split">
+        <div class="section-head">
+          <div class="section-kicker">Good for</div>
+          <h2>Good for projects where docs should move with the work.</h2>
+          <p class="section-copy">
+            nrdocs is intentionally boring infrastructure. That is the idea. You update docs where the work is happening, push them, and get a URL.
+          </p>
+        </div>
+
+        <ul class="list">
+          <li><strong>Public docs for private products.</strong> Keep the source private and publish only the generated site.</li>
+          <li><strong>Protected docs for any repo.</strong> Use public or private repositories, then decide separately whether the docs should be public or password-protected.</li>
+          <li><strong>Client projects.</strong> Document implementation details without exposing the client repository.</li>
+          <li><strong>Internal tools.</strong> Give teams a lightweight private docs site without rolling out a full portal or running another server.</li>
+          <li><strong>Same-repo documentation.</strong> Review documentation changes alongside code changes instead of syncing a second repo.</li>
+          <li><strong>Release-aware docs.</strong> Update docs in the same branch or pull request as the feature, fix, or breaking change they describe.</li>
+          <li><strong>Existing MkDocs sites.</strong> Import an existing MkDocs project with <code>nrdocs import mkdocs</code> instead of rebuilding the docs structure by hand.</li>
+          <li><strong>Many small docs sites.</strong> Serve multiple projects under one shared hostname with one Cloudflare-backed platform.</li>
+        </ul>
+      </div>
+    </section>
+
+    <section>
+      <div class="container">
+        <div class="grid two">
+          <article class="card big-card">
+            <div class="section-kicker">What it is</div>
+            <h2>A serverless publishing layer.</h2>
+            <p>
+              nrdocs handles onboarding, publishing, routing, access policy, artifact storage, and serving. Your documentation can stay in the project repository, while only the generated site is published.
+            </p>
+          </article>
+          <article class="card big-card">
+            <div class="section-kicker">What it is not</div>
+            <h2>Not another docs religion.</h2>
+            <p>
+              nrdocs is not trying to replace MkDocs, Docusaurus, Starlight, or your favorite static site generator. Those are good. If you already have a MkDocs site, <code>nrdocs import mkdocs</code> gives you a direct path in.
+            </p>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <section id="open-source">
+      <div class="container">
+        <div class="callout">
+          <div>
+            <div class="section-kicker" style="color: #a7c7ff;">Open source</div>
+            <h2>Run it yourself. Change it if you need to.</h2>
+            <p>
+              nrdocs is built for people who want a practical, open-source way to publish project documentation from GitHub repositories. It runs without servers on Cloudflare Workers, D1, and R2, supports password-protected docs today, and is designed to grow toward invite-only access without turning into a platform team cosplay exercise.
+            </p>
+          </div>
+          <div class="actions">
+            <a class="button" href="https://github.com/noam-r/nrdocs">Get the code</a>
+            <a class="button" href="https://nrdocs.quinovi.com/nrdocs">See it in action</a>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="footnote">
+    <p>nrdocs: because docs should move with the work, not chase it around.</p>
+  </footer>
+</body>
+</html>

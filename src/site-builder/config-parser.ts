@@ -3,6 +3,16 @@ import type { ProjectConfig, NavConfig, NavItem, AllowedListConfig, AccessMode }
 
 const VALID_ACCESS_MODES: AccessMode[] = ['public', 'password'];
 
+const PROJECT_SLUG_PATTERN = /^[a-z0-9][a-z0-9-]*[a-z0-9]$|^[a-z0-9]$/;
+
+/**
+ * Validate a site slug (lowercase alphanumeric + internal hyphens).
+ * Matches CLI `isValidSlug` rules.
+ */
+export function isValidProjectSlug(slug: string): boolean {
+  return typeof slug === 'string' && slug.length > 0 && PROJECT_SLUG_PATTERN.test(slug);
+}
+
 /**
  * Parse and validate a `project.yml` file.
  *

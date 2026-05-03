@@ -3,9 +3,8 @@ import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 vi.mock('../api-client', () => ({
-  bootstrapValidate: vi.fn(),
-  bootstrapOnboard: vi.fn(),
-  setProjectPasswordWithPublishToken: vi.fn(),
+  setRepoPasswordWithPublishToken: vi.fn(),
+  getRepoStatus: vi.fn(),
 }));
 
 vi.mock('../prompts', () => ({
@@ -25,24 +24,6 @@ vi.mock('../gh-integration', () => ({
 const TMP = join(process.cwd(), 'cli', 'src', '__test_init_tmp__');
 const originalCwd = process.cwd();
 
-function base64url(value: unknown): string {
-  return Buffer.from(JSON.stringify(value), 'utf8').toString('base64url');
-}
-
-function bootstrapToken(): string {
-  return [
-    base64url({ alg: 'HS256', typ: 'JWT' }),
-    base64url({
-      v: 1,
-      typ: 'org_bootstrap',
-      iss: 'https://cp.example',
-      exp: Math.floor(Date.now() / 1000) + 3600,
-      jti: 'bootstrap-1',
-    }),
-    'signature',
-  ].join('.');
-}
-
 describe('runInit', () => {
   beforeEach(async () => {
     rmSync(TMP, { recursive: true, force: true });
@@ -56,19 +37,21 @@ describe('runInit', () => {
     process.exitCode = undefined;
 
     const api = await import('../api-client');
-    vi.mocked(api.bootstrapValidate).mockResolvedValue({
-      org_name: 'Acme',
-      org_slug: 'acme',
-      remaining_quota: 1,
-      expires_at: '2026-01-01T00:00:00.000Z',
+    vi.mocked(api.setRepoPasswordWithPublishToken).mockResolvedValue();
+    vi.mocked(api.getRepoStatus).mockResolvedValue({
+      repo_id: 'project-1',
+      slug: 'docs',
+      title: 'Docs',
+      status: 'approved',
+      access_mode: 'public',
+      repo_identity: 'github.com/acme/docs',
+      approved: true,
+      published: false,
+      active_publish_pointer: null,
       delivery_url: 'https://docs.example.com',
+      url: 'https://docs.example.com/docs/',
+      updated_at: '2026-01-01T00:00:00.000Z',
     });
-    vi.mocked(api.bootstrapOnboard).mockResolvedValue({
-      project_id: 'project-1',
-      repo_publish_token: 'repo-publish-token',
-      delivery_url: 'https://docs.example.com',
-    });
-    vi.mocked(api.setProjectPasswordWithPublishToken).mockResolvedValue();
 
     const prompts = await import('../prompts');
     vi.mocked(prompts.confirm).mockResolvedValue(false);
@@ -86,21 +69,33 @@ describe('runInit', () => {
     vi.clearAllMocks();
   });
 
+  /** Minimal non-interactive args (no Control Plane project id — default owner flow). */
+  const initBaseArgs = [
+    '--api-url',
+    'https://cp.example',
+    '--repo-identity',
+    'github.com/acme/docs',
+    '--slug',
+    'docs',
+    '--title',
+    'Docs',
+    '--docs-dir',
+    'docs',
+    '--description',
+    '',
+    '--publish-branch',
+    'main',
+  ];
+
+  const linkProjectArgs = ['--repo-id', 'project-1'] as const;
+
   it('stops when the user declines conflicting scaffolding', async () => {
     const { runInit } = await import('./init');
     const gh = await import('../gh-integration');
     const log = vi.spyOn(console, 'log').mockImplementation(() => {});
     const err = vi.spyOn(console, 'error').mockImplementation(() => {});
 
-    await runInit([
-      '--token', bootstrapToken(),
-      '--repo-identity', 'github.com/acme/docs',
-      '--slug', 'docs',
-      '--title', 'Docs',
-      '--docs-dir', 'docs',
-      '--description', '',
-      '--publish-branch', 'main',
-    ]);
+    await runInit([...initBaseArgs, ...linkProjectArgs]);
 
     const output = [
       ...log.mock.calls.map((c) => c.join(' ')),
@@ -109,8 +104,8 @@ describe('runInit', () => {
 
     expect(process.exitCode).toBe(1);
     expect(output).toContain('Init cancelled. No local files or GitHub secrets were changed.');
-    expect(output).toContain('Project ID: project-1');
-    expect(output).not.toContain('Project onboarded successfully');
+    expect(output).toContain('Repo ID: project-1');
+    expect(output).not.toContain('scaffolded successfully');
     expect(gh.isGhInstalled).toHaveBeenCalled();
     expect(readFileSync(join(TMP, 'docs', 'project.yml'), 'utf8')).toBe('slug: existing\ntitle: Existing\n');
 
@@ -130,15 +125,7 @@ describe('runInit', () => {
     const log = vi.spyOn(console, 'log').mockImplementation(() => {});
     const err = vi.spyOn(console, 'error').mockImplementation(() => {});
 
-    await runInit([
-      '--token', bootstrapToken(),
-      '--repo-identity', 'github.com/acme/docs',
-      '--slug', 'docs',
-      '--title', 'Docs',
-      '--docs-dir', 'docs',
-      '--description', '',
-      '--publish-branch', 'main',
-    ]);
+    await runInit([...initBaseArgs, ...linkProjectArgs]);
 
     const output = [
       ...log.mock.calls.map((c) => c.join(' ')),
@@ -146,8 +133,8 @@ describe('runInit', () => {
     ].join('\n');
 
     expect(process.exitCode).toBeUndefined();
-    expect(output).toContain('Docs URL:       https://docs.example.com/acme/docs/');
-    expect(output).toContain('After the workflow succeeds, visit: https://docs.example.com/acme/docs/');
+    expect(output).toContain('Docs URL:       https://docs.example.com/docs/');
+    expect(output).toContain('5. Open: https://docs.example.com/docs/');
 
     log.mockRestore();
     err.mockRestore();
@@ -175,15 +162,7 @@ describe('runInit', () => {
     const err = vi.spyOn(console, 'error').mockImplementation(() => {});
     const log = vi.spyOn(console, 'log').mockImplementation(() => {});
 
-    await runInit([
-      '--token', bootstrapToken(),
-      '--repo-identity', 'github.com/acme/docs',
-      '--slug', 'docs',
-      '--title', 'Docs',
-      '--docs-dir', 'docs',
-      '--description', '',
-      '--publish-branch', 'main',
-    ]);
+    await runInit([...initBaseArgs, ...linkProjectArgs]);
 
     const output = [
       ...log.mock.calls.map((c) => c.join(' ')),
@@ -212,12 +191,18 @@ describe('runInit', () => {
     const err = vi.spyOn(console, 'error').mockImplementation(() => {});
 
     await runInit([
-      '--token', bootstrapToken(),
-      '--repo-identity', 'github.com/acme/docs',
-      '--slug', 'docs',
-      '--title', 'Docs',
-      '--docs-dir', 'docs',
-      '--description', '',
+      '--api-url',
+      'https://cp.example',
+      '--repo-identity',
+      'github.com/acme/docs',
+      '--slug',
+      'docs',
+      '--title',
+      'Docs',
+      '--docs-dir',
+      'docs',
+      '--description',
+      '',
     ]);
 
     const output = [
@@ -230,9 +215,59 @@ describe('runInit', () => {
     expect(output).toContain('Publish branch is the Git branch whose pushes trigger publishing');
     expect(output).toContain('Publish branch: nrdocs');
     expect(metadata.publish_branch).toBe('nrdocs');
+    expect(metadata).not.toHaveProperty('repo_id');
 
     log.mockRestore();
     err.mockRestore();
+  });
+
+  it('tokenless init can use global default api url and validates repo binding', async () => {
+    rmSync(join(TMP, 'docs', 'project.yml'), { force: true });
+    rmSync(join(TMP, 'docs', 'nav.yml'), { force: true });
+    rmSync(join(TMP, '.github', 'workflows', 'publish-docs.yml'), { force: true });
+
+    const globalDir = join(TMP, '__global_state__');
+    process.env.NRDOCS_GLOBAL_STATE_DIR = globalDir;
+    mkdirSync(globalDir, { recursive: true });
+    writeFileSync(join(globalDir, 'config.json'), JSON.stringify({
+      version: 1,
+      default_api_url: 'https://cp.example',
+    }), 'utf8');
+
+    const prompts = await import('../prompts');
+    vi.mocked(prompts.confirm).mockResolvedValue(true);
+
+    const { runInit } = await import('./init');
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    await runInit([
+      '--repo-id',
+      'project-1',
+      '--repo-identity',
+      'github.com/acme/docs',
+      '--slug',
+      'docs',
+      '--title',
+      'Docs',
+      '--docs-dir',
+      'docs',
+      '--description',
+      '',
+      '--publish-branch',
+      'main',
+    ]);
+
+    expect(process.exitCode).toBeUndefined();
+    const output = [
+      ...log.mock.calls.map((c) => c.join(' ')),
+      ...err.mock.calls.map((c) => c.join(' ')),
+    ].join('\n');
+    expect(output).toContain('scaffolded successfully');
+
+    log.mockRestore();
+    err.mockRestore();
+    delete process.env.NRDOCS_GLOBAL_STATE_DIR;
   });
 });
 

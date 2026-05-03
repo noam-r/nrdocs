@@ -2,12 +2,15 @@ import type { SessionTokenPayload, TokenValidationResult } from '../types';
 
 const CURRENT_TOKEN_VERSION = 1;
 
-/** Encode bytes to base64url (no padding). */
-function toBase64Url(buffer: ArrayBuffer): string {
-  const bytes = new Uint8Array(buffer);
+/**
+ * Encode bytes to base64url (no padding).
+ * Pass a Uint8Array (or exact slice) — do NOT pass `u8.buffer` alone; pooled encoders
+ * reuse a large ArrayBuffer and only the view’s length is valid (Workers vs Node).
+ */
+function toBase64UrlBytes(bytes: Uint8Array): string {
   let binary = '';
-  for (let i = 0; i < bytes.length; i++) {
-    binary += String.fromCharCode(bytes[i]);
+  for (let i = 0; i < bytes.byteLength; i++) {
+    binary += String.fromCharCode(bytes[i]!);
   }
   return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 }
@@ -28,7 +31,7 @@ function fromBase64Url(str: string): Uint8Array {
 /** Import a signing key string as a CryptoKey for HMAC-SHA256. */
 async function importSigningKey(signingKey: string): Promise<CryptoKey> {
   const encoder = new TextEncoder();
-  const keyBytes = encoder.encode(signingKey);
+  const keyBytes = encoder.encode(signingKey.trim());
   return crypto.subtle.importKey(
     'raw',
     keyBytes,
@@ -40,36 +43,37 @@ async function importSigningKey(signingKey: string): Promise<CryptoKey> {
 
 export const SessionTokenManager = {
   /**
-   * Create a session token for a project.
+   * Create a session token for a repo (docs site).
    *
-   * @param projectId - Internal project UUID
+   * @param repoId - Internal repo UUID
    * @param passwordVersion - Current password version at time of issuance
    * @param signingKey - HMAC signing key string
    * @param ttl - Token time-to-live in seconds
    * @returns Token string in format `base64url(payload).base64url(signature)`
    */
   async create(
-    projectId: string,
+    repoId: string,
     passwordVersion: number,
     signingKey: string,
     ttl: number,
   ): Promise<string> {
     const now = Math.floor(Date.now() / 1000);
+    const pv = Number(passwordVersion);
     const payload: SessionTokenPayload = {
       v: CURRENT_TOKEN_VERSION,
-      pid: projectId,
+      rid: repoId,
       iat: now,
       exp: now + ttl,
-      pv: passwordVersion,
+      pv: Number.isFinite(pv) ? pv : 0,
     };
 
     const encoder = new TextEncoder();
     const payloadBytes = encoder.encode(JSON.stringify(payload));
-    const payloadB64 = toBase64Url(payloadBytes.buffer as ArrayBuffer);
+    const payloadB64 = toBase64UrlBytes(payloadBytes);
 
     const key = await importSigningKey(signingKey);
     const signatureBuffer = await crypto.subtle.sign('HMAC', key, payloadBytes);
-    const signatureB64 = toBase64Url(signatureBuffer);
+    const signatureB64 = toBase64UrlBytes(new Uint8Array(signatureBuffer));
 
     return `${payloadB64}.${signatureB64}`;
   },
@@ -80,7 +84,7 @@ export const SessionTokenManager = {
    * @param token - Token string to validate
    * @param signingKey - HMAC signing key string
    * @param currentPasswordVersion - Current password version from D1
-   * @returns Validation result with projectId on success, or rejection reason
+   * @returns Validation result with repoId on success, or rejection reason
    */
   async validate(
     token: string,
@@ -120,8 +124,8 @@ export const SessionTokenManager = {
       return { valid: false, reason: 'invalid payload' };
     }
 
-    // Check token version
-    if (payload.v !== CURRENT_TOKEN_VERSION) {
+    // Check token version (coerce: JSON may parse numeric fields loosely)
+    if (Number(payload.v) !== CURRENT_TOKEN_VERSION) {
       return { valid: false, reason: 'unrecognized token version' };
     }
 
@@ -131,11 +135,13 @@ export const SessionTokenManager = {
       return { valid: false, reason: 'token expired' };
     }
 
-    // Check password version
-    if (payload.pv !== currentPasswordVersion) {
+    // Check password version (coerce: D1/SQLite may return numeric columns as strings)
+    const tokenPv = Number(payload.pv);
+    const rowPv = Number(currentPasswordVersion);
+    if (!Number.isFinite(tokenPv) || !Number.isFinite(rowPv) || tokenPv !== rowPv) {
       return { valid: false, reason: 'password version mismatch' };
     }
 
-    return { valid: true, projectId: payload.pid };
+    return { valid: true, repoId: String(payload.rid ?? '').trim() };
   },
 };

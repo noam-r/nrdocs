@@ -47,9 +47,8 @@ The following must be immutable after registration:
 - project slug
 - repo binding
 - project ID
-- access mode
 
-Changing any of these requires delete/create of a new project.
+Access mode is intentionally mutable after registration (operators and repo owners can change it; password set/disable is a common lifecycle action).
 
 ## Serving requirements
 

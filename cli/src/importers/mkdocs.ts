@@ -307,7 +307,7 @@ export const mkdocsImporter: Importer = {
     ], force);
     const copied = writeDirectorySnapshot(sourceFiles, contentDir, force);
     const initCommand = [
-      'nrdocs init --token <bootstrap-token>',
+      "nrdocs init --api-url '<control-plane-url>' --project-id '<project-id>'",
       `--docs-dir ${outDir}`,
       ...(publishBranch === targetBranch ? [] : [`--publish-branch ${publishBranch}`]),
       `--slug ${slug}`,

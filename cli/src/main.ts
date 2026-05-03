@@ -2,6 +2,7 @@ import { CliUsageError } from './cli-usage-error';
 import { printBriefUsage, printHelp, printVersion, printUnknownCommand } from './commands/help';
 import { runAdmin } from './commands/admin';
 import { runInit } from './commands/init';
+import { runConfig } from './commands/config';
 
 async function main(): Promise<void> {
   const args = process.argv.slice(2);
@@ -25,6 +26,11 @@ async function main(): Promise<void> {
 
   if (first === 'init') {
     await runInit(args.slice(1));
+    return;
+  }
+
+  if (first === 'config') {
+    await runConfig(args.slice(1));
     return;
   }
 

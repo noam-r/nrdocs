@@ -46,6 +46,9 @@ SESSION_TTL = "28800"          # Session duration in seconds (default: 8 hours)
 CACHE_TTL = "300"              # Cache-Control max-age in seconds (default: 5 min)
 RATE_LIMIT_MAX = "5"           # Max failed login attempts before rate-limiting
 RATE_LIMIT_WINDOW = "300"      # Rate-limit window in seconds (default: 5 min)
+# Optional: R2 key for GET / on the delivery host (default site/index.html). Upload that object to the same BUCKET as publishes.
+# HOME_PAGE_R2_KEY = "site/index.html"
+# HOME_PAGE_R2_KEY = ""       # disable homepage (404 on /)
 
 # Secrets (set via CLI, not stored here):
 #   HMAC_SIGNING_KEY — signs/verifies session tokens (HMAC-SHA256)

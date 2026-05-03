@@ -168,6 +168,24 @@ else
   green "✓ D1 database already configured: ${CURRENT_DB_ID:0:8}..."
 fi
 
+echo ""
+blue "Checking D1 database_id consistency (delivery vs control-plane)..."
+DB_ID_LINES=$(grep -E '^\s*database_id\s*=' wrangler.toml 2>/dev/null || true)
+if [ -n "$DB_ID_LINES" ]; then
+  UNIQUE_COUNT=$(echo "$DB_ID_LINES" | sed 's/.*=\s*"\([^"]*\)".*/\1/' | sort -u | wc -l | tr -d ' ')
+  if [ "${UNIQUE_COUNT:-0}" -gt 1 ]; then
+    red "✗ wrangler.toml lists different database_id values for Workers."
+    red "  The Control Plane and Delivery Worker must bind the SAME D1 database or passwords and content will disagree."
+    echo "$DB_ID_LINES" | while read -r line; do red "  $line"; done
+    exit 1
+  fi
+  if echo "$DB_ID_LINES" | grep -q 'REPLACE_WITH_D1_DATABASE_ID'; then
+    yellow "⚠ database_id still contains REPLACE_WITH_D1_DATABASE_ID — finish Step 3 or edit wrangler.toml"
+  else
+    green "✓ Single D1 database_id across Worker environments"
+  fi
+fi
+
 # ── Step 4: Create R2 bucket ─────────────────────────────────────────
 
 echo ""
@@ -205,6 +223,13 @@ fi
 echo ""
 blue "Step 5/7: Running database migrations..."
 
+D1_NAME=$(grep -E '^database_name\s*=' wrangler.toml | head -1 | sed -e 's/^database_name\s*=\s*"\([^"]*\)".*/\1/')
+if [ -z "$D1_NAME" ]; then
+  red "Could not parse database_name from wrangler.toml"
+  exit 1
+fi
+echo "  Using D1 database name: ${D1_NAME}"
+
 migration_already_applied() {
   # Args: path to wrangler log file. Returns 0 if SQLite rejected DDL as already present.
   grep -qiE 'already exists|duplicate column name' "$1"
@@ -214,7 +239,7 @@ for migration in migrations/*.sql; do
   MIGRATION_NAME=$(basename "$migration")
   echo "  Applying $MIGRATION_NAME..."
   MIG_LOG=$(mktemp)
-  if wrangler d1 execute nrdocs --remote --file="$migration" >"$MIG_LOG" 2>&1; then
+  if wrangler d1 execute "${D1_NAME}" --remote --file="$migration" >"$MIG_LOG" 2>&1; then
     green "  ✓ $MIGRATION_NAME applied"
   elif migration_already_applied "$MIG_LOG"; then
     green "  ✓ $MIGRATION_NAME skipped (schema already matches; not an error)"
@@ -297,6 +322,56 @@ DELIVERY_OUTPUT=$(wrangler deploy --env delivery 2>&1) || {
 }
 green "  ✓ Delivery Worker deployed"
 
+# Public URL readers use (must match Control Plane DELIVERY_URL for published links in API + CI)
+DELIVERY_URL=$(echo "$DELIVERY_OUTPUT" | grep -oE 'https://[a-zA-Z0-9.-]+\.workers\.dev' | head -1 || true)
+if [ -z "$DELIVERY_URL" ]; then
+  DELIVERY_URL=$(echo "$DELIVERY_OUTPUT" | grep -oE 'https://[^ ]+\.workers\.dev' | head -1 || true)
+fi
+# Custom hostnames: wrangler prints zone routes as "  host.example.com/* (zone name: example.com)" with no https:// line
+if [ -z "$DELIVERY_URL" ]; then
+  CUSTOM_HOST=$(echo "$DELIVERY_OUTPUT" | grep '(zone name:' | sed -E 's/^[[:space:]]+([^[:space:]]+)\/\*.*/\1/' | head -1)
+  case "$CUSTOM_HOST" in *'*'*) CUSTOM_HOST="" ;; esac
+  if [ -n "$CUSTOM_HOST" ]; then
+    DELIVERY_URL="https://${CUSTOM_HOST}"
+  fi
+fi
+if [ -z "$DELIVERY_URL" ]; then
+  yellow "Could not read a delivery URL from deploy output (no *.workers.dev URL and no zone route like host.example.com/* (zone name: …))."
+  yellow "Use the URL where the Delivery worker is actually reachable — the origin only, no path or trailing slash."
+  echo ""
+  yellow "Where to find it:"
+  yellow "  • Wrangler does not have a command that prints only this URL (deployments list/status omit it). A successful deploy does print it — run: wrangler deploy --env delivery"
+  yellow "    and copy the https://… URL from the output (re-deploy is safe if nothing changed)."
+  yellow "  • Cloudflare dashboard → Workers & Pages → open the Delivery worker (see wrangler.toml: [env.delivery] → name, e.g. nrdocs-delivery)."
+  yellow "  • On that worker: Domains, Triggers, or the summary at the top — copy the https URL (workers.dev or your custom host like docs.example.com)."
+  yellow "  • Default workers.dev shape: https://<worker-name>.<account-workers-subdomain>.workers.dev — worker name is [env.delivery] name in wrangler.toml; the account subdomain is on Workers & Pages (\"Your subdomain\" / account workers settings)."
+  yellow "  • Or scroll the deploy log printed above and paste any https:// URL shown for this deployment."
+  echo ""
+  printf "Enter the public Delivery Worker base URL (no trailing slash): "
+  read -r DELIVERY_URL
+fi
+DELIVERY_URL="${DELIVERY_URL%/}"
+
+if [ -z "$DELIVERY_URL" ]; then
+  red "DELIVERY_URL is required so the Control Plane can return reader links."
+  red "Find your Delivery worker URL in the Cloudflare dashboard (Workers & Pages → worker named in [env.delivery] in wrangler.toml), then run this script again."
+  red "You can also set DELIVERY_URL under [env.control-plane.vars] in wrangler.toml and re-run from the Control Plane deploy step."
+  exit 1
+fi
+
+if grep -q '^DELIVERY_URL' wrangler.toml 2>/dev/null; then
+  sed -i "s|^DELIVERY_URL = \".*\"|DELIVERY_URL = \"$DELIVERY_URL\"|" wrangler.toml
+  green "  ✓ Set DELIVERY_URL in wrangler.toml → $DELIVERY_URL (Control Plane uses this for reader URLs)"
+elif grep -q '^\[env.control-plane.vars\]' wrangler.toml 2>/dev/null; then
+  awk -v u="$DELIVERY_URL" '
+    /^\[env.control-plane.vars\]/ { print; print "DELIVERY_URL = \"" u "\""; next }
+    { print }
+  ' wrangler.toml > wrangler.toml.__tmp && mv wrangler.toml.__tmp wrangler.toml
+  green "  ✓ Added DELIVERY_URL to wrangler.toml"
+else
+  yellow "  ⚠ No [env.control-plane.vars] or DELIVERY_URL in wrangler.toml — set DELIVERY_URL manually on the control-plane Worker, then redeploy."
+fi
+
 echo "  Deploying Control Plane Worker..."
 CP_OUTPUT=$(wrangler deploy --env control-plane 2>&1) || {
   red "Failed to deploy Control Plane Worker:"
@@ -330,6 +405,16 @@ if [ -f ".env" ]; then
   # Update API key
   sed -i "s|^NRDOCS_API_KEY=.*|NRDOCS_API_KEY=$API_KEY|" .env
   green "✓ Set NRDOCS_API_KEY in .env"
+
+  # Same value as Control Plane DELIVERY_URL — for operators / optional GitHub Actions var NRDOCS_DELIVERY_URL
+  if [ -n "${DELIVERY_URL:-}" ]; then
+    if grep -q '^NRDOCS_DELIVERY_URL=' .env 2>/dev/null; then
+      sed -i "s|^NRDOCS_DELIVERY_URL=.*|NRDOCS_DELIVERY_URL=$DELIVERY_URL|" .env
+    else
+      echo "NRDOCS_DELIVERY_URL=$DELIVERY_URL" >> .env
+    fi
+    green "✓ Set NRDOCS_DELIVERY_URL=$DELIVERY_URL (public docs base; copy to GitHub var if needed)"
+  fi
 fi
 
 # ── Summary ──────────────────────────────────────────────────────────
@@ -339,8 +424,12 @@ blue "════════════════════════�
 green "  Deployment complete!"
 blue "═══════════════════════════════════════════════════"
 echo ""
-echo "  Control Plane: ${CP_URL:-<check wrangler output>}"
-echo "  API Key:       ${API_KEY:0:8}... (saved in .env)"
+echo "  Delivery (readers): ${DELIVERY_URL:-<unset>}"
+echo "  Control Plane:      ${CP_URL:-<check wrangler output>}"
+echo "  API Key:            ${API_KEY:0:8}... (saved in .env)"
+echo ""
+echo "  DELIVERY_URL is stored in wrangler.toml for the control-plane Worker so publish/status return reader URLs."
+echo "  NRDOCS_DELIVERY_URL is in .env for your reference (same value)."
 echo ""
 echo "  Your .env is configured. Next steps:"
 echo ""

@@ -28,7 +28,8 @@ export function printBriefUsage(): void {
 
 For docs repo owners:
   nrdocs import mkdocs
-  nrdocs init --token '<your-token>'
+  nrdocs config set api-url 'https://<control-plane-worker>'   # one-time setup (recommended)
+  nrdocs init
   nrdocs password set
   nrdocs password enable
   nrdocs password disable
@@ -49,18 +50,19 @@ What are you trying to do?
 
 1. Set up a documentation repo (repo owner)
 
-   nrdocs init --token <bootstrap-token>
+   nrdocs config set api-url <control-plane-url>   # one-time (recommended)
+   nrdocs init
 
    Run this once from the repo you want to publish. It creates the docs files,
-   registers the project, writes the publish workflow, and local status metadata.
+   writes the publish workflow, and local status metadata.
    Publishing uses GitHub Actions OIDC by default (no per-repo secrets/variables).
 
 2. Convert an existing docs platform (repo owner)
 
    nrdocs import mkdocs
 
-   Converts local files only. After importing, run nrdocs init with your
-   bootstrap token to create the remote project and generate the publish workflow.
+   Converts local files only. After importing, run nrdocs init. API URL comes
+   from your one-time config or environment. Optional: --repo-id if you link an existing project.
 
 3. Publish documentation (repo owner)
 
@@ -74,7 +76,7 @@ What are you trying to do?
    nrdocs status
 
    Shows whether this repo has been initialized, whether the Control Plane
-   project is approved, whether a publish exists, and the docs URL.
+   repo is approved, whether a publish exists, and the docs URL.
 
 5. Upgrade generated workflow for an already-onboarded repo (repo owner)
 
@@ -87,11 +89,11 @@ What are you trying to do?
 
    nrdocs admin <command>
 
-   Requires NRDOCS_API_KEY. Operators create bootstrap tokens with
-   nrdocs admin init; repo owners should not use admin commands.
+   Requires NRDOCS_API_KEY. Repo owners should not use admin commands.
 
 Commands:
-  init --token <token>   Set up this docs repo for publishing
+  init                   Set up this docs repo for publishing
+  config                 Manage non-secret local CLI defaults (~/.nrdocs)
   import <platform>      Convert existing docs into nrdocs files (mkdocs supported)
   password <subcommand>  Manage password protection (set|enable|disable)
   upgrade                Refresh generated workflow for an onboarded repo
@@ -108,22 +110,35 @@ Run nrdocs admin --help only if you operate the nrdocs platform.`;
 }
 
 export function printInitHelp(): void {
-  const help = `Usage: nrdocs init --token <token> [options]
+  const help = `Usage: nrdocs init [options]
 
-Set up this documentation repo for publishing using a bootstrap token.
+Set up this documentation repo for publishing.
+
+Typical flow:
+  nrdocs config set api-url <control-plane-url>   # one-time (recommended)
+  nrdocs init
+
+No repo id is required: the first GitHub Actions run registers the site via OIDC
+(project.yml + POST /oidc/register-project). Optional --repo-id records a UUID in
+.nrdocs/status.json (operator-first setup or copied from Actions) for nrdocs status.
+
+You can always override the default API URL per run:
+  nrdocs init --api-url <control-plane-url>
 
 Run this once from the repo you want to publish. After init succeeds, publish
 by pushing to GitHub; the generated workflow performs the publish.
 
 Flags:
-  --token <token>              Bootstrap token issued by your organization admin (required)
-  --slug <value>               Project slug (for non-interactive use)
-  --title <value>              Project title (for non-interactive use)
+  --api-url <url>              Control Plane URL (optional if set via nrdocs config → ~/.nrdocs/config.json or NRDOCS_API_URL)
+  --repo-id <uuid>             Optional: link .nrdocs/status.json to an existing Control Plane project
+  --project-id <uuid>          Same as --repo-id (alias)
+  --slug <value>               Site slug (for non-interactive use)
+  --title <value>              Site title (for non-interactive use)
   --repo-identity <value>      Repository identity in format github.com/owner/repo (for non-interactive use)
   --docs-dir <value>           Documentation directory (default: docs)
-  --access-mode <value>        Reader access mode: public or password (default: public)
+  --access-mode <value>        Reader access mode: public or password (default: password)
   --publish-branch <value>     Git branch that triggers publishing (default: current branch, fallback: main)
-  --description <value>        Project description
+  --description <value>        Description
   --overwrite-scaffold         Overwrite existing generated files (project.yml, nav.yml, publish-docs.yml) when they differ
   --help, -h                   Show this help message`;
 
@@ -138,7 +153,7 @@ export function printUnknownCommand(cmd: string): void {
   if (cmd === 'publish') {
     console.error(
       'There is no local `nrdocs publish` command for docs repo owners.\n' +
-        'Run `nrdocs init --token <bootstrap-token>` once, then publish with `git push`.\n' +
+        'Run `nrdocs init` once, then publish with `git push`.\n' +
         'Platform operators doing a manual publish can run: nrdocs admin publish',
     );
     return;

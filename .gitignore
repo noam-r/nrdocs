@@ -2,7 +2,9 @@ node_modules/
 dist/
 dist-cli/
 dist-preview/
-site/
+# MkDocs / generator output under site/ (keep platform root homepage source tracked)
+site/**
+!site/index.html
 
 # Local config with real credentials — use the .example templates
 .env

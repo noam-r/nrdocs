@@ -23,6 +23,8 @@ Each project is represented by a single repository containing:
 
 A protected admin/control API registers the project, validates configuration, and triggers publishing.
 
+The default CI path is **GitHub Actions OIDC**: the workflow exchanges an identity token for short-lived publish credentials; repo owners do not receive the platform API key. Long-lived repo publish JWTs (mint) remain for operator **`admin publish`** and other manual paths.
+
 Publishing performs three actions:
 1. build the static site from the repository content
 2. sync repo-derived desired state into the platform database
@@ -35,6 +37,7 @@ A Cloudflare Worker sits in front of all site requests and acts as a thin reques
 - Custom content format, not MkDocs
 - One repo per project
 - One immutable slug per project (**unique per organization** in D1; not globally unique)
+- Project creation is **operator-controlled** (explicit registration + approval before publishes are accepted)
 - Explicit project registration in phase 1
 - Automatic publish after registration/approval
 - Platform DB stores effective state
@@ -42,6 +45,8 @@ A Cloudflare Worker sits in front of all site requests and acts as a thin reques
 - Repos may only declare `allow` rules for their own project
 - Deny always wins
 - Public and password-protected projects are supported in phase 1
+- GitHub Actions **OIDC** is the primary publishing authentication mechanism (no per-repo secrets/variables required)
+- Private-first onboarding: recommend starting in `password` mode and setting a password before the first publish
 - Future invite-list mode is expected to integrate with Cloudflare Access
 
 ## Conceptual architecture

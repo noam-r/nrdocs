@@ -23,7 +23,7 @@ If you just want to preview the site builder output without deploying, you can s
 
 ## Standalone `nrdocs` CLI
 
-Deploying the Workers does **not** install the small **`nrdocs`** program used for author onboarding (`nrdocs init --token …`) and platform operations (`nrdocs admin …`). Install it on your own machine (see [CLI Reference](cli/index.html)).
+Deploying the Workers does **not** install the small **`nrdocs`** program used for repo-owner initialization (`nrdocs init …`) and platform operations (`nrdocs admin …`). Install it on your own machine (see [CLI Reference](cli/index.html)).
 
 **Simplest approach when GitHub Releases are set up:** `install.sh` downloads a native binary from GitHub. You may need your **computer password** once:
 
@@ -42,15 +42,15 @@ chmod +x "$HOME/.local/bin/nrdocs"
 command -v nrdocs   # should show .../.local/bin/nrdocs
 ```
 
-If the shell still tries **`/usr/local/bin/nrdocs`** and errors, run **`hash -r`** (Bash) or **`rehash`** (zsh), or **`sudo rm -f /usr/local/bin/nrdocs`**, then **`command -v nrdocs`** again. Full walkthrough: [Onboarding → Build from this repo](onboarding-bootstrap/index.html#build-from-this-repo-and-copy-to-localbin).
+If the shell still tries **`/usr/local/bin/nrdocs`** and errors, run **`hash -r`** (Bash) or **`rehash`** (zsh), or **`sudo rm -f /usr/local/bin/nrdocs`**, then **`command -v nrdocs`** again.
 
 System-wide install is still **`sudo cp dist-cli/nrdocs.cjs /usr/local/bin/nrdocs`** if you prefer. Alternatively point `install.sh` at a fork that publishes binaries: **`NRDOCS_RELEASES_REPO=owner/repo sh install.sh`**.
 
-**If you cannot use `sudo`**, or you already used **`sh install.sh`** without flags and see **`command not found`**, follow the full step-by-step (macOS vs Linux, full-path fallback, no assumed shell knowledge) in **[Onboarding (bootstrap token) → Install the CLI](onboarding-bootstrap/index.html#install-the-cli)**.
+**If you cannot use `sudo`** or need a longer PATH walkthrough, see **[Onboarding a repository](onboarding-bootstrap/index.html)** (short install pointer) and the **[CLI Reference](cli/index.html)** troubleshooting notes.
 
 If you **already** ran `install.sh`, you do not need to download again unless you want an update; the onboarding page explains how to fix “command not found” without re-running the installer.
 
-Author-only quick path: [Onboarding (bootstrap token)](onboarding-bootstrap/index.html).
+Repo-owner quick path: [Onboarding a repository](onboarding-bootstrap/index.html).
 
 ### GitHub Actions authentication (OIDC, recommended)
 
@@ -221,7 +221,7 @@ wrangler secret put TOKEN_SIGNING_KEY --env control-plane
 # → paste your TOKEN_SIGNING_KEY, press Enter
 ```
 
-The HMAC signing key **must be the same value** in both Workers — it's used to sign and verify session tokens. The TOKEN_SIGNING_KEY is used by the Control Plane to sign bootstrap tokens and repo publish tokens.
+The HMAC signing key **must be the same value** in both Workers — it's used to sign and verify session tokens. The TOKEN_SIGNING_KEY is used by the Control Plane to sign repo publish tokens (JWTs).
 
 Now put the API key in your `.env` file so the CLI can use it. Open `.env` and set:
 
@@ -230,6 +230,37 @@ NRDOCS_API_KEY=paste-your-api-key-here
 ```
 
 You don't need to save the HMAC key or token signing key anywhere locally — they're only used by the Workers at runtime. The API key is the only one you need locally (for the CLI and GitHub Actions).
+
+**`HMAC_SIGNING_KEY` in your shell:** Wrangler stores Worker secrets on Cloudflare, not in your environment. `echo $HMAC_SIGNING_KEY` will normally be empty — that does **not** mean the Worker has no secret. To see which secrets exist (names only, never values):
+
+```bash
+wrangler secret list --env delivery
+wrangler secret list --env control-plane
+```
+
+If `HMAC_SIGNING_KEY` is missing from the list, run `wrangler secret put HMAC_SIGNING_KEY --env delivery` (and again for `--env control-plane` with the **same** value).
+
+### Rule out “split D1” before changing secrets or keys
+
+If `set-password` succeeds but readers never accept the password, **one** explanation is that the control plane and delivery workers were deployed with **different** `database_id` values (admin writes one SQLite database; the reader reads another). Rotating `HMAC_SIGNING_KEY` will not fix that.
+
+This is **read-only**: it does not overwrite variables, secrets, or `wrangler.toml`.
+
+```bash
+./scripts/verify-d1-alignment.sh
+```
+
+To also run a **remote** D1 query for a single repo (prints `slug`, `access_mode`, and **length** of `password_hash` only — never the hash itself), pass your repo UUID:
+
+```bash
+REPO_ID=xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx ./scripts/verify-d1-alignment.sh
+```
+
+- **Mismatch** in the script → fix both `[[env.delivery.d1_databases]]` and `[[env.control-plane.d1_databases]]` in `wrangler.toml` to the **same** `database_id`, then redeploy both workers.
+- **OK** in the file **but** workers were last deployed from an **older** copy of `wrangler.toml` → compare what is in the Cloudflare dashboard vs this repo, or redeploy from this file so runtime matches config.
+- **OK** and `password_hash_len` is zero for your `REPO_ID` → this database never received that password (wrong repo id, or admin CLI pointed at a different control plane / account than the one backing your reader).
+
+If the remote step prints **Authentication error [code: 10000]** for `/accounts/.../d1/database`, that is a **Wrangler ↔ Cloudflare D1 API** credential issue, not evidence of a split database. `wrangler whoami` can look fine while D1 calls still fail (OAuth token scope friction). The script prints remediation; the usual fix is an **API token** with Account → D1 → Edit (and Account Settings read), exported as `CLOUDFLARE_API_TOKEN` plus `CLOUDFLARE_ACCOUNT_ID` matching `wrangler.toml`, or `wrangler logout && wrangler login`. You can still inspect rows from the dashboard: **Workers & D1** → your database → **Console**.
 
 ## Step 9: Deploy
 
@@ -256,7 +287,7 @@ NRDOCS_API_URL=https://nrdocs-control-plane.YOUR_SUBDOMAIN.workers.dev
 Test that the Control Plane is running:
 
 ```bash
-curl -s -o /dev/null -w "%{http_code}" $NRDOCS_API_URL/projects
+curl -s -o /dev/null -w "%{http_code}" $NRDOCS_API_URL/repos
 ```
 
 If you get `401`, it's working — the Control Plane is rejecting unauthenticated requests, which is correct.
@@ -267,25 +298,42 @@ Run the test suite to make sure the codebase is healthy:
 npm test
 ```
 
+## Operator checklist: OIDC happy path
+
+After **`wrangler deploy --env control-plane`**, confirm the Worker you hit includes **`POST /oidc/publish-credentials`** (matches your local `npm test` / repo version).
+
+1. **`nrdocs admin register`** from a docs checkout (or **`POST /repos`** with **`repo_identity`**: `github.com/<owner>/<repo>`). Without **`repo_identity`**, GitHub Actions OIDC cannot resolve the row.
+2. **`nrdocs admin approve <repo-id>`** (optionally **`--repo-identity`** so mint has a binding). If **`GET …/status/<repo-id>`** still shows a blank identity for an **approved** site, run **`nrdocs admin mint-publish-token <repo-id> --repo-identity github.com/<owner>/<repo>`** — the control plane can persist that value when minting.
+3. **`curl -s "$NRDOCS_API_URL/status/<repo-id>"`** — response JSON should include **`repo_identity`** matching the GitHub repo.
+4. Hand authors the **control plane URL** + **repo id**; they run **`nrdocs config set api-url`** and **`nrdocs init --repo-id`**, commit, push the publish branch.
+5. Open the repo’s **GitHub Actions** run for that push and confirm publish succeeded.
+
+Manual **`nrdocs admin publish`** is optional (uses **`NRDOCS_PUBLISH_TOKEN`** from mint); CI does **not** need that secret when OIDC is configured.
+
 ## What's next
 
-Your platform is deployed. The last thing to do is register your first project and publish content. Registration prints the project ID you will pass to the next commands:
+Your platform is deployed. Register a project from a docs checkout, approve it, then either **publish once manually** or hand off to a repo owner for **OIDC CI**:
 
 ```bash
 # Register the project (reads slug/title from docs/project.yml)
 nrdocs admin register
 ```
 
-This prints a project UUID. Then approve and publish:
+This prints a repo id (UUID). Then approve (mint is included by default):
 
 ```bash
-nrdocs admin approve <project-id> --repo-identity github.com/org/repo
+nrdocs admin approve <repo-id> --repo-identity github.com/org/repo
+```
+
+Optional one-off build from your laptop:
+
+```bash
 nrdocs admin publish <project-id>
 ```
 
 For more details, see:
 
 - [CLI Reference](../cli/index.html) — all available commands
-- [Publishing guide](../publishing/index.html) — manual and automated publishing
+- [Publishing guide](../publishing/index.html) — happy path, manual curl, and OIDC troubleshooting
 - [Repository Setup](../repository-setup/index.html) — how to set up a new docs repo
 - [Configuration](../configuration/index.html) — session TTL, cache TTL, rate limits

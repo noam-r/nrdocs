@@ -1,10 +1,11 @@
 /**
  * Delivery Worker — thin request router and authentication gate.
  *
- * Bound to `docs.example.com/*`. Resolves org + project from the path
- * (`/<org>/<project>/...` or legacy `/<project>/...` for the default org),
- * looks up the project in D1, and routes
- * the request accordingly.
+ * Bound to `docs.example.com/*`. Resolves site slug from `/<slug>/...`,
+ * looks up the repo in D1, and routes the request accordingly.
+ *
+ * GET `/` (no path segments) serves a platform homepage from R2 at `site/index.html`
+ * by default (override with `HOME_PAGE_R2_KEY`, or set it to `""` to return 404 on `/`).
  *
  * Requirements: 1.1, 1.2, 1.3, 1.4, 1.7, 1.8, 1.9, 1.10, 13.2, 13.3, 20.1, 20.2, 20.3
  */
@@ -14,6 +15,10 @@ import { R2StorageProvider } from '../storage/r2-storage-provider';
 import { PasswordHasher } from '../auth/password-hasher';
 import { SessionTokenManager } from '../auth/session-token-manager';
 import { RateLimiter } from '../auth/rate-limiter';
+import { readCookieValue } from './cookie-header';
+
+/** Default R2 object key for GET / on the delivery host (platform landing page, not a repo slug). */
+export const DEFAULT_HOME_PAGE_R2_KEY = 'site/index.html';
 
 /** Cloudflare Worker environment bindings for the Delivery Worker. */
 export interface DeliveryEnv {
@@ -28,6 +33,11 @@ export interface DeliveryEnv {
   RATE_LIMIT_MAX: string;
   /** Rate-limit window in seconds. */
   RATE_LIMIT_WINDOW: string;
+  /**
+   * R2 object key for GET / (delivery origin with no path segments).
+   * Defaults to {@link DEFAULT_HOME_PAGE_R2_KEY}. Set to empty string to disable (404 on /).
+   */
+  HOME_PAGE_R2_KEY?: string;
 }
 
 /**
@@ -81,23 +91,17 @@ function parseRateLimitWindow(env: DeliveryEnv): number {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_RATE_LIMIT_WINDOW;
 }
 
-/**
- * Extract the value of a named cookie from the Cookie header.
- */
 function getCookie(request: Request, name: string): string | null {
-  const header = request.headers.get('Cookie');
-  if (!header) return null;
-  for (const part of header.split(';')) {
-    const [key, ...rest] = part.split('=');
-    if (key.trim() === name) {
-      return rest.join('=').trim();
-    }
-  }
-  return null;
+  return readCookieValue(request.headers.get('Cookie'), name);
+}
+
+/** Compare internal repo UUIDs; D1 and JSON may differ in casing. */
+function sameRepoId(a: string, b: string): boolean {
+  return a.trim().toLowerCase() === b.trim().toLowerCase();
 }
 
 /**
- * Render the login page HTML for a password-protected project.
+ * Render the login page HTML for a password-protected site.
  *
  * Requirements: 5.1, 5.4, 5.8
  */
@@ -177,7 +181,7 @@ function pathSegments(url: URL): string[] {
 }
 
 /**
- * Path under the project URL prefix (content path within the site).
+ * Path under the site URL prefix (content path within the site).
  * e.g. prefix `/my-project`, path `/my-project/section/page/` → `section/page/`
  */
 function extractRemainingPathAfterPrefix(url: URL, urlPathPrefix: string): string {
@@ -227,6 +231,47 @@ function parseCacheTtl(env: DeliveryEnv): number {
   if (!raw) return DEFAULT_CACHE_TTL;
   const parsed = parseInt(raw, 10);
   return Number.isFinite(parsed) && parsed >= 0 ? parsed : DEFAULT_CACHE_TTL;
+}
+
+/** R2 key for the delivery root `/`. Empty string in env disables the homepage. */
+function resolveHomePageR2Key(env: DeliveryEnv): string | null {
+  const raw = env.HOME_PAGE_R2_KEY;
+  if (raw === '') return null;
+  const trimmed = raw?.trim();
+  if (trimmed) return trimmed;
+  return DEFAULT_HOME_PAGE_R2_KEY;
+}
+
+/**
+ * GET/HEAD `/` — serve a static object from R2 (e.g. `site/index.html`), no D1 repo.
+ */
+async function tryServePlatformHomePage(request: Request, env: DeliveryEnv): Promise<Response | null> {
+  const key = resolveHomePageR2Key(env);
+  if (key === null) return null;
+
+  if (request.method !== 'GET' && request.method !== 'HEAD') {
+    return new Response('Method Not Allowed', {
+      status: 405,
+      headers: { Allow: 'GET, HEAD', 'Content-Type': 'text/plain; charset=utf-8' },
+    });
+  }
+
+  const storage = new R2StorageProvider(env.BUCKET);
+  const object = await storage.get(key);
+  if (!object) return null;
+
+  const cacheTtl = parseCacheTtl(env);
+  const contentType = resolveContentType(object.contentType, key);
+  const headers: Record<string, string> = {
+    'Content-Type': contentType,
+    'Cache-Control': `public, max-age=${cacheTtl}`,
+  };
+
+  if (request.method === 'HEAD') {
+    return new Response(null, { status: 200, headers });
+  }
+
+  return new Response(object.content, { status: 200, headers });
 }
 
 /**
@@ -290,58 +335,59 @@ export default {
     const url = new URL(request.url);
     const dataStore = new D1DataStore(env.DB);
     const segments = pathSegments(url);
-    if (segments.length === 0) return notFound();
-
-    // Disambiguate `/org/project/...` vs legacy `/project/...`:
-    // If `/org/project` exists in DB, treat it as org-scoped route.
-    // Otherwise, fall back to default-org `/project/...` and treat the rest as page path.
-    let orgSlug: string;
-    let projectSlug: string;
-    let urlPathPrefix: string;
-    let project = null as Awaited<ReturnType<typeof dataStore.getProjectByOrgSlugAndProjectSlug>>;
-
-    if (segments.length >= 2) {
-      const [maybeOrgSlug, maybeProjectSlug] = segments;
-      const explicit = await dataStore.getProjectByOrgSlugAndProjectSlug(maybeOrgSlug, maybeProjectSlug);
-      if (explicit) {
-        orgSlug = maybeOrgSlug;
-        projectSlug = maybeProjectSlug;
-        urlPathPrefix = `/${orgSlug}/${projectSlug}`;
-        project = explicit;
-      } else {
-        orgSlug = 'default';
-        projectSlug = segments[0];
-        urlPathPrefix = `/${projectSlug}`;
-        project = await dataStore.getProjectByOrgSlugAndProjectSlug(orgSlug, projectSlug);
-      }
-    } else {
-      orgSlug = 'default';
-      projectSlug = segments[0];
-      urlPathPrefix = `/${projectSlug}`;
-      project = await dataStore.getProjectByOrgSlugAndProjectSlug(orgSlug, projectSlug);
+    if (segments.length === 0) {
+      const home = await tryServePlatformHomePage(request, env);
+      if (home !== null) return home;
+      return notFound();
     }
 
+    const siteSlug = segments[0];
+    const urlPathPrefix = `/${siteSlug}`;
+    const repo = await dataStore.getRepoBySlug(siteSlug);
+
     // Unknown slug, disabled, or awaiting_approval → identical 404
-    if (!project || project.status === 'disabled' || project.status === 'awaiting_approval') {
+    if (!repo || repo.status === 'disabled' || repo.status === 'awaiting_approval') {
       return notFound();
     }
 
     // No active publish pointer → nothing to serve (Req 13.2)
-    if (!project.active_publish_pointer) {
+    if (!repo.active_publish_pointer) {
       return notFound();
     }
 
-    const pointer = project.active_publish_pointer;
+    const pointer = repo.active_publish_pointer;
 
     // Access mode branching (Requirements 4.2, 7.9)
-    if (project.access_mode === 'public') {
-      // Public projects: serve content directly without authentication.
-      // No access policy evaluation (Req 7.9).
+    if (repo.access_mode === 'public') {
+      // Public sites: serve content directly without authentication.
       return serveContent(url, urlPathPrefix, pointer, env);
     }
 
-    // Password-protected projects: authentication required (Req 4.3).
+    // Password-protected sites: authentication required (Req 4.3).
     // Requirements: 4.3, 5.1, 5.2, 5.3, 5.4, 5.8, 6.5
+
+    const hmacKey = env.HMAC_SIGNING_KEY?.trim() ?? '';
+    if (!hmacKey) {
+      console.error(
+        'nrdocs delivery: HMAC_SIGNING_KEY is unset or empty — password login cannot work. ' +
+          'Set the same secret on delivery and control-plane: wrangler secret put HMAC_SIGNING_KEY --env delivery',
+      );
+      return new Response(
+        'Documentation login is unavailable (server configuration). Ask the platform operator to set HMAC_SIGNING_KEY on the delivery worker.',
+        { status: 503, headers: { 'Content-Type': 'text/plain; charset=utf-8' } },
+      );
+    }
+
+    // Canonical site root: `/${slug}` → `/${slug}/`. Without this, browsers on the no-slash URL
+    // can loop on login (form POST + redirect stays on `/slug` while content flow expects `/slug/`).
+    if (
+      (request.method === 'GET' || request.method === 'HEAD') &&
+      url.pathname === `/${siteSlug}`
+    ) {
+      const loc = new URL(url.toString());
+      loc.pathname = `/${siteSlug}/`;
+      return Response.redirect(loc.href, 308);
+    }
 
     const sessionTtl = parseSessionTtl(env);
     const sessionCookie = getCookie(request, 'nrdocs_session');
@@ -350,10 +396,10 @@ export default {
       // Validate the session token: HMAC signature, expiry, password version
       const validation = await SessionTokenManager.validate(
         sessionCookie,
-        env.HMAC_SIGNING_KEY,
-        project.password_version,
+        hmacKey,
+        repo.password_version,
       );
-      if (validation.valid) {
+      if (validation.valid && sameRepoId(validation.repoId, repo.id)) {
         return serveContent(url, urlPathPrefix, pointer, env);
       }
       // Invalid token (expired, tampered, wrong password version) → treat as unauthenticated
@@ -367,14 +413,14 @@ export default {
       // Process password submission (Req 5.2, 5.3, 5.4)
       const contentType = request.headers.get('Content-Type') ?? '';
       if (!contentType.includes('application/x-www-form-urlencoded')) {
-        return renderLoginPage(project.title, actionUrl, 'Invalid request.');
+        return renderLoginPage(repo.title, actionUrl, 'Invalid request.');
       }
 
       const formData = await request.formData();
       const submittedPassword = formData.get('password');
 
       if (typeof submittedPassword !== 'string' || submittedPassword.length === 0) {
-        return renderLoginPage(project.title, actionUrl, 'Password is required.');
+        return renderLoginPage(repo.title, actionUrl, 'Password is required.');
       }
 
       // Rate limit check BEFORE password verification to prevent unnecessary
@@ -383,7 +429,7 @@ export default {
       const maxAttempts = parseRateLimitMax(env);
       const windowSeconds = parseRateLimitWindow(env);
       const rateLimitResult = await rateLimiter.checkAndIncrement(
-        project.id,
+        repo.id,
         maxAttempts,
         windowSeconds,
       );
@@ -399,31 +445,31 @@ export default {
       }
 
       // Retrieve stored password hash from D1
-      const hashRecord = await dataStore.getPasswordHash(project.id);
+      const hashRecord = await dataStore.getPasswordHash(repo.id);
       if (!hashRecord) {
         // No password configured — cannot authenticate
-        return renderLoginPage(project.title, actionUrl, 'Authentication is not configured for this project.');
+        return renderLoginPage(repo.title, actionUrl, 'Authentication is not configured for this site.');
       }
 
       // Verify submitted password against stored hash (Req 5.2)
       const passwordValid = await PasswordHasher.verify(submittedPassword, hashRecord.hash);
 
       if (!passwordValid) {
-        // Log failed login attempt with project slug and request metadata,
+        // Log failed login attempt with site slug and request metadata,
         // excluding the submitted password (Req 5.11)
         const clientIp = request.headers.get('CF-Connecting-IP') ?? request.headers.get('X-Forwarded-For') ?? 'unknown';
         const userAgent = request.headers.get('User-Agent') ?? 'unknown';
         console.log(
-          `Login failure: project="${project.slug}" ip="${clientIp}" user-agent="${userAgent}"`,
+          `Login failure: slug="${repo.slug}" ip="${clientIp}" user-agent="${userAgent}"`,
         );
 
         // Record login_failure operational event (Req 19.1)
         await dataStore.recordEvent({
           id: crypto.randomUUID(),
-          project_id: project.id,
+          repo_id: repo.id,
           event_type: 'login_failure',
           detail: JSON.stringify({
-            slug: project.slug,
+            slug: repo.slug,
             ip: clientIp,
             user_agent: userAgent,
           }),
@@ -431,31 +477,41 @@ export default {
         });
 
         // Req 5.4: re-render login page with error, do not issue token
-        return renderLoginPage(project.title, actionUrl, 'Incorrect password.');
+        return renderLoginPage(repo.title, actionUrl, 'Incorrect password.');
       }
 
       // Password verified — issue session token (Req 5.3, 6.5)
+      // Use hashRecord.version (paired with the hash we verified), not a later re-read.
       const token = await SessionTokenManager.create(
-        project.id,
+        repo.id,
         hashRecord.version,
-        env.HMAC_SIGNING_KEY,
+        hmacKey,
         sessionTtl,
       );
 
-      // Set cookie scoped to this project's URL prefix (includes org segment when present).
-      const cookieValue = `nrdocs_session=${token}; Secure; HttpOnly; SameSite=Lax; Path=${urlPathPrefix}/; Max-Age=${sessionTtl}`;
+      // Set cookie scoped to this site's URL prefix.
+      // Secure: browsers ignore Secure cookies on plain-HTTP origins (e.g. wrangler dev) — omit on http.
+      // Path: use `/${slug}` (no trailing slash) so both `/slug` and `/slug/...` match (RFC cookie path prefix).
+      const secureAttr = url.protocol === 'https:' ? 'Secure; ' : '';
+      const cookieValue =
+        `nrdocs_session=${token}; ${secureAttr}HttpOnly; SameSite=Lax; Path=${urlPathPrefix}; Max-Age=${sessionTtl}`;
 
-      // Redirect to the originally requested path (Req 5.3)
+      // Redirect to canonical path (same as serveContent): site root must use trailing slash.
+      const loc = new URL(url.toString());
+      if (loc.pathname === `/${siteSlug}`) {
+        loc.pathname = `/${siteSlug}/`;
+      }
+      const redirectTo = loc.href;
       return new Response(null, {
         status: 303,
         headers: {
           'Set-Cookie': cookieValue,
-          Location: url.pathname,
+          Location: redirectTo,
         },
       });
     }
 
     // GET (or any other method): return login page (Req 5.1)
-    return renderLoginPage(project.title, actionUrl);
+    return renderLoginPage(repo.title, actionUrl);
   },
 };

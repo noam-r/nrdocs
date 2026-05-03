@@ -24,7 +24,8 @@ describe('CLI argv routing (main.ts)', () => {
     expect(log).toHaveBeenCalled();
     const out = log.mock.calls.map((c) => c.join(' ')).join('\n');
     expect(out).toContain('nrdocs CLI');
-    expect(out).toContain('--token');
+    expect(out).toContain('nrdocs init');
+    expect(out).toContain('config set api-url');
     expect(out).toContain('git push');
     expect(out).toContain('nrdocs --help');
     expect(out).not.toContain('Show the installed version');
@@ -37,7 +38,8 @@ describe('CLI argv routing (main.ts)', () => {
     const out = log.mock.calls.map((c) => c.join(' ')).join('\n');
     expect(out).toContain('nrdocs CLI');
     expect(out).toContain('Show the installed version');
-    expect(out).toContain('init --token');
+    expect(out).toContain('init');
+    expect(out).toContain('--repo-id');
     expect(out).toContain('password <subcommand>');
     expect(out).toContain('upgrade');
     expect(out).toContain('status');

@@ -164,21 +164,21 @@ NRDOCS_API_KEY=the-api-key-you-generated-above
 NRDOCS_DOCS_DIR=docs
 ```
 
-You can set `NRDOCS_PROJECT_ID` for repeated commands, but the preferred flow is to pass the project ID directly.
+You can set `NRDOCS_REPO_ID` for repeated commands, but the preferred flow is to pass the repo id directly.
 
 ### Test the full flow
 
 ```bash
-# Register a new project (reads slug, title, access_mode from docs/project.yml)
+# Register a new site (reads slug, title, access_mode from docs/project.yml)
 nrdocs admin register
 
-# Copy the project ID from the output
+# Copy the repo id from the output
 
-# Approve the project and mint NRDOCS_PUBLISH_TOKEN
-nrdocs admin approve <project-id> --repo-identity github.com/org/repo
+# Approve and mint NRDOCS_PUBLISH_TOKEN
+nrdocs admin approve <repo-id> --repo-identity github.com/org/repo
 
 # Publish the docs
-nrdocs admin publish <project-id>
+nrdocs admin publish <repo-id>
 ```
 
 Or do register + approve in one step:

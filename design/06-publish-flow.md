@@ -1,8 +1,10 @@
 # Publish Flow
 
 ## Registration
-Phase 1 uses explicit admin registration.
+Phase 1 uses explicit admin registration (`POST /repos` with an API key, then approval).
 A project must be registered and approved before publishing is allowed.
+
+**Planned alternative:** owner-initiated registration from GitHub Actions via OIDC (no API key for the repo), then operator approval only — see [FLOW.md](../FLOW.md) and [10-owner-initiated-registration.md](10-owner-initiated-registration.md).
 
 ## Publish trigger
 Publishing is automatic after an authorized publish trigger.

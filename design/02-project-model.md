@@ -19,9 +19,10 @@ After registration, these fields are immutable:
 - slug
 - repo binding
 - project ID
-- access mode (for phase 1 design purposes)
 
 If one of these must change, the project is treated as a new project.
+
+Access mode is intentionally **mutable** after registration (for example, start in `password` mode to avoid exposure, then later switch to `public`, or rotate/disable password protection).
 
 ## Lifecycle states
 

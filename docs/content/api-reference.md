@@ -1,77 +1,44 @@
 # API Reference
 
-The Control Plane exposes a REST API for managing projects. Most endpoints require `Authorization: Bearer <API_KEY>`. Bootstrap endpoints use `Authorization: Bearer <bootstrap-token>` instead.
+The Control Plane exposes a REST API for managing registered documentation repos. Most endpoints require `Authorization: Bearer <API_KEY>`.
 
-## Bootstrap Endpoints
+Publishing from GitHub Actions uses **OIDC** (`POST /oidc/publish-credentials`) and short-lived repo-publish JWTs. Long-lived tokens from **`POST /repos/:id/publish-token`** are for **operator manual publish** and for **binding `repo_identity`** when it was missing at registration.
 
-These endpoints use bootstrap token authentication (not API key auth).
+## OIDC
 
-### POST /bootstrap/init
+### POST /oidc/publish-credentials
 
-Validate a bootstrap token and return org metadata. Used by the CLI as a preflight check before onboarding.
+Exchange a **GitHub Actions OIDC** token for publish credentials.
 
-**Headers:** `Authorization: Bearer <bootstrap-token>`
-
-**Request body:** empty or `{}`
-
-**Response:** `200 OK`
-
-```json
-{
-  "org_name": "My Organization",
-  "org_slug": "my-org",
-  "remaining_quota": 8,
-  "expires_at": "2025-12-31T00:00:00.000Z"
-}
-```
-
----
-
-### POST /bootstrap/onboard
-
-Create a project and mint a repo publish token in a single request. Used by the CLI after the user confirms onboarding values.
-
-**Headers:** `Authorization: Bearer <bootstrap-token>`
-
-**Request body:**
-
-```json
-{
-  "slug": "my-project",
-  "title": "My Project",
-  "description": "Optional description",
-  "repo_identity": "github.com/owner/repo"
-}
-```
+**Headers:** `Authorization: Bearer <github-oidc-token>` (audience = control plane origin)
 
 **Response:** `201 Created`
 
 ```json
 {
-  "project_id": "550e8400-e29b-41d4-a716-446655440000",
-  "repo_publish_token": "eyJhbGciOi..."
+  "repo_id": "550e8400-e29b-41d4-a716-446655440000",
+  "repo_publish_token": "eyJhbGciOi...",
+  "expires_at": "2026-01-01T00:00:00.000Z"
 }
 ```
 
-**Error responses:** 400 (missing/invalid fields, invalid repo_identity), 401 (auth), 403 (org disabled, quota exceeded), 409 (slug conflict — slug already used **in that organization**; quota slot from a failed write is rolled back).
-
 ---
 
-## Admin Endpoints
+## Admin endpoints
 
 These endpoints require `Authorization: Bearer <API_KEY>`.
 
-### POST /projects
+### POST /repos
 
-Register a new documentation project.
+Register a new documentation site (row in `repos`).
 
 **Request body:**
 
 ```json
 {
-  "slug": "my-project",
+  "slug": "my-docs",
   "repo_url": "https://github.com/org/repo",
-  "title": "My Project Docs",
+  "title": "My Docs",
   "description": "Internal documentation",
   "access_mode": "public",
   "repo_identity": "github.com/org/repo"
@@ -80,115 +47,93 @@ Register a new documentation project.
 
 | Field | Required | Description |
 |-------|----------|-------------|
-| `slug` | yes | Unique per organization. |
+| `slug` | yes | Unique **site slug** for this deployment. |
 | `repo_url` | yes | Canonical repo URL (informational). |
 | `title` | yes | Display title. |
 | `description` | no | Optional. |
 | `access_mode` | yes | `public` or `password`. |
-| `repo_identity` | no | Canonical identity for CI binding: **`github.com/<owner>/<repo>`** (normalized server-side). Omit if unknown; see [Administrator guide](guides/administrator/index.html). |
+| `repo_identity` | no | Canonical identity for CI: **`github.com/<owner>/<repo>`** (normalized server-side). |
 
-**Response:** `201 Created` with the full project object.
-
----
-
-### POST /projects/:id/approve
-
-Approve a project for publishing. Only projects in `awaiting_approval` status can be approved.
-
-**Response:** `200 OK`
+**Response:** `201 Created` with the full repo object (includes `id` = **`repo_id`**).
 
 ---
 
-### POST /projects/:id/publish-token
+### GET /repos
 
-**Authentication:** Control Plane **`API_KEY`** (Bearer `NRDOCS_API_KEY`).
+List registered repos. Query params: `all`, `status`, `name`, `slug`, `title`, `repo_identity`, `access_mode`.
 
-Mint a **repo publish** JWT for an **approved** project and insert the corresponding `repo_publish_tokens` row. Used by **`nrdocs admin mint-publish-token`** when a project was created via **`POST /projects`** instead of bootstrap onboard.
-
-**Request body (optional JSON):**
-
-| Field | Required | Description |
-|-------|----------|-------------|
-| `repo_identity` | no | **`github.com/<owner>/<repo>`**. If omitted, the server uses the project’s stored **`repo_identity`**; one of the two must be set. |
-
-**Response:** `201 Created` with `{ "repo_publish_token": "<JWT>" }`.
+**Response:** `{ "repos": [ … ], "count": N }`
 
 ---
 
-### POST /projects/:id/disable
+### POST /repos/:id/approve
 
-Disable a project. Returns 404 to all readers. Data is preserved.
+Approve a repo for publishing. Only rows in `awaiting_approval` can be approved.
 
-**Response:** `200 OK`
-
----
-
-### POST /projects/:id/publish
-
-Trigger a build and publish for the project. Project must be `approved`.
-
-**Authentication:** **repo publish** JWT in **`Authorization: Bearer …`** (not the control plane API key). Optionally **`X-Repo-Identity: github.com/owner/repo`** when the token enforces repository binding.
-
-**Request body:**
-
-```json
-{
-  "repo_content": {
-    "project_yml": "...",
-    "nav_yml": "...",
-    "allowed_list_yml": "...",
-    "pages": {
-      "getting-started": "# Getting Started\n\nContent...",
-      "guides/installation": "# Installation\n\nContent..."
-    }
-  }
-}
-```
-
-**Response:** `200 OK` with publish details including `publish_id` and `prefix`.
-
-The `prefix` is the R2 path for this publish version, typically `publishes/<org-slug>/<project-slug>/<publish-id>/`.
+**Response:** `200 OK` — `{ "message": "Repo approved", "id": "<uuid>" }`
 
 ---
 
-### DELETE /projects/:id
+### POST /repos/:id/publish-token
 
-Delete a project and all associated data (D1 records, R2 artifacts, access config).
+Mint a **repo publish** JWT for an **approved** repo.
 
-**Response:** `200 OK`
+**Request body (optional):** `{ "repo_identity": "github.com/owner/repo" }` if the row needs `repo_identity` set.
+
+**Response:** `201 Created` — `{ "repo_publish_token": "<JWT>" }`
 
 ---
+
+### POST /repos/:id/disable
+
+Disable a site (404 for readers). Data preserved.
+
+---
+
+### POST /repos/:id/publish
+
+Build and publish. Repo must be `approved`.
+
+**Authentication:** repo-publish JWT in `Authorization` (not the API key). Optional **`X-Repo-Identity`** when the token enforces repository binding.
+
+**Request body:** `repo_content` with `project_yml`, `nav_yml`, `allowed_list_yml`, `pages` map.
+
+**Response:** includes `publish_id` and R2 **`prefix`**, typically `publishes/<site-slug>/<publish-id>/`.
+
+---
+
+### DELETE /repos/:id
+
+Delete the registration and associated data (D1, R2 under that site’s publish prefix, related rows).
+
+---
+
+### POST /repos/:id/password · POST /repos/:id/access-mode
+
+Set password or access mode (operator API key or repo-publish JWT per server rules).
+
+---
+
+## Public / repo-owner
+
+### GET /status/:id
+
+Limited status for a **`repo_id`** (no API key). Returns lifecycle, `repo_identity`, delivery URL hint, published flag.
+
+---
+
+### Repo-proof (`/repo-proof/...`)
+
+Challenge / verify / consume flows for repo owners changing password or access mode without operator involvement. See [CLI guide](guides/cli/index.html).
+
+---
+
+## Admin access overrides
 
 ### POST /admin/overrides
 
-Create an admin access policy override.
+**Request body:** `scope_type` is `platform` or `repo`; for `repo`, `scope_value` is the **`repo_id`**.
 
-**Request body:**
+### PUT /admin/overrides/:id · DELETE /admin/overrides/:id
 
-```json
-{
-  "scope_type": "platform",
-  "scope_value": "*",
-  "subject_type": "email",
-  "subject_value": "blocked@example.com",
-  "effect": "deny"
-}
-```
-
-**Response:** `201 Created`
-
----
-
-### PUT /admin/overrides/:id
-
-Update an existing admin override. Same body format as create.
-
-**Response:** `200 OK`
-
----
-
-### DELETE /admin/overrides/:id
-
-Delete an admin override.
-
-**Response:** `200 OK`
+Update or delete an override.

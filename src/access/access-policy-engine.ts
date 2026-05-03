@@ -50,24 +50,24 @@ function findMatch(
  * Evaluation order (first match wins):
  *  1. Platform deny  (scope_type='platform', effect='deny')  → deny
  *  2. Platform allow  (scope_type='platform', effect='allow') → allow
- *  3. Project deny   (scope_type='project', effect='deny', source='admin') → deny
- *  4. Project allow   (scope_type='project', effect='allow', source='admin') → allow
- *  5. Repo-derived allow (scope_type='project', effect='allow', source='repo') → allow
+ *  3. Repo deny   (scope_type='repo', effect='deny', source='admin') → deny
+ *  4. Repo allow   (scope_type='repo', effect='allow', source='admin') → allow
+ *  5. Repo-derived allow (scope_type='repo', effect='allow', source='repo') → allow
  *  6. Default → deny (matchedRule: null)
  *
  * This is a **pure function** — no side effects, no database access.
  *
  * @param subject          Email address of the user requesting access
- * @param _projectId       Project ID (reserved for future use / auditability)
+ * @param _repoId          Repo ID (reserved for future use / auditability)
  * @param platformPolicies Platform-scoped entries (scope_type='platform')
- * @param projectPolicies  Project-scoped entries (scope_type='project'), both
+ * @param repoPolicies     Repo-scoped entries (scope_type='repo'), both
  *                         admin overrides and repo-derived
  */
 export function evaluateAccess(
   subject: string,
-  _projectId: string,
+  _repoId: string,
   platformPolicies: AccessPolicyEntry[],
-  projectPolicies: AccessPolicyEntry[],
+  repoPolicies: AccessPolicyEntry[],
 ): AccessPolicyResult {
   // 1. Platform deny
   const platformDeny = findMatch(
@@ -87,27 +87,27 @@ export function evaluateAccess(
     return { allowed: true, matchedRule: platformAllow };
   }
 
-  // 3. Project deny (admin overrides only)
-  const projectDeny = findMatch(
-    projectPolicies.filter((e) => e.effect === 'deny' && e.source === 'admin'),
+  // 3. Repo deny (admin overrides only)
+  const repoDeny = findMatch(
+    repoPolicies.filter((e) => e.effect === 'deny' && e.source === 'admin'),
     subject,
   );
-  if (projectDeny) {
-    return { allowed: false, matchedRule: projectDeny };
+  if (repoDeny) {
+    return { allowed: false, matchedRule: repoDeny };
   }
 
-  // 4. Project allow (admin overrides only)
-  const projectAllow = findMatch(
-    projectPolicies.filter((e) => e.effect === 'allow' && e.source === 'admin'),
+  // 4. Repo allow (admin overrides only)
+  const repoAllowAdmin = findMatch(
+    repoPolicies.filter((e) => e.effect === 'allow' && e.source === 'admin'),
     subject,
   );
-  if (projectAllow) {
-    return { allowed: true, matchedRule: projectAllow };
+  if (repoAllowAdmin) {
+    return { allowed: true, matchedRule: repoAllowAdmin };
   }
 
   // 5. Repo-derived allow
   const repoAllow = findMatch(
-    projectPolicies.filter((e) => e.effect === 'allow' && e.source === 'repo'),
+    repoPolicies.filter((e) => e.effect === 'allow' && e.source === 'repo'),
     subject,
   );
   if (repoAllow) {

@@ -4,6 +4,7 @@ import {
   parseNavConfig,
   parseAllowedListConfig,
   validateSlugMatch,
+  isValidProjectSlug,
 } from './config-parser.js';
 
 describe('parseProjectConfig', () => {
@@ -133,6 +134,19 @@ describe('parseAllowedListConfig', () => {
 
   it('throws for non-string entries', () => {
     expect(() => parseAllowedListConfig('allow:\n  - 123\n')).toThrow('allow[0] must be a non-empty string');
+  });
+});
+
+describe('isValidProjectSlug', () => {
+  it('accepts lowercase slugs with hyphens', () => {
+    expect(isValidProjectSlug('my-project')).toBe(true);
+    expect(isValidProjectSlug('a')).toBe(true);
+  });
+
+  it('rejects invalid slugs', () => {
+    expect(isValidProjectSlug('')).toBe(false);
+    expect(isValidProjectSlug('My-Project')).toBe(false);
+    expect(isValidProjectSlug('-bad')).toBe(false);
   });
 });
 

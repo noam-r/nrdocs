@@ -86,8 +86,14 @@ describe('generatePublishWorkflow', () => {
 
   it('exchanges GitHub OIDC token for publish credentials', () => {
     const wf = generatePublishWorkflow(config);
+    expect(wf).toContain('/oidc/register-project');
     expect(wf).toContain('/oidc/publish-credentials');
+    expect(wf.indexOf('/repo-proof/challenges')).toBeLessThan(wf.indexOf('/oidc/register-project'));
     expect(wf).toContain('ACTIONS_ID_TOKEN_REQUEST_URL');
+    expect(wf).toContain('export DOCS_DIR');
+    expect(wf).toContain('NRDOCS_APPROVAL_MAX_WAIT_SECS');
+    expect(wf).toContain('Reader URL');
+    expect(wf).toContain('NRDOCS_DELIVERY_URL');
   });
 
   it('contains X-Repo-Identity header', () => {

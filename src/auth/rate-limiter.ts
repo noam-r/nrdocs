@@ -5,9 +5,9 @@ export interface RateLimitResult {
 }
 
 /**
- * Tracks failed login attempts per project using the D1 `rate_limit_entries` table.
+ * Tracks failed login attempts per repo using the D1 `rate_limit_entries` table.
  *
- * Phase 1 keys by project_id only (not per-IP).
+ * Keys by repo_id only (not per-IP).
  *
  * @see Requirement 5.10
  */
@@ -30,7 +30,7 @@ export class RateLimiter {
    * 4. Otherwise increment attempt_count and allow.
    */
   async checkAndIncrement(
-    projectId: string,
+    repoId: string,
     maxAttempts: number,
     windowSeconds: number,
   ): Promise<RateLimitResult> {
@@ -38,17 +38,17 @@ export class RateLimiter {
     const nowIso = new Date(now).toISOString();
 
     const row = await this.db
-      .prepare('SELECT attempt_count, window_start FROM rate_limit_entries WHERE project_id = ?')
-      .bind(projectId)
+      .prepare('SELECT attempt_count, window_start FROM rate_limit_entries WHERE repo_id = ?')
+      .bind(repoId)
       .first<{ attempt_count: number; window_start: string }>();
 
     // No existing entry or window expired → reset
     if (!row || this.isWindowExpired(row.window_start, windowSeconds, now)) {
       await this.db
         .prepare(
-          'INSERT OR REPLACE INTO rate_limit_entries (project_id, attempt_count, window_start) VALUES (?, 1, ?)',
+          'INSERT OR REPLACE INTO rate_limit_entries (repo_id, attempt_count, window_start) VALUES (?, 1, ?)',
         )
-        .bind(projectId, nowIso)
+        .bind(repoId, nowIso)
         .run();
       return { allowed: true };
     }
@@ -64,9 +64,9 @@ export class RateLimiter {
     // Under threshold — increment and allow
     await this.db
       .prepare(
-        'UPDATE rate_limit_entries SET attempt_count = attempt_count + 1 WHERE project_id = ?',
+        'UPDATE rate_limit_entries SET attempt_count = attempt_count + 1 WHERE repo_id = ?',
       )
-      .bind(projectId)
+      .bind(repoId)
       .run();
 
     return { allowed: true };

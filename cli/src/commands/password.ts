@@ -3,11 +3,14 @@ import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { loadDotEnvFromAncestors } from './admin';
 import { confirm } from '../prompts';
+import { getDefaultApiUrl } from '../global-state';
 
 type StatusMetadata = {
   repo_identity?: string;
   publish_branch?: string;
   api_url?: string;
+  repo_id?: string;
+  /** @deprecated use repo_id */
   project_id?: string;
 };
 
@@ -33,7 +36,7 @@ Usage:
   nrdocs password enable
   nrdocs password disable [--no-auto-push] [--yes]
 
-Sets/rotates the reader password for a password-protected project.
+Sets/rotates the reader password for a password-protected docs site.
 
 This is a repo-owner command. It does NOT require GitHub secrets, PATs, or gh.
 It uses a repo-proof challenge file committed to the repo; GitHub Actions verifies
@@ -41,10 +44,12 @@ the challenge with OIDC on push, enabling the Control Plane to accept the passwo
 Auto-push is enabled by default; pass --no-auto-push to do git steps manually.
 
 Reads:
-  .nrdocs/status.json  (written by nrdocs init)
+  .nrdocs/status.json  (written by nrdocs init) — must include repo_identity, publish_branch, and api_url (or set NRDOCS_API_URL)
+  The Control Plane project id is required: put "repo_id" in status.json, or set NRDOCS_REPO_ID in the environment (e.g. from nrdocs admin list).
 
 Environment:
-  NRDOCS_NEW_PASSWORD  Non-interactive password input (otherwise prompts)`);
+  NRDOCS_NEW_PASSWORD  Non-interactive password input (otherwise prompts)
+  NRDOCS_REPO_ID     Optional: repo UUID if not stored in .nrdocs/status.json (same as nrdocs init --repo-id)`);
 }
 
 function git(args: string[]): string {
@@ -315,15 +320,35 @@ export async function runPassword(args: string[]): Promise<void> {
   }
 
   const metadata = readStatusMetadata();
-  if (!metadata?.repo_identity || !metadata?.publish_branch || !metadata?.api_url || !metadata?.project_id) {
-    console.error('Error: Missing .nrdocs/status.json metadata. Run nrdocs init first.');
+  const repoIdFromFile = metadata?.repo_id ?? metadata?.project_id;
+  const repoId = (repoIdFromFile ?? process.env.NRDOCS_REPO_ID?.trim()) || undefined;
+
+  const missing: string[] = [];
+  if (!metadata) {
+    missing.push('valid .nrdocs/status.json (file missing or not valid JSON)');
+  } else {
+    if (!metadata.repo_identity?.trim()) missing.push('repo_identity in .nrdocs/status.json');
+    if (!metadata.publish_branch?.trim()) missing.push('publish_branch in .nrdocs/status.json');
+  }
+  if (!repoId?.trim()) {
+    missing.push(
+      'repo_id: add to .nrdocs/status.json, or set NRDOCS_REPO_ID, or run nrdocs init --repo-id <uuid> (get the id from your operator: nrdocs admin list)',
+    );
+  }
+  if (missing.length > 0) {
+    console.error('Error: nrdocs password needs the following (repo-proof API):');
+    for (const m of missing) console.error(`  • ${m}`);
+    console.error('');
     process.exitCode = 1;
     return;
   }
 
-  const apiUrl = requireString(metadata.api_url, 'api_url');
-  const projectId = requireString(metadata.project_id, 'project_id');
-  const repoIdentity = requireString(metadata.repo_identity, 'repo_identity');
+  const apiUrl = requireString(
+    process.env.NRDOCS_API_URL?.trim() || metadata!.api_url || getDefaultApiUrl(),
+    'api_url',
+  );
+  const resolvedRepoId = requireString(repoId, 'repo_id');
+  const repoIdentity = requireString(metadata!.repo_identity, 'repo_identity');
 
   const action = sub === 'set' ? 'set_password'
     : sub === 'enable' ? 'set_access_mode'
@@ -338,7 +363,7 @@ export async function runPassword(args: string[]): Promise<void> {
 
   // 1) Issue challenge
   const issue = await apiJson(apiUrl, 'POST', '/repo-proof/challenges', {
-    project_id: projectId,
+    repo_id: resolvedRepoId,
     repo_identity: repoIdentity,
     action,
   });
@@ -376,7 +401,7 @@ export async function runPassword(args: string[]): Promise<void> {
   mkdirSync(dir, { recursive: true });
   const marker = {
     challenge_id: challengeId,
-    project_id: projectId,
+    repo_id: resolvedRepoId,
     repo_identity: repoIdentity,
     action,
     public_token: publicToken,
@@ -429,6 +454,7 @@ export async function runPassword(args: string[]): Promise<void> {
   if (sub === 'set') {
     const password = await readPasswordHidden('Enter new docs password: ');
     console.log('Submitting password change and waiting for challenge verification (up to 3 minutes)...');
+    console.log('If this keeps waiting: open the latest "Publish Docs" workflow run — the job must POST /repo-proof/challenges/<id>/verify with HTTP 2xx before the password can apply.');
     let attempts = 0;
     while (true) {
       attempts += 1;
@@ -436,7 +462,7 @@ export async function runPassword(args: string[]): Promise<void> {
         challenge_id: challengeId,
         public_token: publicToken,
         private_token: privateToken,
-        project_id: projectId,
+        repo_id: resolvedRepoId,
         password,
       });
       if (res.ok) break;
@@ -470,7 +496,7 @@ export async function runPassword(args: string[]): Promise<void> {
         challenge_id: challengeId,
         public_token: publicToken,
         private_token: privateToken,
-        project_id: projectId,
+        repo_id: resolvedRepoId,
       });
       if (res.ok) break;
       const apiError = apiErrorMessage(res.data);

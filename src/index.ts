@@ -7,9 +7,9 @@
 
 // ── Shared types ────────────────────────────────────────────────────
 export type {
-  Project,
-  NewProject,
-  ProjectStatus,
+  Repo,
+  NewRepo,
+  RepoStatus,
   AccessMode,
   AccessPolicyEntry,
   OperationalEvent,
