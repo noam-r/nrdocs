@@ -91,7 +91,8 @@ describe('generatePublishWorkflow', () => {
     expect(wf.indexOf('/repo-proof/challenges')).toBeLessThan(wf.indexOf('/oidc/register-project'));
     expect(wf).toContain('ACTIONS_ID_TOKEN_REQUEST_URL');
     expect(wf).toContain('export DOCS_DIR');
-    expect(wf).toContain('NRDOCS_APPROVAL_MAX_WAIT_SECS');
+    expect(wf).toContain('without polling');
+    expect(wf).not.toContain('NRDOCS_APPROVAL_MAX_WAIT_SECS');
     expect(wf).toContain('Reader URL');
     expect(wf).toContain('NRDOCS_DELIVERY_URL');
   });

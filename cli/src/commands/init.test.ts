@@ -133,8 +133,14 @@ describe('runInit', () => {
     ].join('\n');
 
     expect(process.exitCode).toBeUndefined();
+<<<<<<< Updated upstream
     expect(output).toContain('Docs URL:       https://docs.example.com/docs/');
     expect(output).toContain('5. Open: https://docs.example.com/docs/');
+=======
+    expect(output).toContain('Reader URL:       https://docs.example.com/docs/');
+    expect(output).toContain('6. Open the published site:');
+    expect(output).toContain('https://docs.example.com/docs/');
+>>>>>>> Stashed changes
 
     log.mockRestore();
     err.mockRestore();
