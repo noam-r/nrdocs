@@ -1,0 +1,29 @@
+{
+  "name": "nrdocs",
+  "version": "0.1.3",
+  "description": "CLI for nrdocs - serverless docs publishing for private GitHub repos",
+  "type": "module",
+  "bin": {
+    "nrdocs": "./dist/bin.mjs"
+  },
+  "files": [
+    "dist/bin.mjs"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "bundle": "node build.mjs",
+    "prepublishOnly": "node build.mjs",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "lint": "echo 'no lint configured yet'"
+  },
+  "devDependencies": {
+    "@nrdocs/shared": "workspace:*",
+    "@types/markdown-it": "^14.1.2",
+    "@types/node": "^20.14.0",
+    "esbuild": "^0.28.0",
+    "markdown-it": "^14.1.1",
+    "typescript": "^5.5.0",
+    "vitest": "^2.0.0"
+  }
+}

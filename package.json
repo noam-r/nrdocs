@@ -1,0 +1,14 @@
+{
+  "name": "nrdocs",
+  "private": true,
+  "description": "Serverless, protected-first docs publishing layer for private GitHub repositories",
+  "scripts": {
+    "build": "pnpm -r build",
+    "test": "pnpm -r test",
+    "lint": "pnpm -r lint",
+    "typecheck": "pnpm -r typecheck"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}

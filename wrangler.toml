@@ -1,0 +1,15 @@
+name = "nrdocs-default"
+main = "src/index.ts"
+compatibility_date = "2026-05-07"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "nrdocs-default-db"
+database_id = "unknown"
+
+[[r2_buckets]]
+binding = "ARTIFACTS"
+bucket_name = "nrdocs-default-artifacts"
+
+[vars]
+BASE_URL = "https://docs.example.com"

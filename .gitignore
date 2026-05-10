@@ -1,0 +1,8 @@
+node_modules/
+dist/
+.wrangler/
+.nrdocs/
+*.tsbuildinfo
+.env
+.env.*
+packages/worker/wrangler.toml
