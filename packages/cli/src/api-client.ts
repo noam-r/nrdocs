@@ -60,43 +60,43 @@ export class ApiClient {
     if (filters?.access) params.set('access', filters.access);
     if (filters?.owner) params.set('owner', filters.owner);
     const qs = params.toString();
-    return this.request('GET', `/api/operator/repos${qs ? `?${qs}` : ''}`);
+    return this.request('GET', `/api/repos${qs ? `?${qs}` : ''}`);
   }
 
   async getRepo(owner: string, repo: string): Promise<ApiResponse> {
-    return this.request('GET', `/api/operator/repos/${owner}/${repo}`);
+    return this.request('GET', `/api/repos/${owner}/${repo}`);
   }
 
   async approveRepo(owner: string, repo: string, accessMode: string): Promise<ApiResponse> {
-    return this.request('POST', `/api/operator/repos/${owner}/${repo}/approve`, {
+    return this.request('POST', `/api/repos/${owner}/${repo}/approve`, {
       access_mode: accessMode,
     });
   }
 
   async disableRepo(owner: string, repo: string, reason?: string): Promise<ApiResponse> {
-    return this.request('POST', `/api/operator/repos/${owner}/${repo}/disable`, {
+    return this.request('POST', `/api/repos/${owner}/${repo}/disable`, {
       reason: reason ?? undefined,
     });
   }
 
   async setAccess(owner: string, repo: string, accessMode: string): Promise<ApiResponse> {
-    return this.request('PUT', `/api/operator/repos/${owner}/${repo}/access`, {
+    return this.request('POST', `/api/repos/${owner}/${repo}/access`, {
       access_mode: accessMode,
     });
   }
 
   async setPassword(owner: string, repo: string, password: string): Promise<ApiResponse> {
-    return this.request('PUT', `/api/operator/repos/${owner}/${repo}/password`, {
+    return this.request('POST', `/api/repos/${owner}/${repo}/password`, {
       password,
     });
   }
 
   async listRules(): Promise<ApiResponse> {
-    return this.request('GET', '/api/operator/rules');
+    return this.request('GET', '/api/auto-approval-rules');
   }
 
   async addRule(pattern: string, accessMode: string, applyExisting?: boolean): Promise<ApiResponse> {
-    return this.request('POST', '/api/operator/rules', {
+    return this.request('POST', '/api/auto-approval-rules', {
       pattern,
       access_mode: accessMode,
       apply_existing: applyExisting ?? false,
@@ -104,11 +104,11 @@ export class ApiClient {
   }
 
   async removeRule(ruleId: string): Promise<ApiResponse> {
-    return this.request('DELETE', `/api/operator/rules/${ruleId}`);
+    return this.request('DELETE', `/api/auto-approval-rules/${ruleId}`);
   }
 
   async getStatus(owner: string, repo: string): Promise<ApiResponse> {
-    return this.request('GET', `/api/operator/repos/${owner}/${repo}/status`);
+    return this.request('GET', `/api/repos/${owner}/${repo}`);
   }
 
   async getOperatorMe(): Promise<ApiResponse> {

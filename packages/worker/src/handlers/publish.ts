@@ -65,7 +65,19 @@ export async function handlePublish(
     return jsonError('REPO_DISABLED', 'This repository has been disabled by the operator', 409);
   }
 
-  // 5. Parse multipart form data
+  // 5. Check publish allowlist: repo must be already known OR match an auto-approval rule
+  if (!existingRepo) {
+    const matchedRule = await matchRules(env.DB, fullName);
+    if (!matchedRule) {
+      return jsonError(
+        'REPO_NOT_ALLOWED',
+        `Repository '${fullName}' is not allowed to publish to this instance. The operator must add an auto-approval rule first. Run: nrdocs rules add '${ownerName}/*' --access password`,
+        403,
+      );
+    }
+  }
+
+  // 6. Parse multipart form data
   let formData: FormData;
   try {
     formData = await request.formData();

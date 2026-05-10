@@ -6,3 +6,4 @@ dist/
 .env
 .env.*
 packages/worker/wrangler.toml
+tmp/

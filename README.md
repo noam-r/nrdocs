@@ -1,6 +1,6 @@
 # nrdocs
 
-Serverless docs publishing for private GitHub repos. Protected-first — nothing is public until an operator says so.
+Serverless docs publishing from GitHub repos — keep docs with the code, control visibility separately.
 
 ## How it works
 
@@ -21,21 +21,8 @@ Repos are invisible by default. An operator must explicitly approve each repo an
 
 ## Install
 
-The package is not yet published to npm. Install from source:
-
 ```bash
-git clone <this-repo>
-cd nrdocs
-pnpm install
-pnpm build
-```
-
-Make the `nrdocs` command available:
-
-```bash
-pnpm setup   # creates ~/.local/share/pnpm and adds it to PATH
-source ~/.bashrc  # or restart your terminal
-pnpm link --global --dir packages/cli
+npm install -g nrdocs
 ```
 
 Verify:
@@ -45,7 +32,16 @@ $ nrdocs --version
 nrdocs 0.1.0
 ```
 
-> **Repo owners** don't need to install nrdocs locally. The GitHub Action workflow handles everything via `npx nrdocs publish` once the package is published.
+For development from source:
+
+```bash
+git clone https://github.com/noam-r/nrdocs.git
+cd nrdocs
+pnpm install
+pnpm build
+pnpm setup && source ~/.bashrc
+pnpm link --global --dir packages/cli
+```
 
 ## Quick start
 
@@ -55,25 +51,25 @@ nrdocs 0.1.0
 nrdocs deploy
 ```
 
-Prompts for instance name, Cloudflare account, domain, etc. Saves credentials locally — no env vars needed after this.
+Prompts for instance name, Cloudflare account, domain, etc. Saves credentials locally.
 
-All Cloudflare resources are named with a `nrdocs-{instance}` prefix:
+### 2. Allow repos to publish (operator — required before first publish)
 
-```
-Instance name: prod
-  → Worker:   nrdocs-prod
-  → D1:       nrdocs-prod-db
-  → R2:       nrdocs-prod-artifacts
-```
-
-Default instance name is `default`. You can run multiple instances on the same account:
+Before any repo can publish, the operator must add a rule that allows it:
 
 ```bash
-nrdocs deploy --instance prod    # nrdocs-prod, nrdocs-prod-db, nrdocs-prod-artifacts
-nrdocs deploy --instance staging # nrdocs-staging, nrdocs-staging-db, nrdocs-staging-artifacts
+nrdocs rules add 'myorg/*' --access password
 ```
 
-### 2. Set up a repo (repo owner)
+This allows all repos under `myorg` to publish. Without this step, the first publish will fail with:
+
+```
+Error: Repository 'myorg/repo' is not allowed to publish to this instance.
+The operator must add an auto-approval rule first.
+Run: nrdocs rules add 'myorg/*' --access password
+```
+
+### 3. Set up a repo (repo owner)
 
 ```bash
 nrdocs init
@@ -82,17 +78,51 @@ git commit -m "Add nrdocs"
 git push
 ```
 
-The GitHub Action runs automatically. Docs are uploaded but not visible yet.
+The GitHub Action runs automatically. If a matching rule exists, the repo is auto-approved. Otherwise it lands in `pending` state.
 
-### 3. Approve the repo (operator)
+### 4. Approve the repo (operator — if not auto-approved)
 
 ```bash
-nrdocs repos                              # see pending repos
-nrdocs approve owner/repo --access password
-nrdocs password set owner/repo            # set the reader password
+nrdocs repos                                # see pending repos
+nrdocs approve owner/repo --access public   # or --access password
 ```
 
-Docs are now live at `https://docs.example.com/owner/repo/`.
+Docs are now live at `https://your-domain.com/owner/repo/`.
+
+## Publish allowlist
+
+nrdocs only accepts publishes from repos that are either:
+
+1. **Already known** — previously published (pending or approved)
+2. **Matching an auto-approval rule** — e.g., `myorg/*` or `myorg/specific-repo`
+
+This prevents unauthorized repos from uploading artifacts to your instance. The API URL alone is not enough to publish.
+
+**If a publish fails with "not allowed":**
+
+1. Ask the operator to add a rule:
+   ```bash
+   nrdocs rules add 'owner/*' --access password
+   ```
+2. Re-run the GitHub Action
+
+## Instance naming
+
+All Cloudflare resources use a `nrdocs-{instance}` prefix:
+
+```
+Instance name: prod
+  → Worker:   nrdocs-prod
+  → D1:       nrdocs-prod-db
+  → R2:       nrdocs-prod-artifacts
+```
+
+Multiple instances on the same account:
+
+```bash
+nrdocs deploy --instance prod
+nrdocs deploy --instance staging
+```
 
 ## Operator commands
 
@@ -116,7 +146,7 @@ nrdocs access set owner/repo password
 # Disable
 nrdocs disable owner/repo
 
-# Auto-approval rules
+# Auto-approval rules (also controls publish allowlist)
 nrdocs rules add 'myorg/*' --access password
 nrdocs rules add 'myorg/public-docs' --access public
 nrdocs rules list
@@ -164,9 +194,11 @@ NRDOCS_OPERATOR_TOKEN=nrdocs_op_... \
 nrdocs repos
 ```
 
-## Auto-approval
+## Auto-approval rules
 
-Skip manual approval for trusted namespaces:
+Rules serve two purposes:
+1. **Publish allowlist** — only repos matching a rule (or already known) can upload
+2. **Auto-approval** — matching repos are approved automatically on first publish
 
 ```bash
 # All repos under myorg get password-protected access
@@ -226,9 +258,9 @@ Supported content:
 Docs are served at:
 
 ```
-https://docs.example.com/owner/repo/
-https://docs.example.com/owner/repo/getting-started/
-https://docs.example.com/owner/repo/guides/setup/
+https://your-domain.com/owner/repo/
+https://your-domain.com/owner/repo/getting-started/
+https://your-domain.com/owner/repo/guides/setup/
 ```
 
 ## Architecture
@@ -252,7 +284,7 @@ packages/
 ```bash
 pnpm install
 pnpm build
-pnpm -r test    # 424 tests
+pnpm -r test
 ```
 
 ## Specs

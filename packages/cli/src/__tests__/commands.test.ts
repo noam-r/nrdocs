@@ -223,7 +223,7 @@ describe('ApiClient', () => {
       const client = new ApiClient('https://api.example.com', 'tok');
       await client.listRepos();
       expect(fetchSpy).toHaveBeenCalledWith(
-        'https://api.example.com/api/operator/repos',
+        'https://api.example.com/api/repos',
         expect.objectContaining({ method: 'GET' })
       );
     });
@@ -232,7 +232,7 @@ describe('ApiClient', () => {
       const client = new ApiClient('https://api.example.com', 'tok');
       await client.listRepos({ state: 'pending' });
       expect(fetchSpy).toHaveBeenCalledWith(
-        'https://api.example.com/api/operator/repos?state=pending',
+        'https://api.example.com/api/repos?state=pending',
         expect.objectContaining({ method: 'GET' })
       );
     });
@@ -249,7 +249,7 @@ describe('ApiClient', () => {
       const client = new ApiClient('https://api.example.com', 'tok');
       await client.approveRepo('myorg', 'myrepo', 'public');
       expect(fetchSpy).toHaveBeenCalledWith(
-        'https://api.example.com/api/operator/repos/myorg/myrepo/approve',
+        'https://api.example.com/api/repos/myorg/myrepo/approve',
         expect.objectContaining({
           method: 'POST',
           body: JSON.stringify({ access_mode: 'public' }),
@@ -261,7 +261,7 @@ describe('ApiClient', () => {
       const client = new ApiClient('https://api.example.com', 'tok');
       await client.disableRepo('myorg', 'myrepo', 'policy violation');
       expect(fetchSpy).toHaveBeenCalledWith(
-        'https://api.example.com/api/operator/repos/myorg/myrepo/disable',
+        'https://api.example.com/api/repos/myorg/myrepo/disable',
         expect.objectContaining({
           method: 'POST',
           body: JSON.stringify({ reason: 'policy violation' }),
@@ -273,9 +273,9 @@ describe('ApiClient', () => {
       const client = new ApiClient('https://api.example.com', 'tok');
       await client.setAccess('myorg', 'myrepo', 'password');
       expect(fetchSpy).toHaveBeenCalledWith(
-        'https://api.example.com/api/operator/repos/myorg/myrepo/access',
+        'https://api.example.com/api/repos/myorg/myrepo/access',
         expect.objectContaining({
-          method: 'PUT',
+          method: 'POST',
           body: JSON.stringify({ access_mode: 'password' }),
         })
       );
@@ -285,9 +285,9 @@ describe('ApiClient', () => {
       const client = new ApiClient('https://api.example.com', 'tok');
       await client.setPassword('myorg', 'myrepo', 'secret123');
       expect(fetchSpy).toHaveBeenCalledWith(
-        'https://api.example.com/api/operator/repos/myorg/myrepo/password',
+        'https://api.example.com/api/repos/myorg/myrepo/password',
         expect.objectContaining({
-          method: 'PUT',
+          method: 'POST',
           body: JSON.stringify({ password: 'secret123' }),
         })
       );
@@ -297,7 +297,7 @@ describe('ApiClient', () => {
       const client = new ApiClient('https://api.example.com', 'tok');
       await client.addRule('myorg/*', 'public', true);
       expect(fetchSpy).toHaveBeenCalledWith(
-        'https://api.example.com/api/operator/rules',
+        'https://api.example.com/api/auto-approval-rules',
         expect.objectContaining({
           method: 'POST',
           body: JSON.stringify({ pattern: 'myorg/*', access_mode: 'public', apply_existing: true }),
@@ -309,7 +309,7 @@ describe('ApiClient', () => {
       const client = new ApiClient('https://api.example.com', 'tok');
       await client.removeRule('rule_abc');
       expect(fetchSpy).toHaveBeenCalledWith(
-        'https://api.example.com/api/operator/rules/rule_abc',
+        'https://api.example.com/api/auto-approval-rules/rule_abc',
         expect.objectContaining({ method: 'DELETE' })
       );
     });
