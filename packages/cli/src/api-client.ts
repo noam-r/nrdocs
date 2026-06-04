@@ -215,6 +215,7 @@ export class ApiClient {
     accessMode: string,
     applyExisting?: boolean,
     defaultAllowSelfPassword?: boolean,
+    allowUnlistedAssets?: boolean,
   ): Promise<ApiResponse> {
     const body: Record<string, unknown> = {
       pattern,
@@ -224,7 +225,17 @@ export class ApiClient {
     if (defaultAllowSelfPassword !== undefined) {
       body['default_allow_repo_owner_password'] = defaultAllowSelfPassword;
     }
+    if (allowUnlistedAssets !== undefined) {
+      body['allow_unlisted_assets'] = allowUnlistedAssets;
+    }
     return this.request('POST', '/api/auto-approval-rules', body);
+  }
+
+  async updateRule(
+    ruleId: string,
+    updates: { allow_unlisted_assets?: boolean },
+  ): Promise<ApiResponse> {
+    return this.request('PATCH', `/api/auto-approval-rules/${ruleId}`, updates);
   }
 
   async removeRule(ruleId: string): Promise<ApiResponse> {
@@ -237,6 +248,10 @@ export class ApiClient {
 
   async getOperatorMe(): Promise<ApiResponse> {
     return this.request('GET', '/api/operator/me');
+  }
+
+  async getPublishCapabilities(): Promise<ApiResponse> {
+    return this.request('GET', '/api/publish-capabilities');
   }
 
   async publish(formData: FormData, verbose = false): Promise<ApiResponse> {

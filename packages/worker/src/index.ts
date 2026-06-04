@@ -17,9 +17,15 @@ import {
   handleAllowSelfPassword,
   handleDisallowSelfPassword,
 } from './handlers/repos.js';
-import { handleListRules, handleCreateRule, handleDeleteRule } from './handlers/rules.js';
+import {
+  handleListRules,
+  handleCreateRule,
+  handleUpdateRule,
+  handleDeleteRule,
+} from './handlers/rules.js';
 import { handleListStatic, handleSetStatic, handleDeleteStatic } from './handlers/static-files.js';
 import { handlePublish } from './handlers/publish.js';
+import { handlePublishCapabilities } from './handlers/publish-capabilities.js';
 import { handleAuditLog } from './handlers/audit.js';
 import { handleServe } from './handlers/serve.js';
 import { handlePasswordLogin } from './handlers/password-auth.js';
@@ -55,6 +61,7 @@ router.post('/api/repos/:owner/:repo/disallow-self-password', handleDisallowSelf
 // Auto-approval rules
 router.get('/api/auto-approval-rules', handleListRules);
 router.post('/api/auto-approval-rules', handleCreateRule);
+router.patch('/api/auto-approval-rules/:id', handleUpdateRule);
 router.delete('/api/auto-approval-rules/:id', handleDeleteRule);
 
 // Static files (placeholder)
@@ -63,6 +70,7 @@ router.put('/api/static/:key', handleSetStatic);
 router.delete('/api/static/:key', handleDeleteStatic);
 
 // Publish (GitHub OIDC)
+router.get('/api/publish-capabilities', handlePublishCapabilities);
 router.post('/api/publish', handlePublish);
 
 // Audit log

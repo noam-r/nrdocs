@@ -174,6 +174,45 @@ describe('Archive validation', () => {
     }
   });
 
+  it('archive with whitelisted .yaml → accepted', async () => {
+    const manifest = JSON.stringify({ version: 1, pages: [] });
+    const archive = await createTestArchive([
+      { name: 'nrdocs-manifest.json', content: manifest },
+      { name: 'index.html', content: '<h1>Hi</h1>' },
+      { name: 'schemas/openapi.yaml', content: 'openapi: 3.0.0' },
+    ]);
+
+    const result = await extractArtifact(archive);
+    expect(result.ok).toBe(true);
+  });
+
+  it('archive with unlisted .zip → rejected without allowUnlisted', async () => {
+    const manifest = JSON.stringify({ version: 1, pages: [] });
+    const archive = await createTestArchive([
+      { name: 'nrdocs-manifest.json', content: manifest },
+      { name: 'index.html', content: '<h1>Hi</h1>' },
+      { name: 'bundle.zip', content: 'PK' },
+    ]);
+
+    const result = await extractArtifact(archive);
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.code).toBe('EXTENSION_NOT_PERMITTED');
+    }
+  });
+
+  it('archive with unlisted .zip → accepted when allowUnlisted', async () => {
+    const manifest = JSON.stringify({ version: 1, pages: [] });
+    const archive = await createTestArchive([
+      { name: 'nrdocs-manifest.json', content: manifest },
+      { name: 'index.html', content: '<h1>Hi</h1>' },
+      { name: 'bundle.zip', content: 'PK' },
+    ]);
+
+    const result = await extractArtifact(archive, undefined, { allowUnlisted: true });
+    expect(result.ok).toBe(true);
+  });
+
   it('archive with platform _nrdocs runtime .js → accepted', async () => {
     const manifest = JSON.stringify({ version: 1, pages: [] });
     const archive = await createTestArchive([

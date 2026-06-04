@@ -2,6 +2,8 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { resolveCredentials } from '../config/index.js';
 import { ApiClient } from '../api-client.js';
+import { getOIDCToken } from '../github-oidc.js';
+import { scanDocsForUnlistedAssets } from '../renderer/assets.js';
 import {
   normalizeApiBaseUrl,
   parseApiUrlFromConfig,
@@ -191,6 +193,56 @@ export async function handleDoctor(args: string[]): Promise<void> {
       status: ghRepo ? 'ok' : 'fail',
       message: ghRepo ?? 'Not set',
     });
+
+    if (fs.existsSync(docsDir)) {
+      const unlisted = scanDocsForUnlistedAssets(docsDir);
+      if (unlisted.length === 0) {
+        checks.push({
+          section: 'Publish assets',
+          name: 'Non-whitelisted files',
+          status: 'ok',
+          message: 'No files in docs/ require operator consent for unlisted extensions',
+        });
+      } else {
+        let allowed = false;
+        let capMessage = 'Could not verify publish capabilities (OIDC or API URL missing)';
+        if (publishBaseUrl && ghRepo && hasOidcUrl && hasOidcToken) {
+          const { url } = normalizeApiBaseUrl(publishBaseUrl);
+          const token = await getOIDCToken();
+          if (token) {
+            const client = new ApiClient(url, token);
+            const capsRes = await client.getPublishCapabilities();
+            if (capsRes.ok) {
+              const caps = capsRes.data as { allow_unlisted_assets?: boolean } | undefined;
+              allowed = caps?.allow_unlisted_assets === true;
+              capMessage = allowed
+                ? 'Matching auto-approval rule allows unlisted asset files'
+                : 'Publish rule does not allow unlisted asset files';
+            } else {
+              capMessage = capsRes.error?.message ?? 'publish-capabilities request failed';
+            }
+          } else {
+            capMessage = 'Failed to obtain OIDC token for capabilities check';
+          }
+        }
+        const sample = unlisted.slice(0, 5).join(', ');
+        const more = unlisted.length > 5 ? ` (+${unlisted.length - 5} more)` : '';
+        checks.push({
+          section: 'Publish assets',
+          name: 'Non-whitelisted files',
+          status: allowed ? 'ok' : 'fail',
+          message: allowed
+            ? `${unlisted.length} unlisted file(s) allowed by rule: ${sample}${more}`
+            : `${unlisted.length} unlisted file(s) in docs/: ${sample}${more}. ${capMessage}`,
+          fixes: allowed
+            ? undefined
+            : [
+                "Ask the operator: nrdocs rules add 'OWNER/*' --access password --allow-unlisted-files true",
+                'Or remove non-whitelisted files from docs/',
+              ],
+        });
+      }
+    }
   }
 
   let operatorApiUrl: string | undefined;
@@ -270,6 +322,7 @@ export async function handleDoctor(args: string[]): Promise<void> {
         publishPathFailed = true;
       }
       if (check.section === 'GitHub Actions') publishPathFailed = true;
+      if (check.section === 'Publish assets') publishPathFailed = true;
     }
   }
 

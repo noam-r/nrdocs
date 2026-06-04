@@ -266,7 +266,7 @@ describe('Asset collection', () => {
     fs.writeFileSync(path.join(tmpDir, 'logo.png'), 'PNG data');
     fs.writeFileSync(path.join(tmpDir, 'data.json'), '{}');
 
-    const assets = collectAssets(tmpDir);
+    const assets = collectAssets(tmpDir).files;
     const paths = assets.map((a) => a.path);
     expect(paths).toContain('style.css');
     expect(paths).toContain('logo.png');
@@ -278,7 +278,7 @@ describe('Asset collection', () => {
     fs.writeFileSync(path.join(tmpDir, 'module.mjs'), 'export default 1');
     fs.writeFileSync(path.join(tmpDir, 'common.cjs'), 'module.exports = 1');
 
-    const assets = collectAssets(tmpDir);
+    const assets = collectAssets(tmpDir).files;
     const paths = assets.map((a) => a.path);
     expect(paths).not.toContain('script.js');
     expect(paths).not.toContain('module.mjs');
@@ -288,7 +288,7 @@ describe('Asset collection', () => {
   it('skips markdown files', () => {
     fs.writeFileSync(path.join(tmpDir, 'readme.md'), '# Hello');
 
-    const assets = collectAssets(tmpDir);
+    const assets = collectAssets(tmpDir).files;
     const paths = assets.map((a) => a.path);
     expect(paths).not.toContain('readme.md');
   });
@@ -297,7 +297,7 @@ describe('Asset collection', () => {
     fs.mkdirSync(path.join(tmpDir, 'images'));
     fs.writeFileSync(path.join(tmpDir, 'images', 'photo.jpg'), 'JPEG data');
 
-    const assets = collectAssets(tmpDir);
+    const assets = collectAssets(tmpDir).files;
     const paths = assets.map((a) => a.path);
     expect(paths).toContain('images/photo.jpg');
   });
@@ -306,7 +306,7 @@ describe('Asset collection', () => {
     fs.mkdirSync(path.join(tmpDir, '.hidden'));
     fs.writeFileSync(path.join(tmpDir, '.hidden', 'secret.txt'), 'secret');
 
-    const assets = collectAssets(tmpDir);
+    const assets = collectAssets(tmpDir).files;
     const paths = assets.map((a) => a.path);
     expect(paths).not.toContain('.hidden/secret.txt');
   });
@@ -315,7 +315,7 @@ describe('Asset collection', () => {
     fs.writeFileSync(path.join(tmpDir, 'binary.exe'), 'binary');
     fs.writeFileSync(path.join(tmpDir, 'archive.zip'), 'zip');
 
-    const assets = collectAssets(tmpDir);
+    const assets = collectAssets(tmpDir).files;
     const paths = assets.map((a) => a.path);
     expect(paths).not.toContain('binary.exe');
     expect(paths).not.toContain('archive.zip');

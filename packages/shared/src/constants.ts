@@ -41,21 +41,5 @@ export const PASSWORD_THROTTLE_LOCKOUT_MINUTES = 5;
 // Allowed static file keys
 export const ALLOWED_STATIC_KEYS = ['homepage', 'favicon', 'robots'] as const;
 
-// Allowed artifact file extensions
-export const ALLOWED_ASSET_EXTENSIONS = new Set([
-  '.html',
-  '.css',
-  '.json',
-  '.svg',
-  '.png',
-  '.jpg',
-  '.jpeg',
-  '.gif',
-  '.webp',
-  '.ico',
-  '.txt',
-  '.pdf',
-]);
-
-// Rejected extensions
+// Rejected extensions (executable / script types)
 export const REJECTED_EXTENSIONS = new Set(['.js', '.mjs', '.cjs']);

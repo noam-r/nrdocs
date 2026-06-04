@@ -12,6 +12,7 @@ import {
   getExplicitNav,
   validateNavPaths,
 } from '../config/docs-config.js';
+import { getOIDCToken } from '../github-oidc.js';
 
 interface PublishOptions {
   docsDir?: string;
@@ -86,25 +87,6 @@ function getRepoInfo(): { owner: string; repo: string } | null {
   const [owner, repo] = ghRepo.split('/');
   if (!owner || !repo) return null;
   return { owner, repo };
-}
-
-/**
- * Requests an OIDC token from GitHub Actions.
- */
-async function getOIDCToken(): Promise<string | null> {
-  const requestUrl = process.env['ACTIONS_ID_TOKEN_REQUEST_URL'];
-  const requestToken = process.env['ACTIONS_ID_TOKEN_REQUEST_TOKEN'];
-  if (!requestUrl || !requestToken) return null;
-
-  try {
-    const res = await fetch(`${requestUrl}&audience=nrdocs`, {
-      headers: { Authorization: `bearer ${requestToken}` },
-    });
-    const json = (await res.json()) as { value?: string };
-    return json.value ?? null;
-  } catch {
-    return null;
-  }
 }
 
 /**
@@ -188,6 +170,22 @@ export async function handlePublish(args: string[]): Promise<void> {
     console.log(`API base: ${apiUrl}`);
   }
 
+  console.log('Requesting OIDC token...');
+  const token = await getOIDCToken();
+  if (!token) {
+    console.error('Error: Failed to obtain OIDC token.');
+    process.exit(12);
+  }
+
+  const client = new ApiClient(apiUrl, token);
+  const capsRes = await client.getPublishCapabilities();
+  if (!capsRes.ok) {
+    console.error(`Error: Could not load publish capabilities: ${capsRes.error?.message ?? 'unknown'}`);
+    process.exit(10);
+  }
+  const caps = capsRes.data as { allow_unlisted_assets?: boolean } | undefined;
+  const allowUnlistedAssets = caps?.allow_unlisted_assets === true;
+
   console.log('Rendering Markdown...');
   const indexPath = docsConfig.config.content?.index ?? 'index.md';
   const navOption = explicitNav ?? 'auto';
@@ -200,6 +198,7 @@ export async function handlePublish(args: string[]): Promise<void> {
     repo: repoLower,
     nav: navOption,
     indexPath,
+    allowUnlistedAssets,
   });
 
   console.log(`Rendered ${site.files.length} files.`);
@@ -208,15 +207,7 @@ export async function handlePublish(args: string[]): Promise<void> {
   const archive = await createArchive(site.files, site.manifest);
   console.log(`Archive size: ${(archive.length / 1024).toFixed(1)} KB`);
 
-  console.log('Requesting OIDC token...');
-  const token = await getOIDCToken();
-  if (!token) {
-    console.error('Error: Failed to obtain OIDC token.');
-    process.exit(12);
-  }
-
   console.log('Uploading to nrdocs...');
-  const client = new ApiClient(apiUrl, token);
 
   const formData = new FormData();
   formData.append('artifact', new Blob([archive], { type: 'application/gzip' }), 'docs.tar.gz');

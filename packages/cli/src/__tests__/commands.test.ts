@@ -9,6 +9,7 @@ import { parsePasswordSetArgs } from '../commands/password.js';
 import {
   parseRulesListArgs,
   parseRulesAddArgs,
+  parseRulesUpdateArgs,
   parseRulesRemoveArgs,
 } from '../commands/rules.js';
 import { parseStatusArgs } from '../commands/status.js';
@@ -175,6 +176,30 @@ describe('Arg parsing', () => {
     it('parses rules remove with rule ID', () => {
       const opts = parseRulesRemoveArgs(['rule_abc123']);
       expect(opts.ruleId).toBe('rule_abc123');
+    });
+
+    it('parses rules add --allow-unlisted-files true|false', () => {
+      expect(
+        parseRulesAddArgs(['myorg/*', '--access', 'password', '--allow-unlisted-files', 'true'])
+          .allowUnlistedFiles,
+      ).toBe(true);
+      expect(
+        parseRulesAddArgs(['myorg/*', '--access', 'password', '--allow-unlisted-files', 'false'])
+          .allowUnlistedFiles,
+      ).toBe(false);
+      expect(parseRulesAddArgs(['myorg/*', '--access', 'password']).allowUnlistedFiles).toBe(
+        undefined,
+      );
+    });
+
+    it('parses rules update --allow-unlisted-files', () => {
+      const opts = parseRulesUpdateArgs([
+        'rule_abc',
+        '--allow-unlisted-files',
+        'false',
+      ]);
+      expect(opts.ruleId).toBe('rule_abc');
+      expect(opts.allowUnlistedFiles).toBe(false);
     });
   });
 

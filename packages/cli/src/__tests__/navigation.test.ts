@@ -9,6 +9,7 @@ import {
   navConfigToNavItems,
   navConfigToSidebar,
   flattenNavPaths,
+  isSkippablePlaceholderIndex,
 } from '../renderer/navigation.js';
 import {
   loadDocsConfig,
@@ -31,6 +32,37 @@ describe('sortNavPaths', () => {
   });
 });
 
+describe('isSkippablePlaceholderIndex', () => {
+  let tmpDir: string;
+
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'nrdocs-skip-index-'));
+  });
+
+  afterEach(() => {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it('skips legacy init stub at docs/index.md', () => {
+    fs.writeFileSync(
+      path.join(tmpDir, 'index.md'),
+      '# My Site\n\nWelcome to your documentation site powered by nrdocs.\n',
+    );
+    expect(isSkippablePlaceholderIndex(tmpDir, 'index.md')).toBe(true);
+  });
+
+  it('keeps short but real root index.md', () => {
+    fs.writeFileSync(path.join(tmpDir, 'index.md'), '# Home\n');
+    expect(isSkippablePlaceholderIndex(tmpDir, 'index.md')).toBe(false);
+  });
+
+  it('does not skip index.md in subfolders', () => {
+    fs.mkdirSync(path.join(tmpDir, 'guide'), { recursive: true });
+    fs.writeFileSync(path.join(tmpDir, 'guide', 'index.md'), '# Home\n');
+    expect(isSkippablePlaceholderIndex(tmpDir, 'guide/index.md')).toBe(false);
+  });
+});
+
 describe('discoverNavEntries', () => {
   let tmpDir: string;
 
@@ -40,6 +72,17 @@ describe('discoverNavEntries', () => {
 
   afterEach(() => {
     fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it('omits placeholder root index.md from nav', () => {
+    fs.writeFileSync(
+      path.join(tmpDir, 'index.md'),
+      '# Site\n\nWelcome to your documentation site powered by nrdocs.\n',
+    );
+    fs.writeFileSync(path.join(tmpDir, '00-intro.md'), '# Intro');
+
+    const entries = discoverNavEntries(tmpDir);
+    expect(flattenNavPaths(entries)).toEqual(['00-intro.md']);
   });
 
   it('orders numbered prefixes after index at root', () => {

@@ -140,6 +140,7 @@ describe('handleAllowSelfPassword / handleDisallowSelfPassword', () => {
     sqlDb.run(readMigration('0001_initial_schema.sql'));
     sqlDb.run(readMigration('0002_repo_owner_password_optin.sql'));
     sqlDb.run(readMigration('0003_rule_self_password_default.sql'));
+    sqlDb.run(readMigration('0004_rule_unlisted_assets.sql'));
     const d1 = createD1FromSqlJs(sqlDb);
     return { sqlDb, d1 };
   }

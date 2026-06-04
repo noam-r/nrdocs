@@ -1,6 +1,6 @@
 {
   "name": "nrdocs",
-  "version": "0.2.3",
+  "version": "0.2.4",
   "description": "CLI for nrdocs - serverless docs publishing for private GitHub repos",
   "type": "module",
   "bin": {

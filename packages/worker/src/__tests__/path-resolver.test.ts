@@ -127,10 +127,9 @@ describe('resolveServingPath', () => {
       expect(result).toEqual({ type: 'not_found' });
     });
 
-    it('handles paths with unknown extensions as page paths (redirect)', () => {
-      // Unknown extension → treated as a page path, redirect to add trailing slash
+    it('serves paths with non-html extensions as static assets', () => {
       const result = resolveServingPath('/acme/docs/file.xyz', owner, repo);
-      expect(result).toEqual({ type: 'redirect', location: '/acme/docs/file.xyz/' });
+      expect(result).toEqual({ type: 'serve', filePath: 'file.xyz' });
     });
   });
 });

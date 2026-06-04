@@ -47,6 +47,7 @@ function makeRule(overrides: Partial<AutoApprovalRule> = {}): AutoApprovalRule {
     enabled: true,
     priority: 0,
     default_allow_repo_owner_password: true,
+    allow_unlisted_assets: false,
     created_at: '2024-01-01T00:00:00Z',
     created_by: 'operator',
     updated_at: '2024-01-01T00:00:00Z',

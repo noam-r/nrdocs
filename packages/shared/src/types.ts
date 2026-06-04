@@ -85,6 +85,8 @@ export interface AutoApprovalRule {
   enabled: boolean;
   priority: number;
   default_allow_repo_owner_password: boolean;
+  /** When true, publish may include files whose extensions are not on the platform whitelist. */
+  allow_unlisted_assets: boolean;
   created_at: string;
   created_by: string;
   updated_at: string;

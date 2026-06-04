@@ -71,6 +71,10 @@ export class Router {
     this.routes.push(buildRoute('PUT', path, handler));
   }
 
+  patch(path: string, handler: Handler): void {
+    this.routes.push(buildRoute('PATCH', path, handler));
+  }
+
   delete(path: string, handler: Handler): void {
     this.routes.push(buildRoute('DELETE', path, handler));
   }

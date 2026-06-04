@@ -29,11 +29,13 @@ export type { CreateBuildInput } from './builds.js';
 
 export {
   createRule,
+  updateRule,
   deleteRule,
   listRules,
   matchRules,
   findMatchingRule,
 } from './rules.js';
+export type { UpdateRuleInput } from './rules.js';
 
 export {
   setPassword,

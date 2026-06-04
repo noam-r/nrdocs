@@ -83,6 +83,10 @@ export async function handlePublish(
     }
   }
 
+  const matchedRule =
+    matchedRuleForNewRepo ?? (await matchRules(env.DB, fullName));
+  const allowUnlistedAssets = matchedRule?.allow_unlisted_assets ?? false;
+
   // 6. Parse multipart form data
   let formData: FormData;
   try {
@@ -132,14 +136,16 @@ export async function handlePublish(
   }
 
   // 7. Extract and validate artifact archive
-  const extractResult = await extractArtifact(archiveBuffer);
+  const extractResult = await extractArtifact(archiveBuffer, undefined, {
+    allowUnlisted: allowUnlistedAssets,
+  });
   if (!extractResult.ok) {
-    return jsonError(
-      'EXTRACTION_FAILED',
-      extractResult.error.message,
-      400,
-      { code: extractResult.error.code },
-    );
+    const code = extractResult.error.code;
+    const message =
+      code === 'EXTENSION_NOT_PERMITTED'
+        ? `${extractResult.error.message}. Ask your operator: nrdocs rules add '${ownerName}/*' --access password --allow-unlisted-files true`
+        : extractResult.error.message;
+    return jsonError('EXTRACTION_FAILED', message, 400, { code });
   }
 
   const { files, totalSize, fileCount } = extractResult.result;

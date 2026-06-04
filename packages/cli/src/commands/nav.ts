@@ -1,6 +1,6 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { discoverNavEntries } from '../renderer/navigation.js';
+import { discoverNavEntries, flattenNavPaths } from '../renderer/navigation.js';
 import {
   loadDocsConfig,
   hasExplicitNav,
@@ -71,8 +71,10 @@ export async function handleNavGenerate(args: string[]): Promise<void> {
     process.exit(10);
   }
 
+  const pageCount = flattenNavPaths(entries).length;
+
   if (opts.json) {
-    console.log(JSON.stringify({ nav: entries, files: entries.length }, null, 2));
+    console.log(JSON.stringify({ nav: entries, pages: pageCount }, null, 2));
     if (opts.dryRun) return;
   } else if (opts.dryRun) {
     console.log('# Dry run — content.nav that would be written:\n');
@@ -83,7 +85,10 @@ export async function handleNavGenerate(args: string[]): Promise<void> {
   generateNavInConfig(docsDir, { generatedBy: 'nrdocs nav generate', indexPath });
 
   if (!opts.json) {
-    console.log(`Generated navigation for ${entries.length} page(s) in ${path.relative(process.cwd(), configPath)}`);
-    console.log('Edit the file to reorder or rename entries, then run publish.');
+    console.log(
+      `Updated content.nav (${pageCount} page(s)) in ${path.relative(process.cwd(), configPath)}`,
+    );
+    console.log('Only nrdocs.yml was changed — no markdown files are created or modified.');
+    console.log('Edit content.nav to reorder, then publish via GitHub Actions.');
   }
 }

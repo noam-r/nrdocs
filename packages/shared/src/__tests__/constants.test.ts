@@ -5,7 +5,7 @@ import {
   ACCESS_MODES,
   BUILD_STATUSES,
   DEFAULT_PBKDF2_ITERATIONS,
-  ALLOWED_ASSET_EXTENSIONS,
+  WHITELISTED_ASSET_EXTENSIONS,
   REJECTED_EXTENSIONS,
 } from '../index.js';
 
@@ -40,10 +40,10 @@ describe('constants', () => {
   });
 
   it('allows expected asset extensions', () => {
-    expect(ALLOWED_ASSET_EXTENSIONS.has('.html')).toBe(true);
-    expect(ALLOWED_ASSET_EXTENSIONS.has('.png')).toBe(true);
-    expect(ALLOWED_ASSET_EXTENSIONS.has('.svg')).toBe(true);
-    expect(ALLOWED_ASSET_EXTENSIONS.has('.pdf')).toBe(true);
+    expect(WHITELISTED_ASSET_EXTENSIONS.has('.html')).toBe(true);
+    expect(WHITELISTED_ASSET_EXTENSIONS.has('.png')).toBe(true);
+    expect(WHITELISTED_ASSET_EXTENSIONS.has('.yaml')).toBe(true);
+    expect(WHITELISTED_ASSET_EXTENSIONS.has('.pdf')).toBe(true);
   });
 
   it('rejects .js extensions', () => {

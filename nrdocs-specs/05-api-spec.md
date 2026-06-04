@@ -324,6 +324,30 @@ Pending approval is not a publish failure.
 | `artifact_too_large` | 413 | Artifact exceeds configured size limit |
 | `repo_disabled` | 409 | Repo is disabled; publish is rejected before artifact storage |
 | `upload_failed` | 500 | Artifact storage failed |
+| `extension_not_permitted` | 422 | Artifact contains a file extension that is not whitelisted and the matching auto-approval rule does not grant `allow_unlisted_assets` |
+
+## Endpoint: GET /api/publish-capabilities
+
+### Purpose
+
+Return publish-time capabilities for the authenticated GitHub repository (OIDC identity). Used by `nrdocs publish` and `nrdocs doctor --ci` before packaging assets.
+
+### Auth
+
+GitHub OIDC required. The repo identity is derived from the token; callers must not override it.
+
+### Response
+
+```json
+{
+  "ok": true,
+  "data": {
+    "allow_unlisted_assets": false
+  }
+}
+```
+
+`allow_unlisted_assets` is `true` only when an enabled auto-approval rule matches the repository **and** that rule has `allow_unlisted_assets = true`.
 
 ## Endpoint: GET /api/repos
 
@@ -610,7 +634,8 @@ Operator token required.
         "pattern": "noam-r/*",
         "access_mode": "password",
         "enabled": true,
-        "priority": 0
+        "priority": 0,
+        "allow_unlisted_assets": false
       }
     ]
   }
@@ -635,9 +660,12 @@ Operator token required.
   "access_mode": "password",
   "enabled": true,
   "priority": 0,
-  "apply_existing": false
+  "apply_existing": false,
+  "allow_unlisted_assets": false
 }
 ```
+
+`allow_unlisted_assets` is optional. When omitted, the server stores `false` (only whitelisted asset extensions may appear in published artifacts for repos matching this rule).
 
 Allowed pattern forms:
 
@@ -678,6 +706,30 @@ By default, creating a rule affects future publishes only. If `apply_existing` i
   }
 }
 ```
+
+## Endpoint: PATCH /api/auto-approval-rules/:id
+
+### Purpose
+
+Update fields on an existing auto-approval rule (for example revoke `allow_unlisted_assets` without deleting the rule).
+
+### Auth
+
+Operator token required.
+
+### Request Body
+
+```json
+{
+  "allow_unlisted_assets": false
+}
+```
+
+At least one supported field must be present. Supported MVP fields include `allow_unlisted_assets`, `access_mode`, `priority`, and `enabled`.
+
+### Response
+
+Returns the updated rule object (same shape as create/list).
 
 ## Endpoint: DELETE /api/auto-approval-rules/:id
 

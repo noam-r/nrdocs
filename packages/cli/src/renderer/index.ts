@@ -32,6 +32,8 @@ export interface RenderOptions {
   /** Explicit nav from nrdocs.yml; omit or 'auto' for discovery. */
   nav?: NavConfigEntry[] | 'auto';
   indexPath?: string;
+  /** When true, non-whitelist asset extensions may be included (operator rule consent). */
+  allowUnlistedAssets?: boolean;
 }
 
 export interface RenderedSite {
@@ -122,8 +124,17 @@ export async function renderSite(options: RenderOptions): Promise<RenderedSite> 
     });
   }
 
-  const assets = collectAssets(resolvedDocsDir);
-  renderedFiles.push(...assets);
+  const { files: assetFiles, rejected: rejectedAssets } = collectAssets(resolvedDocsDir, {
+    allowUnlisted: options.allowUnlistedAssets ?? false,
+  });
+  if (rejectedAssets.length > 0) {
+    const lines = rejectedAssets.map((r) => `  - ${r.path}: ${r.message}`).join('\n');
+    throw new Error(
+      `Artifact contains files not permitted by extension policy:\n${lines}\n` +
+        `Ask your operator: nrdocs rules add 'OWNER/*' --access password --allow-unlisted-files true`,
+    );
+  }
+  renderedFiles.push(...assetFiles);
 
   const manifest: Record<string, unknown> = {
     version: 1,

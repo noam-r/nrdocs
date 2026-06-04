@@ -50,6 +50,17 @@ describe('getMimeType', () => {
     expect(getMimeType('doc.pdf')).toBe('application/pdf');
   });
 
+  it('returns correct MIME type for textual schema extensions', () => {
+    expect(getMimeType('openapi.yaml')).toBe('text/yaml; charset=utf-8');
+    expect(getMimeType('openapi.yml')).toBe('text/yaml; charset=utf-8');
+    expect(getMimeType('data.jsonp')).toBe('text/plain; charset=utf-8');
+    expect(getMimeType('config.toml')).toBe('text/plain; charset=utf-8');
+  });
+
+  it('returns correct MIME type for .zip when served', () => {
+    expect(getMimeType('bundle.zip')).toBe('application/zip');
+  });
+
   it('returns correct MIME type for .js', () => {
     expect(getMimeType('_nrdocs/mermaid.min.js')).toBe('text/javascript; charset=utf-8');
     expect(getMimeType('file.js')).toBe('text/javascript; charset=utf-8');
@@ -57,7 +68,6 @@ describe('getMimeType', () => {
 
   it('returns null for unknown extensions', () => {
     expect(getMimeType('file.exe')).toBeNull();
-    expect(getMimeType('file.zip')).toBeNull();
   });
 
   it('returns null for files without extensions', () => {

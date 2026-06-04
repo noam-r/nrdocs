@@ -95,22 +95,26 @@ describe('Extension filtering', () => {
     expect(err!.code).toBe('REJECTED_EXTENSION');
   });
 
-  it('rejects .exe files (unknown extension)', () => {
+  it('rejects .exe files (unlisted extension)', () => {
     const err = validateExtension('program.exe');
     expect(err).not.toBeNull();
-    expect(err!.code).toBe('INVALID_EXTENSION');
+    expect(err!.code).toBe('EXTENSION_NOT_PERMITTED');
   });
 
-  it('rejects .sh files (unknown extension)', () => {
+  it('allows unlisted when allowUnlisted is true', () => {
+    expect(validateExtension('program.exe', { allowUnlisted: true })).toBeNull();
+  });
+
+  it('rejects .sh files (unlisted extension)', () => {
     const err = validateExtension('script.sh');
     expect(err).not.toBeNull();
-    expect(err!.code).toBe('INVALID_EXTENSION');
+    expect(err!.code).toBe('EXTENSION_NOT_PERMITTED');
   });
 
-  it('rejects .py files (unknown extension)', () => {
+  it('rejects .py files (unlisted extension)', () => {
     const err = validateExtension('app.py');
     expect(err).not.toBeNull();
-    expect(err!.code).toBe('INVALID_EXTENSION');
+    expect(err!.code).toBe('EXTENSION_NOT_PERMITTED');
   });
 
   it('rejects files without extensions', () => {
@@ -132,6 +136,8 @@ describe('Extension filtering', () => {
     expect(validateExtension('icon.ico')).toBeNull();
     expect(validateExtension('readme.txt')).toBeNull();
     expect(validateExtension('doc.pdf')).toBeNull();
+    expect(validateExtension('schemas/api.yaml')).toBeNull();
+    expect(validateExtension('schemas/api.yml')).toBeNull();
   });
 
   it('allows nrdocs-manifest.json regardless of extension rules', () => {

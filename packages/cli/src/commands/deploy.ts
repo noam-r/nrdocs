@@ -11,7 +11,15 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { execSync } from 'node:child_process';
 import { validateInstanceName, getResourceNames } from '@nrdocs/shared';
-import { setProfile, createProfile, setDefaultProfile } from '../config/index.js';
+import {
+  setProfile,
+  createProfile,
+  setDefaultProfile,
+  getProfile,
+  resolveProfileName,
+  updateProfile,
+} from '../config/index.js';
+import type { Profile } from '../config/schema.js';
 
 interface DeployOptions {
   instance?: string;
@@ -149,6 +157,21 @@ function workerUsesBundledEntry(workerDir: string): boolean {
   return fs.existsSync(path.join(workerDir, 'index.js'));
 }
 
+/** Profile has enough data to redeploy without prompts. */
+export function isUsableDeployProfile(profile: Profile): boolean {
+  return Boolean(profile.api_url?.trim() && profile.operator_token?.trim());
+}
+
+/** True when the user did not pass deploy-specific overrides on the CLI. */
+export function hasDeployCliOverrides(opts: DeployOptions): boolean {
+  return Boolean(
+    opts.instance ||
+      opts.baseUrl ||
+      opts.operatorToken ||
+      opts.operatorTokenEnv,
+  );
+}
+
 export async function handleDeploy(args: string[]): Promise<void> {
   const opts = parseDeployArgs(args);
 
@@ -191,7 +214,11 @@ export async function handleDeploy(args: string[]): Promise<void> {
     console.log('');
   }
 
-  // Gather inputs
+  // Gather inputs (reuse saved operator profile when present)
+  const profileName = resolveProfileName(opts.profile);
+  const savedProfile = getProfile(profileName);
+  const hasSavedProfile = savedProfile !== undefined && isUsableDeployProfile(savedProfile);
+
   let instance = opts.instance;
   let baseUrl = opts.baseUrl;
   let operatorToken = opts.operatorToken;
@@ -204,16 +231,50 @@ export async function handleDeploy(args: string[]): Promise<void> {
     }
   }
 
-  if (opts.nonInteractive) {
-    if (!instance) { console.error('Error: --instance is required in non-interactive mode.'); process.exit(2); }
-    if (!baseUrl) { console.error('Error: --base-url is required in non-interactive mode.'); process.exit(2); }
+  const savedInstance = savedProfile?.deployment_name?.trim() || 'default';
+  const savedBaseUrl = savedProfile?.api_url?.trim();
+  const frictionless =
+    hasSavedProfile && !hasDeployCliOverrides(opts) && !opts.nonInteractive;
+
+  if (frictionless) {
+    instance = savedInstance;
+    baseUrl = savedBaseUrl!;
+    operatorToken = operatorToken ?? savedProfile!.operator_token;
+    console.log(
+      `Using saved operator profile "${profileName}" (${instance}, ${savedBaseUrl})`,
+    );
+    console.log('');
+  } else if (opts.nonInteractive) {
+    if (!instance) instance = savedInstance;
+    if (!baseUrl && savedBaseUrl) baseUrl = savedBaseUrl;
+    if (!operatorToken && hasSavedProfile) {
+      operatorToken = savedProfile!.operator_token;
+    }
+    if (!instance) {
+      console.error(
+        'Error: --instance is required in non-interactive mode (no deployment_name in profile).',
+      );
+      process.exit(2);
+    }
+    if (!baseUrl) {
+      console.error(
+        'Error: --base-url is required in non-interactive mode (no api_url in profile).',
+      );
+      process.exit(2);
+    }
   } else {
-    instance = instance || await prompt('Instance name', 'default');
+    if (hasSavedProfile && !hasDeployCliOverrides(opts)) {
+      console.log(`Found saved operator profile "${profileName}".`);
+      console.log('');
+    }
+    instance =
+      instance ||
+      (await prompt('Instance name', hasSavedProfile ? savedInstance : 'default'));
     baseUrl =
       baseUrl ||
       (await prompt(
         'Public site URL (readers visit this host)',
-        'https://docs.example.com',
+        hasSavedProfile ? savedBaseUrl! : 'https://docs.example.com',
       ));
   }
 
@@ -242,22 +303,25 @@ export async function handleDeploy(args: string[]): Promise<void> {
     return;
   }
 
-  // Generate operator token if not provided
+  // Operator token: reuse profile on redeploy; prompt only for first-time setup
   let tokenGenerated = false;
   if (!operatorToken) {
-    if (opts.nonInteractive) {
+    if (hasSavedProfile) {
+      operatorToken = savedProfile!.operator_token;
+    } else if (opts.nonInteractive) {
       console.error('Error: --operator-token or --operator-token-env is required in non-interactive mode.');
       process.exit(2);
-    }
-    const generate = await prompt('Generate operator token?', 'Y');
-    if (generate.toLowerCase() === 'y' || generate === '') {
-      operatorToken = generateOperatorToken();
-      tokenGenerated = true;
     } else {
-      operatorToken = await prompt('Operator token');
-      if (!operatorToken) {
-        console.error('Error: Operator token is required.');
-        process.exit(2);
+      const generate = await prompt('Generate operator token?', 'Y');
+      if (generate.toLowerCase() === 'y' || generate === '') {
+        operatorToken = generateOperatorToken();
+        tokenGenerated = true;
+      } else {
+        operatorToken = await prompt('Operator token');
+        if (!operatorToken) {
+          console.error('Error: Operator token is required.');
+          process.exit(2);
+        }
       }
     }
   }
@@ -346,23 +410,28 @@ BASE_URL = "${baseUrl}"
     console.log('⚠️  No migrations directory found, skipping');
   }
 
-  // Step 5: Set secrets
-  console.log('Setting Worker secrets...');
-  try {
-    execSync(`echo "${operatorToken}" | npx wrangler secret put OPERATOR_TOKEN --config "${wranglerPath}"`, {
-      stdio: ['pipe', 'pipe', 'pipe'],
-      encoding: 'utf-8',
-    });
-    const sessionSecret = crypto.randomBytes(32).toString('hex');
-    execSync(`echo "${sessionSecret}" | npx wrangler secret put SESSION_SECRET --config "${wranglerPath}"`, {
-      stdio: ['pipe', 'pipe', 'pipe'],
-      encoding: 'utf-8',
-    });
-    console.log('✅ Secrets configured');
-  } catch {
-    console.warn('⚠️  Could not set secrets automatically. Set them manually:');
-    console.warn(`   npx wrangler secret put OPERATOR_TOKEN --config "${wranglerPath}"`);
-    console.warn(`   npx wrangler secret put SESSION_SECRET --config "${wranglerPath}"`);
+  // Step 5: Set secrets (first-time setup only; redeploy leaves existing secrets)
+  const redeployExisting = hasSavedProfile && !tokenGenerated;
+  if (redeployExisting) {
+    console.log('Redeploying existing instance — keeping Worker secrets unchanged');
+  } else {
+    console.log('Setting Worker secrets...');
+    try {
+      execSync(`echo "${operatorToken}" | npx wrangler secret put OPERATOR_TOKEN --config "${wranglerPath}"`, {
+        stdio: ['pipe', 'pipe', 'pipe'],
+        encoding: 'utf-8',
+      });
+      const sessionSecret = crypto.randomBytes(32).toString('hex');
+      execSync(`echo "${sessionSecret}" | npx wrangler secret put SESSION_SECRET --config "${wranglerPath}"`, {
+        stdio: ['pipe', 'pipe', 'pipe'],
+        encoding: 'utf-8',
+      });
+      console.log('✅ Secrets configured');
+    } catch {
+      console.warn('⚠️  Could not set secrets automatically. Set them manually:');
+      console.warn(`   npx wrangler secret put OPERATOR_TOKEN --config "${wranglerPath}"`);
+      console.warn(`   npx wrangler secret put SESSION_SECRET --config "${wranglerPath}"`);
+    }
   }
 
   // Step 6: Deploy Worker
@@ -403,8 +472,14 @@ BASE_URL = "${baseUrl}"
   // Save profile
   const shouldSave = opts.noSaveProfile ? false : (opts.saveProfile || !opts.nonInteractive);
   if (shouldSave) {
-    const profileName = opts.profile || 'default';
-    const profile = createProfile(baseUrl!, operatorToken!, instance);
+    const existing = getProfile(profileName);
+    const profile = existing
+      ? updateProfile(existing, {
+          api_url: baseUrl!,
+          operator_token: operatorToken!,
+          deployment_name: instance,
+        })
+      : createProfile(baseUrl!, operatorToken!, instance);
     setProfile(profileName, profile);
     setDefaultProfile(profileName);
     console.log(`Operator profile saved: ${profileName}`);

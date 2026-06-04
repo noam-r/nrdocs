@@ -264,6 +264,7 @@ The `auto_approval_rules` table stores operator-defined rules that approve match
 | `access_mode` | enum | yes | `public` or `password` |
 | `enabled` | boolean | yes | Whether rule is active |
 | `priority` | integer | yes | Rule ordering when multiple rules match |
+| `allow_unlisted_assets` | boolean | yes | When `true`, repos matching this rule may publish artifact files whose extensions are not on the platform whitelist (default `false`) |
 | `created_at` | timestamp | yes | Creation time |
 | `created_by` | string | yes | Operator identity |
 | `updated_at` | timestamp | yes | Last change time |
@@ -563,6 +564,8 @@ CREATE TABLE auto_approval_rules (
   access_mode TEXT NOT NULL CHECK (access_mode IN ('public', 'password')),
   enabled INTEGER NOT NULL DEFAULT 1,
   priority INTEGER NOT NULL DEFAULT 0,
+  default_allow_repo_owner_password INTEGER NOT NULL DEFAULT 1,
+  allow_unlisted_assets INTEGER NOT NULL DEFAULT 0,
   created_at TEXT NOT NULL,
   created_by TEXT NOT NULL,
   updated_at TEXT NOT NULL,

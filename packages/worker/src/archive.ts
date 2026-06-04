@@ -4,8 +4,7 @@
  */
 
 import {
-  ALLOWED_ASSET_EXTENSIONS,
-  REJECTED_EXTENSIONS,
+  validateAssetFilePath,
   DEFAULT_MAX_FILE_COUNT,
   DEFAULT_MAX_EXTRACTED_SIZE_MB,
   DEFAULT_MAX_SINGLE_FILE_SIZE_MB,
@@ -70,37 +69,21 @@ export function validatePath(filePath: string): ExtractionError | null {
 }
 
 /**
- * Validates a file extension against the allowlist/blocklist.
+ * Validates a file extension against whitelist / unlisted / forbidden policy.
  * The manifest file is exempt from extension filtering.
  */
-export function validateExtension(filePath: string): ExtractionError | null {
-  // Manifest is always allowed
-  const basename = filePath.split('/').pop() ?? filePath;
-  if (basename === MANIFEST_FILENAME) {
-    return null;
-  }
-
-  const lastDot = basename.lastIndexOf('.');
-  if (lastDot === -1) {
-    return { code: 'INVALID_EXTENSION', message: `No extension found: ${filePath}` };
-  }
-
-  const ext = basename.slice(lastDot).toLowerCase();
-
-  // Platform-generated runtime under _nrdocs/ (e.g. mermaid.min.js)
-  if (REJECTED_EXTENSIONS.has(ext)) {
-    const normalized = filePath.replace(/\\/g, '/');
-    if (normalized.startsWith('_nrdocs/')) {
-      return null;
-    }
-    return { code: 'REJECTED_EXTENSION', message: `Rejected extension ${ext}: ${filePath}` };
-  }
-
-  if (!ALLOWED_ASSET_EXTENSIONS.has(ext)) {
-    return { code: 'INVALID_EXTENSION', message: `Extension not allowed ${ext}: ${filePath}` };
-  }
-
-  return null;
+export function validateExtension(
+  filePath: string,
+  options?: { allowUnlisted?: boolean },
+): ExtractionError | null {
+  const result = validateAssetFilePath(filePath, {
+    allowUnlisted: options?.allowUnlisted ?? false,
+  });
+  if (result.ok) return null;
+  return {
+    code: result.code ?? 'INVALID_EXTENSION',
+    message: result.message ?? `Invalid file: ${filePath}`,
+  };
 }
 
 /**
@@ -109,6 +92,7 @@ export function validateExtension(filePath: string): ExtractionError | null {
 export async function extractArtifact(
   archive: ArrayBuffer,
   limits?: ExtractionLimits,
+  options?: { allowUnlisted?: boolean },
 ): Promise<{ ok: true; result: ExtractionResult } | { ok: false; error: ExtractionError }> {
   const maxFileCount = limits?.maxFileCount ?? DEFAULT_MAX_FILE_COUNT;
   const maxTotalSize = limits?.maxTotalSize ?? DEFAULT_MAX_EXTRACTED_SIZE_MB * 1024 * 1024;
@@ -170,7 +154,9 @@ export async function extractArtifact(
     if (pathError) return { ok: false, error: pathError };
 
     // Validate extension
-    const extError = validateExtension(header.name);
+    const extError = validateExtension(header.name, {
+      allowUnlisted: options?.allowUnlisted ?? false,
+    });
     if (extError) return { ok: false, error: extError };
 
     // Check single file size

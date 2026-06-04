@@ -204,7 +204,7 @@ describe('Renderer flow', () => {
       fs.writeFileSync(path.join(tmpDir, 'style.css'), 'body {}');
       fs.writeFileSync(path.join(tmpDir, 'logo.png'), 'PNG');
 
-      const assets = collectAssets(tmpDir);
+      const assets = collectAssets(tmpDir).files;
       const paths = assets.map((a) => a.path);
       expect(paths).toContain('style.css');
       expect(paths).toContain('logo.png');
@@ -216,7 +216,7 @@ describe('Renderer flow', () => {
       fs.writeFileSync(path.join(tmpDir, 'lib.cjs'), 'code');
       fs.writeFileSync(path.join(tmpDir, 'style.css'), 'body {}');
 
-      const assets = collectAssets(tmpDir);
+      const assets = collectAssets(tmpDir).files;
       const paths = assets.map((a) => a.path);
       expect(paths).not.toContain('app.js');
       expect(paths).not.toContain('mod.mjs');
@@ -228,7 +228,7 @@ describe('Renderer flow', () => {
       fs.writeFileSync(path.join(tmpDir, 'binary.exe'), 'data');
       fs.writeFileSync(path.join(tmpDir, 'script.sh'), '#!/bin/bash');
 
-      const assets = collectAssets(tmpDir);
+      const assets = collectAssets(tmpDir).files;
       const paths = assets.map((a) => a.path);
       expect(paths).not.toContain('binary.exe');
       expect(paths).not.toContain('script.sh');

@@ -11,7 +11,7 @@ import { handleApprove } from './approve.js';
 import { handleDisable } from './disable.js';
 import { handleAccessSet } from './access.js';
 import { handlePasswordSet, handlePasswordAllow, handlePasswordDisallow } from './password.js';
-import { handleRulesList, handleRulesAdd, handleRulesRemove } from './rules.js';
+import { handleRulesList, handleRulesAdd, handleRulesUpdate, handleRulesRemove } from './rules.js';
 import { handleStatus } from './status.js';
 import { handleConfigShow } from './config-show.js';
 import { handleProfilesList, handleProfilesUse } from './profiles.js';
@@ -116,11 +116,14 @@ export async function runCommand(args: string[]): Promise<void> {
         case 'add':
           await handleRulesAdd(args.slice(2));
           break;
+        case 'update':
+          await handleRulesUpdate(args.slice(2));
+          break;
         case 'remove':
           await handleRulesRemove(args.slice(2));
           break;
         default:
-          console.error('Usage: nrdocs rules <list|add|remove>');
+          console.error('Usage: nrdocs rules <list|add|update|remove>');
           process.exitCode = 1;
       }
       break;

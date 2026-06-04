@@ -10,6 +10,13 @@ interface RulesAddOptions {
   access?: string;
   applyExisting?: boolean;
   selfSetPassword?: 'allow' | 'deny';
+  allowUnlistedFiles?: boolean;
+  json?: boolean;
+}
+
+interface RulesUpdateOptions {
+  ruleId?: string;
+  allowUnlistedFiles?: boolean;
   json?: boolean;
 }
 
@@ -46,9 +53,14 @@ export function parseRulesAddArgs(args: string[]): RulesAddOptions {
       if (v === 'allow' || v === 'deny') {
         opts.selfSetPassword = v;
       } else {
-        // Sentinel value triggers a usage error in handleRulesAdd; we keep
-        // parsing pure (no exits) for testability.
         opts.selfSetPassword = '__invalid__' as 'allow' | 'deny';
+      }
+    } else if (arg === '--allow-unlisted-files' && i + 1 < args.length) {
+      const v = args[++i];
+      if (v === 'true' || v === 'false') {
+        opts.allowUnlistedFiles = v === 'true';
+      } else {
+        opts.allowUnlistedFiles = undefined;
       }
     } else if (arg === '--json') {
       opts.json = true;
@@ -57,6 +69,29 @@ export function parseRulesAddArgs(args: string[]): RulesAddOptions {
     }
   }
   if (positional.length >= 1) opts.pattern = positional[0];
+  return opts;
+}
+
+/**
+ * Parses rules update flags from args.
+ */
+export function parseRulesUpdateArgs(args: string[]): RulesUpdateOptions {
+  const opts: RulesUpdateOptions = {};
+  const positional: string[] = [];
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i];
+    if (arg === '--allow-unlisted-files' && i + 1 < args.length) {
+      const v = args[++i];
+      if (v === 'true' || v === 'false') {
+        opts.allowUnlistedFiles = v === 'true';
+      }
+    } else if (arg === '--json') {
+      opts.json = true;
+    } else if (!arg?.startsWith('--')) {
+      positional.push(arg!);
+    }
+  }
+  if (positional.length >= 1) opts.ruleId = positional[0];
   return opts;
 }
 
@@ -82,11 +117,12 @@ export function parseRulesRemoveArgs(args: string[]): RulesRemoveOptions {
 function formatRulesTable(rules: Array<Record<string, unknown>>): string {
   if (rules.length === 0) return 'No rules configured.';
 
-  const headers = ['ID', 'PATTERN', 'ACCESS', 'SELF-PWD', 'ENABLED', 'PRIORITY'];
+  const headers = ['ID', 'PATTERN', 'ACCESS', 'UNLISTED', 'SELF-PWD', 'ENABLED', 'PRIORITY'];
   const rows = rules.map((r) => [
     String(r['id'] ?? '-').slice(0, 8),
     String(r['pattern'] ?? '-'),
     String(r['access_mode'] ?? '-'),
+    r['allow_unlisted_assets'] === true ? 'true' : 'false',
     r['default_allow_repo_owner_password'] === true ? 'allow' : 'deny',
     String(r['enabled'] ?? '-'),
     String(r['priority'] ?? '-'),
@@ -169,8 +205,18 @@ export async function handleRulesAdd(args: string[]): Promise<void> {
     process.exit(2);
   }
 
+  if (args.some((a) => a === '--allow-unlisted-files')) {
+    const idx = args.indexOf('--allow-unlisted-files');
+    const val = args[idx + 1];
+    if (val !== 'true' && val !== 'false') {
+      console.error('Error: --allow-unlisted-files requires value "true" or "false".');
+      process.exit(2);
+    }
+  }
+
   const defaultAllowSelfPassword =
     opts.selfSetPassword === undefined ? true : opts.selfSetPassword === 'allow';
+  const allowUnlistedAssets = opts.allowUnlistedFiles ?? false;
 
   let creds;
   try {
@@ -181,7 +227,13 @@ export async function handleRulesAdd(args: string[]): Promise<void> {
   }
 
   const client = new ApiClient(creds.api_url, creds.operator_token);
-  const res = await client.addRule(opts.pattern, opts.access, opts.applyExisting, defaultAllowSelfPassword);
+  const res = await client.addRule(
+    opts.pattern,
+    opts.access,
+    opts.applyExisting,
+    defaultAllowSelfPassword,
+    allowUnlistedAssets,
+  );
 
   if (!res.ok) {
     console.error(`Error: ${res.error?.message ?? 'Unknown error'}`);
@@ -195,6 +247,50 @@ export async function handleRulesAdd(args: string[]): Promise<void> {
     if (opts.applyExisting) {
       console.log('Applied to existing matching repos.');
     }
+  }
+}
+
+/**
+ * Handles the `nrdocs rules update` command.
+ * Usage: nrdocs rules update <rule-id> --allow-unlisted-files true|false
+ */
+export async function handleRulesUpdate(args: string[]): Promise<void> {
+  const opts = parseRulesUpdateArgs(args);
+
+  if (!opts.ruleId) {
+    console.error('Error: Rule ID required. Usage: nrdocs rules update <rule-id> --allow-unlisted-files true|false');
+    process.exit(2);
+  }
+
+  if (opts.allowUnlistedFiles === undefined) {
+    console.error('Error: --allow-unlisted-files true|false is required.');
+    process.exit(2);
+  }
+
+  let creds;
+  try {
+    creds = resolveCredentials();
+  } catch (e) {
+    console.error(e instanceof Error ? e.message : String(e));
+    process.exit(1);
+  }
+
+  const client = new ApiClient(creds.api_url, creds.operator_token);
+  const res = await client.updateRule(opts.ruleId, {
+    allow_unlisted_assets: opts.allowUnlistedFiles,
+  });
+
+  if (!res.ok) {
+    console.error(`Error: ${res.error?.message ?? 'Unknown error'}`);
+    process.exit(1);
+  }
+
+  if (opts.json) {
+    console.log(JSON.stringify(res.data, null, 2));
+  } else {
+    console.log(
+      `Rule ${opts.ruleId} updated: allow_unlisted_assets=${opts.allowUnlistedFiles}`,
+    );
   }
 }
 

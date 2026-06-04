@@ -97,6 +97,7 @@ export function mapPublishExitCode(error: ApiErrorInfo): number {
     code === 'INVALID_REQUEST' ||
     code === 'EXTRACTION_FAILED' ||
     code === 'INVALID_EXTENSION' ||
+    code === 'EXTENSION_NOT_PERMITTED' ||
     code === 'PATH_TRAVERSAL' ||
     code === 'REJECTED_EXTENSION'
   ) {
@@ -163,6 +164,22 @@ export function formatPublishFailure(
   } else if (error.code === 'REPO_DISABLED') {
     headline = 'Publish rejected — repo disabled';
     fixes.push('Ask the operator to re-enable the repo or approve it again.');
+  } else if (
+    error.code === 'EXTENSION_NOT_PERMITTED' ||
+    error.code === 'extension_not_permitted'
+  ) {
+    headline = 'Publish rejected — non-whitelisted file extensions in artifact';
+    const owner = context.fullName?.split('/')[0];
+    if (owner) {
+      fixes.push(
+        `Ask the operator: nrdocs rules add '${owner}/*' --access password --allow-unlisted-files true`,
+      );
+    } else {
+      fixes.push(
+        'Ask the operator to add or update an auto-approval rule with --allow-unlisted-files true',
+      );
+    }
+    fixes.push('Or remove non-whitelisted files from docs/ before publishing.');
   } else if (error.code === 'timeout') {
     headline = 'Upload timed out';
     fixes.push('Retry the workflow; if it persists, check Worker limits and network stability.');

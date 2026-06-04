@@ -48,6 +48,30 @@ export function extractTitle(markdownContent: string, filePath: string): string 
 }
 
 /**
+ * True for empty or legacy init stub content at docs/index.md (not real docs).
+ */
+export function isSkippablePlaceholderIndex(
+  contentDir: string,
+  relativePath: string,
+): boolean {
+  const normalized = relativePath.replace(/\\/g, '/');
+  if (path.dirname(normalized) !== '.') return false;
+
+  const full = path.join(contentDir, normalized);
+  let text: string;
+  try {
+    text = fs.readFileSync(full, 'utf-8').trim();
+  } catch {
+    return false;
+  }
+
+  if (text.length === 0) return true;
+  if (text.includes('Welcome to your documentation site powered by nrdocs')) return true;
+  if (text.includes('Edit this file to add your documentation content')) return true;
+  return false;
+}
+
+/**
  * Recursively finds all .md files in a directory.
  */
 export function findMarkdownFiles(dir: string, relativeTo: string): string[] {
@@ -161,7 +185,9 @@ export function discoverNavEntries(
   options?: DiscoverNavOptions,
 ): NavConfigEntry[] {
   const indexPath = (options?.indexPath ?? 'index.md').replace(/\\/g, '/');
-  const files = findMarkdownFiles(contentDir, contentDir);
+  const files = findMarkdownFiles(contentDir, contentDir).filter(
+    (f) => !isSkippablePlaceholderIndex(contentDir, f),
+  );
   return groupNavEntriesByFolders(files, contentDir, indexPath);
 }
 

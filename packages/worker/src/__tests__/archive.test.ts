@@ -78,7 +78,7 @@ describe('validateExtension', () => {
   it('rejects unknown extensions', () => {
     const result = validateExtension('file.exe');
     expect(result).not.toBeNull();
-    expect(result!.code).toBe('INVALID_EXTENSION');
+    expect(result!.code).toBe('EXTENSION_NOT_PERMITTED');
   });
 
   it('rejects files without extensions', () => {

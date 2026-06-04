@@ -51,7 +51,9 @@ pnpm link --global --dir packages/cli
 nrdocs deploy
 ```
 
-Prompts for instance name, Cloudflare account, domain, etc. Saves credentials locally.
+On first run, prompts for instance name, public URL, and operator token, then saves an operator profile locally.
+
+On later runs, `nrdocs deploy` reuses that profile (same instance and URL) with no prompts — migrations and Worker deploy only. Pass flags such as `--instance` or `--base-url` when you need to override.
 
 ### 2. Allow repos to publish (operator — required before first publish)
 
@@ -151,6 +153,7 @@ nrdocs rules add 'myorg/*' --access password
 nrdocs rules add 'myorg/public-docs' --access public
 nrdocs rules list
 nrdocs rules remove RULE_ID
+nrdocs rules update RULE_ID --allow-unlisted-files false
 
 # Status
 nrdocs status owner/repo
@@ -213,6 +216,22 @@ Rules apply to future publishes. To also approve existing pending repos:
 ```bash
 nrdocs rules add 'myorg/*' --access password --apply-existing
 ```
+
+### Non-whitelisted asset files (operator opt-in)
+
+By default, only **whitelisted** extensions may appear in published docs (images, PDF, `.json`, `.yaml`, `.yml`, `.txt`, `.xml`, etc.). Other files (for example `.zip`) are rejected unless the matching auto-approval rule explicitly allows them:
+
+```bash
+nrdocs rules add 'myorg/data-docs' --access password --allow-unlisted-files true
+```
+
+To revoke consent without deleting the rule:
+
+```bash
+nrdocs rules update RULE_ID --allow-unlisted-files false
+```
+
+Omitting `--allow-unlisted-files` on `rules add` means unlisted files are **not** allowed. Executable/script extensions (`.js`, `.mjs`, `.cjs`) are always forbidden except platform runtime under `_nrdocs/`.
 
 ## Access modes
 

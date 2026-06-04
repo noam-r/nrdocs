@@ -3,7 +3,7 @@
  * Handles canonical URL redirects and file path mapping.
  */
 
-import { ALLOWED_ASSET_EXTENSIONS } from '@nrdocs/shared';
+import { REJECTED_EXTENSIONS } from '@nrdocs/shared';
 
 export type PathResolution =
   | { type: 'serve'; filePath: string }
@@ -48,15 +48,14 @@ export function resolveServingPath(
   const normalizedRelative = relativePath.replace(/\/+$/, '');
   const ext = getExtension(normalizedRelative);
 
-  // Platform runtime (e.g. _nrdocs/mermaid.min.js) — serve .js without page redirects
-  if (isPlatformRuntimePath(normalizedRelative, ext)) {
-    return { type: 'serve', filePath: normalizedRelative };
-  }
-
-  // Check if this is an asset file (has a non-.html extension in the allowed list)
-  if (ext && ext !== '.html' && ALLOWED_ASSET_EXTENSIONS.has(ext)) {
-    // Serve asset files directly without redirect
-    return { type: 'serve', filePath: relativePath };
+  // Serve static assets: non-html paths with an extension (whitelist + rule-gated unlisted at publish time)
+  if (ext && ext !== '.html') {
+    if (isPlatformRuntimePath(normalizedRelative, ext)) {
+      return { type: 'serve', filePath: normalizedRelative };
+    }
+    if (!REJECTED_EXTENSIONS.has(ext)) {
+      return { type: 'serve', filePath: relativePath };
+    }
   }
 
   // Handle .html extension → redirect to clean URL

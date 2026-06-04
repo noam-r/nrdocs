@@ -15,6 +15,8 @@ export function normalizeRule(row: Record<string, unknown>): AutoApprovalRule {
     default_allow_repo_owner_password:
       row['default_allow_repo_owner_password'] === 1 ||
       row['default_allow_repo_owner_password'] === true,
+    allow_unlisted_assets:
+      row['allow_unlisted_assets'] === 1 || row['allow_unlisted_assets'] === true,
   };
 }
 
@@ -25,14 +27,15 @@ export async function createRule(
   createdBy: string,
   priority?: number,
   defaultAllowSelfPassword: boolean = true,
+  allowUnlistedAssets: boolean = false,
 ): Promise<AutoApprovalRule> {
   const id = generateId('rule_');
   const now = new Date().toISOString();
 
   await db
     .prepare(
-      `INSERT INTO auto_approval_rules (id, pattern, access_mode, enabled, priority, default_allow_repo_owner_password, created_at, created_by, updated_at, updated_by)
-       VALUES (?, ?, ?, 1, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO auto_approval_rules (id, pattern, access_mode, enabled, priority, default_allow_repo_owner_password, allow_unlisted_assets, created_at, created_by, updated_at, updated_by)
+       VALUES (?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .bind(
       id,
@@ -40,6 +43,7 @@ export async function createRule(
       accessMode,
       priority ?? 0,
       defaultAllowSelfPassword ? 1 : 0,
+      allowUnlistedAssets ? 1 : 0,
       now,
       createdBy,
       now,
@@ -52,6 +56,73 @@ export async function createRule(
     .bind(id)
     .first<Record<string, unknown>>();
   return normalizeRule(row!);
+}
+
+export interface UpdateRuleInput {
+  allow_unlisted_assets?: boolean;
+  access_mode?: 'public' | 'password';
+  priority?: number;
+  enabled?: boolean;
+  default_allow_repo_owner_password?: boolean;
+}
+
+export async function updateRule(
+  db: D1Database,
+  ruleId: string,
+  updates: UpdateRuleInput,
+  updatedBy: string,
+): Promise<AutoApprovalRule | null> {
+  const existing = await db
+    .prepare('SELECT * FROM auto_approval_rules WHERE id = ?')
+    .bind(ruleId)
+    .first<Record<string, unknown>>();
+  if (!existing) return null;
+
+  const now = new Date().toISOString();
+  const accessMode =
+    updates.access_mode ??
+    (existing['access_mode'] as 'public' | 'password');
+  const priority =
+    updates.priority ?? (existing['priority'] as number);
+  const enabled =
+    updates.enabled !== undefined
+      ? updates.enabled
+      : existing['enabled'] === 1 || existing['enabled'] === true;
+  const defaultAllowSelfPassword =
+    updates.default_allow_repo_owner_password !== undefined
+      ? updates.default_allow_repo_owner_password
+      : existing['default_allow_repo_owner_password'] === 1 ||
+        existing['default_allow_repo_owner_password'] === true;
+  const allowUnlisted =
+    updates.allow_unlisted_assets !== undefined
+      ? updates.allow_unlisted_assets
+      : existing['allow_unlisted_assets'] === 1 ||
+        existing['allow_unlisted_assets'] === true;
+
+  await db
+    .prepare(
+      `UPDATE auto_approval_rules
+       SET access_mode = ?, priority = ?, enabled = ?, default_allow_repo_owner_password = ?,
+           allow_unlisted_assets = ?, updated_at = ?, updated_by = ?
+       WHERE id = ?`,
+    )
+    .bind(
+      accessMode,
+      priority,
+      enabled ? 1 : 0,
+      defaultAllowSelfPassword ? 1 : 0,
+      allowUnlisted ? 1 : 0,
+      now,
+      updatedBy,
+      ruleId,
+    )
+    .run();
+
+  const row = await db
+    .prepare('SELECT * FROM auto_approval_rules WHERE id = ?')
+    .bind(ruleId)
+    .first<Record<string, unknown>>();
+  return row ? normalizeRule(row) : null;
 }
 
 export async function deleteRule(

@@ -7,6 +7,13 @@ const MIME_MAP: Record<string, string> = {
   '.js': 'text/javascript; charset=utf-8',
   '.css': 'text/css; charset=utf-8',
   '.json': 'application/json; charset=utf-8',
+  '.jsonp': 'text/plain; charset=utf-8',
+  '.yaml': 'text/yaml; charset=utf-8',
+  '.yml': 'text/yaml; charset=utf-8',
+  '.xml': 'application/xml; charset=utf-8',
+  '.toml': 'text/plain; charset=utf-8',
+  '.csv': 'text/csv; charset=utf-8',
+  '.ndjson': 'application/x-ndjson; charset=utf-8',
   '.svg': 'image/svg+xml',
   '.png': 'image/png',
   '.jpg': 'image/jpeg',
@@ -16,6 +23,7 @@ const MIME_MAP: Record<string, string> = {
   '.ico': 'image/x-icon',
   '.txt': 'text/plain; charset=utf-8',
   '.pdf': 'application/pdf',
+  '.zip': 'application/zip',
 };
 
 /**

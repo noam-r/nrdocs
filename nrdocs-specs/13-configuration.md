@@ -411,6 +411,7 @@ auto_approval:
 | `match` | yes | GitHub repo pattern. |
 | `access` | yes | Effective access mode if matched. |
 | `enabled` | no | Defaults to true. |
+| `allow_unlisted_assets` | no | When `true`, matching repos may publish non-whitelisted file extensions in artifacts. Defaults to `false` when omitted (CLI: `--allow-unlisted-files true|false`). |
 
 ### Match Pattern Rules
 
