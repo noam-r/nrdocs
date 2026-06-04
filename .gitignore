@@ -1,9 +1,53 @@
+# Dependencies
 node_modules/
+
+# TypeScript / build outputs
 dist/
-.wrangler/
-.nrdocs/
 *.tsbuildinfo
+
+# CLI: generated mermaid browser bundle (built by pnpm bundle → dist/runtime/)
+packages/cli/src/renderer/runtime/
+
+# Cloudflare Wrangler
+.wrangler/
+.dev.vars
+packages/worker/wrangler.toml
+
+# Local nrdocs operator config (~/.nrdocs is outside repo; this catches repo-local copies)
+.nrdocs/
+
+# Environment & secrets
 .env
 .env.*
-packages/worker/wrangler.toml
+!.env.example
+
+# Test coverage
+coverage/
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+pnpm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editors & local AI tooling
+.idea/
+.vscode/
+!.vscode/extensions.json
+!.vscode/settings.json.example
+.cursor/
+.kiro/
+.agent/
+
+# Temp & scratch
 tmp/
+temp/
+*.tmp
+*.swp
+*~
