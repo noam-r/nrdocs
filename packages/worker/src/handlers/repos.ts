@@ -19,6 +19,7 @@ import {
   disableRepo,
   setAccessMode,
   setPassword,
+  setSelfPasswordAllowFlag,
   validateApproval,
   validateAccessChange,
   writeAuditEvent,
@@ -262,4 +263,58 @@ export async function handleSetPassword(
   });
 
   return jsonSuccess({ message: 'Password updated successfully' });
+}
+
+export async function handleAllowSelfPassword(
+  request: Request,
+  env: Env,
+  params: Record<string, string>,
+): Promise<Response> {
+  const auth = requireOperator(request, env);
+  if (!auth.authenticated) return auth.response;
+
+  const fullName = `${params['owner']}/${params['repo']}`.toLowerCase();
+  const repo = await findRepoByFullName(env.DB, fullName);
+
+  if (!repo) {
+    return jsonError('NOT_FOUND', `Repository '${fullName}' not found`, 404);
+  }
+
+  await setSelfPasswordAllowFlag(env.DB, repo.id, true);
+
+  await writeAuditEvent(env.DB, {
+    event_type: 'repo.self_password_allowed',
+    actor_type: 'operator',
+    repo_id: repo.id,
+  });
+
+  const updated = await findRepoByFullName(env.DB, fullName);
+  return jsonSuccess({ repo: updated });
+}
+
+export async function handleDisallowSelfPassword(
+  request: Request,
+  env: Env,
+  params: Record<string, string>,
+): Promise<Response> {
+  const auth = requireOperator(request, env);
+  if (!auth.authenticated) return auth.response;
+
+  const fullName = `${params['owner']}/${params['repo']}`.toLowerCase();
+  const repo = await findRepoByFullName(env.DB, fullName);
+
+  if (!repo) {
+    return jsonError('NOT_FOUND', `Repository '${fullName}' not found`, 404);
+  }
+
+  await setSelfPasswordAllowFlag(env.DB, repo.id, false);
+
+  await writeAuditEvent(env.DB, {
+    event_type: 'repo.self_password_disallowed',
+    actor_type: 'operator',
+    repo_id: repo.id,
+  });
+
+  const updated = await findRepoByFullName(env.DB, fullName);
+  return jsonSuccess({ repo: updated });
 }

@@ -5,29 +5,53 @@
 import type { AutoApprovalRule } from '@nrdocs/shared';
 import { generateId } from './id.js';
 
+/**
+ * Coerce D1 INTEGER 0/1 columns to JS booleans on a raw rule row.
+ */
+export function normalizeRule(row: Record<string, unknown>): AutoApprovalRule {
+  return {
+    ...(row as unknown as AutoApprovalRule),
+    enabled: row['enabled'] === 1 || row['enabled'] === true,
+    default_allow_repo_owner_password:
+      row['default_allow_repo_owner_password'] === 1 ||
+      row['default_allow_repo_owner_password'] === true,
+  };
+}
+
 export async function createRule(
   db: D1Database,
   pattern: string,
   accessMode: 'public' | 'password',
   createdBy: string,
   priority?: number,
+  defaultAllowSelfPassword: boolean = true,
 ): Promise<AutoApprovalRule> {
   const id = generateId('rule_');
   const now = new Date().toISOString();
 
   await db
     .prepare(
-      `INSERT INTO auto_approval_rules (id, pattern, access_mode, enabled, priority, created_at, created_by, updated_at, updated_by)
-       VALUES (?, ?, ?, 1, ?, ?, ?, ?, ?)`,
+      `INSERT INTO auto_approval_rules (id, pattern, access_mode, enabled, priority, default_allow_repo_owner_password, created_at, created_by, updated_at, updated_by)
+       VALUES (?, ?, ?, 1, ?, ?, ?, ?, ?, ?)`,
     )
-    .bind(id, pattern.toLowerCase(), accessMode, priority ?? 0, now, createdBy, now, createdBy)
+    .bind(
+      id,
+      pattern.toLowerCase(),
+      accessMode,
+      priority ?? 0,
+      defaultAllowSelfPassword ? 1 : 0,
+      now,
+      createdBy,
+      now,
+      createdBy,
+    )
     .run();
 
-  const rule = await db
+  const row = await db
     .prepare('SELECT * FROM auto_approval_rules WHERE id = ?')
     .bind(id)
-    .first<AutoApprovalRule>();
-  return rule!;
+    .first<Record<string, unknown>>();
+  return normalizeRule(row!);
 }
 
 export async function deleteRule(
@@ -44,8 +68,8 @@ export async function deleteRule(
 export async function listRules(db: D1Database): Promise<AutoApprovalRule[]> {
   const result = await db
     .prepare('SELECT * FROM auto_approval_rules WHERE enabled = 1 ORDER BY priority DESC, created_at ASC')
-    .all<AutoApprovalRule>();
-  return result.results ?? [];
+    .all<Record<string, unknown>>();
+  return (result.results ?? []).map(normalizeRule);
 }
 
 /**

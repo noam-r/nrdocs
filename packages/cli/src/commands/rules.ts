@@ -9,6 +9,7 @@ interface RulesAddOptions {
   pattern?: string;
   access?: string;
   applyExisting?: boolean;
+  selfSetPassword?: 'allow' | 'deny';
   json?: boolean;
 }
 
@@ -40,6 +41,15 @@ export function parseRulesAddArgs(args: string[]): RulesAddOptions {
       opts.access = args[++i];
     } else if (arg === '--apply-existing') {
       opts.applyExisting = true;
+    } else if (arg === '--self-set-password' && i + 1 < args.length) {
+      const v = args[++i];
+      if (v === 'allow' || v === 'deny') {
+        opts.selfSetPassword = v;
+      } else {
+        // Sentinel value triggers a usage error in handleRulesAdd; we keep
+        // parsing pure (no exits) for testability.
+        opts.selfSetPassword = '__invalid__' as 'allow' | 'deny';
+      }
     } else if (arg === '--json') {
       opts.json = true;
     } else if (!arg?.startsWith('--')) {
@@ -72,11 +82,12 @@ export function parseRulesRemoveArgs(args: string[]): RulesRemoveOptions {
 function formatRulesTable(rules: Array<Record<string, unknown>>): string {
   if (rules.length === 0) return 'No rules configured.';
 
-  const headers = ['ID', 'PATTERN', 'ACCESS', 'ENABLED', 'PRIORITY'];
+  const headers = ['ID', 'PATTERN', 'ACCESS', 'SELF-PWD', 'ENABLED', 'PRIORITY'];
   const rows = rules.map((r) => [
     String(r['id'] ?? '-').slice(0, 8),
     String(r['pattern'] ?? '-'),
     String(r['access_mode'] ?? '-'),
+    r['default_allow_repo_owner_password'] === true ? 'allow' : 'deny',
     String(r['enabled'] ?? '-'),
     String(r['priority'] ?? '-'),
   ]);
@@ -153,6 +164,14 @@ export async function handleRulesAdd(args: string[]): Promise<void> {
     process.exit(2);
   }
 
+  if (opts.selfSetPassword !== undefined && opts.selfSetPassword !== 'allow' && opts.selfSetPassword !== 'deny') {
+    console.error('Error: --self-set-password must be "allow" or "deny".');
+    process.exit(2);
+  }
+
+  const defaultAllowSelfPassword =
+    opts.selfSetPassword === undefined ? true : opts.selfSetPassword === 'allow';
+
   let creds;
   try {
     creds = resolveCredentials();
@@ -162,7 +181,7 @@ export async function handleRulesAdd(args: string[]): Promise<void> {
   }
 
   const client = new ApiClient(creds.api_url, creds.operator_token);
-  const res = await client.addRule(opts.pattern, opts.access, opts.applyExisting);
+  const res = await client.addRule(opts.pattern, opts.access, opts.applyExisting, defaultAllowSelfPassword);
 
   if (!res.ok) {
     console.error(`Error: ${res.error?.message ?? 'Unknown error'}`);

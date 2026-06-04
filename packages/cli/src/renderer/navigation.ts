@@ -11,6 +11,18 @@ export interface NavItem {
   active?: boolean;
 }
 
+/** Config nav entry (path + title only; no href). */
+export interface NavConfigEntry {
+  title: string;
+  path: string;
+  children?: NavConfigEntry[];
+}
+
+export interface DiscoverNavOptions {
+  /** Home page path relative to content dir (default index.md). */
+  indexPath?: string;
+}
+
 /**
  * Extracts a title from Markdown content.
  * Uses the first H1 heading if present, otherwise derives from filename.
@@ -20,12 +32,10 @@ export function extractTitle(markdownContent: string, filePath: string): string 
   if (match) {
     return match[1]!.trim();
   }
-  // Fallback: derive from filename
   const basename = path.basename(filePath, '.md');
   if (basename === 'index') {
     return 'Home';
   }
-  // Convert kebab-case/snake_case to title case
   return basename
     .replace(/[-_]/g, ' ')
     .replace(/\b\w/g, (c) => c.toUpperCase());
@@ -34,8 +44,10 @@ export function extractTitle(markdownContent: string, filePath: string): string 
 /**
  * Recursively finds all .md files in a directory.
  */
-function findMarkdownFiles(dir: string, relativeTo: string): string[] {
+export function findMarkdownFiles(dir: string, relativeTo: string): string[] {
   const results: string[] = [];
+  if (!fs.existsSync(dir)) return results;
+
   const entries = fs.readdirSync(dir, { withFileTypes: true });
 
   for (const entry of entries) {
@@ -43,7 +55,7 @@ function findMarkdownFiles(dir: string, relativeTo: string): string[] {
     if (entry.isDirectory()) {
       results.push(...findMarkdownFiles(fullPath, relativeTo));
     } else if (entry.isFile() && entry.name.endsWith('.md')) {
-      results.push(path.relative(relativeTo, fullPath));
+      results.push(path.relative(relativeTo, fullPath).replace(/\\/g, '/'));
     }
   }
 
@@ -51,48 +63,112 @@ function findMarkdownFiles(dir: string, relativeTo: string): string[] {
 }
 
 /**
- * Converts a .md file path to a clean URL path segment.
- * e.g. "getting-started.md" → "getting-started/"
- *      "index.md" → ""
+ * Sorts markdown paths: configured index first, then numeric-aware path order.
  */
-function mdPathToHref(filePath: string): string {
-  const withoutExt = filePath.replace(/\.md$/, '');
-  if (withoutExt === 'index') {
-    return '';
+export function sortNavPaths(files: string[], indexPath = 'index.md'): string[] {
+  const normalizedIndex = indexPath.replace(/\\/g, '/');
+  const sorted = [...files].sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+
+  const indexIdx = sorted.indexOf(normalizedIndex);
+  if (indexIdx <= 0) return sorted;
+
+  const without = sorted.filter((f) => f !== normalizedIndex);
+  return [normalizedIndex, ...without];
+}
+
+/**
+ * Converts a .md file path to a clean URL path segment.
+ */
+export function mdPathToHref(filePath: string): string {
+  const normalized = filePath.replace(/\\/g, '/');
+  const withoutExt = normalized.replace(/\.md$/, '');
+  if (withoutExt === 'index' || withoutExt.endsWith('/index')) {
+    const dir = withoutExt === 'index' ? '' : withoutExt.slice(0, -'/index'.length);
+    return dir ? `${dir}/` : '';
   }
-  // Normalize path separators for URL
-  return withoutExt.replace(/\\/g, '/') + '/';
+  return `${withoutExt}/`;
+}
+
+/**
+ * Discovers nav config entries from markdown files (title + path).
+ */
+export function discoverNavEntries(
+  contentDir: string,
+  options?: DiscoverNavOptions,
+): NavConfigEntry[] {
+  const indexPath = (options?.indexPath ?? 'index.md').replace(/\\/g, '/');
+  const files = findMarkdownFiles(contentDir, contentDir);
+  const sorted = sortNavPaths(files, indexPath);
+
+  return sorted.map((file) => {
+    const fullPath = path.join(contentDir, file);
+    const content = fs.readFileSync(fullPath, 'utf-8');
+    return {
+      title: extractTitle(content, file),
+      path: file,
+    };
+  });
+}
+
+/**
+ * Flattens explicit nav config (including nested children) to NavItem list.
+ */
+export function navConfigToNavItems(
+  entries: NavConfigEntry[],
+  contentDir: string,
+): NavItem[] {
+  const items: NavItem[] = [];
+
+  const walk = (list: NavConfigEntry[]) => {
+    for (const entry of list) {
+      const normalizedPath = entry.path.replace(/\\/g, '/');
+      items.push({
+        title: entry.title,
+        path: normalizedPath,
+        href: mdPathToHref(normalizedPath),
+      });
+      if (entry.children?.length) {
+        walk(entry.children);
+      }
+    }
+  };
+
+  walk(entries);
+
+  // Verify paths exist
+  for (const item of items) {
+    const full = path.join(contentDir, item.path);
+    if (!fs.existsSync(full)) {
+      throw new Error(`Nav path not found: ${item.path}`);
+    }
+  }
+
+  return items;
 }
 
 /**
  * Auto-discovers navigation from the docs directory.
- * Finds all .md files, sorts them with index.md first,
- * and extracts titles from H1 headings.
  */
-export function generateAutoNav(docsDir: string): NavItem[] {
-  const files = findMarkdownFiles(docsDir, docsDir);
+export function generateAutoNav(docsDir: string, indexPath = 'index.md'): NavItem[] {
+  const entries = discoverNavEntries(docsDir, { indexPath });
+  return entries.map((e) => ({
+    title: e.title,
+    path: e.path,
+    href: mdPathToHref(e.path),
+  }));
+}
 
-  // Sort alphabetically, but put index.md first
-  files.sort((a, b) => {
-    if (a === 'index.md') return -1;
-    if (b === 'index.md') return 1;
-    return a.localeCompare(b);
-  });
-
-  const items: NavItem[] = [];
-
-  for (const file of files) {
-    const fullPath = path.join(docsDir, file);
-    const content = fs.readFileSync(fullPath, 'utf-8');
-    const title = extractTitle(content, file);
-    const href = mdPathToHref(file);
-
-    items.push({
-      title,
-      path: file,
-      href,
-    });
-  }
-
-  return items;
+/**
+ * Collects all paths from a nav config (flat), for validation.
+ */
+export function flattenNavPaths(entries: NavConfigEntry[]): string[] {
+  const paths: string[] = [];
+  const walk = (list: NavConfigEntry[]) => {
+    for (const e of list) {
+      paths.push(e.path.replace(/\\/g, '/'));
+      if (e.children?.length) walk(e.children);
+    }
+  };
+  walk(entries);
+  return paths;
 }

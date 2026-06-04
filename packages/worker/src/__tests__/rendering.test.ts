@@ -174,6 +174,22 @@ describe('Archive validation', () => {
     }
   });
 
+  it('archive with platform _nrdocs runtime .js → accepted', async () => {
+    const manifest = JSON.stringify({ version: 1, pages: [] });
+    const archive = await createTestArchive([
+      { name: 'nrdocs-manifest.json', content: manifest },
+      { name: 'index.html', content: '<h1>Hi</h1>' },
+      { name: '_nrdocs/mermaid.min.js', content: 'globalThis.mermaid={};' },
+    ]);
+
+    const result = await extractArtifact(archive);
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      const paths = result.result.files.map((f) => f.path);
+      expect(paths).toContain('_nrdocs/mermaid.min.js');
+    }
+  });
+
   it('archive exceeding file count → rejected', async () => {
     const manifest = JSON.stringify({ version: 1 });
     const files = [{ name: 'nrdocs-manifest.json', content: manifest }];
@@ -226,9 +242,13 @@ describe('MIME type handling', () => {
 
   it('returns null for unknown extensions', () => {
     expect(getMimeType('file.exe')).toBeNull();
-    expect(getMimeType('script.js')).toBeNull();
     expect(getMimeType('app.py')).toBeNull();
     expect(getMimeType('noext')).toBeNull();
+  });
+
+  it('returns MIME type for .js runtime files', () => {
+    expect(getMimeType('_nrdocs/mermaid.min.js')).toBe('text/javascript; charset=utf-8');
+    expect(getMimeType('script.js')).toBe('text/javascript; charset=utf-8');
   });
 
   it('SVG gets extra CSP headers', () => {

@@ -3,12 +3,24 @@
  */
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { renderMarkdown } from './markdown.js';
-import { generateAutoNav, extractTitle } from './navigation.js';
+import { renderMarkdown, contentHasMermaid } from './markdown.js';
+import {
+  generateAutoNav,
+  extractTitle,
+  navConfigToNavItems,
+} from './navigation.js';
 import type { NavItem } from './navigation.js';
+import type { NavConfigEntry } from './navigation.js';
 import { rewriteLinks } from './links.js';
 import { wrapInTemplate } from './template.js';
 import { collectAssets } from './assets.js';
+import {
+  loadMermaidRuntime,
+  MERMAID_ARTIFACT_PATH,
+  mermaidScriptSrcForOutput,
+} from './mermaid-runtime.js';
+
+export type { NavConfigEntry };
 
 export interface RenderOptions {
   docsDir: string;
@@ -16,13 +28,9 @@ export interface RenderOptions {
   baseUrl: string;
   owner: string;
   repo: string;
-  nav?: 'auto' | NavEntry[];
-}
-
-export interface NavEntry {
-  title: string;
-  path: string;
-  children?: NavEntry[];
+  /** Explicit nav from nrdocs.yml; omit or 'auto' for discovery. */
+  nav?: NavConfigEntry[] | 'auto';
+  indexPath?: string;
 }
 
 export interface RenderedSite {
@@ -35,47 +43,56 @@ export interface RenderedFile {
   content: Buffer;
 }
 
+function resolveNavItems(
+  resolvedDocsDir: string,
+  nav: NavConfigEntry[] | 'auto' | undefined,
+  indexPath: string,
+): NavItem[] {
+  if (nav && nav !== 'auto' && Array.isArray(nav)) {
+    return navConfigToNavItems(nav, resolvedDocsDir);
+  }
+  return generateAutoNav(resolvedDocsDir, indexPath);
+}
+
 /**
  * Renders the full documentation site from Markdown sources.
  */
 export async function renderSite(options: RenderOptions): Promise<RenderedSite> {
-  const { docsDir, siteTitle, baseUrl, owner, repo } = options;
+  const { docsDir, siteTitle, baseUrl, owner, repo, nav, indexPath = 'index.md' } = options;
   const resolvedDocsDir = path.resolve(docsDir);
 
-  // Generate navigation
-  const navItems = generateAutoNav(resolvedDocsDir);
+  const navItems = resolveNavItems(resolvedDocsDir, nav, indexPath);
   const siteBase = `/${owner}/${repo}/`;
 
   const renderedFiles: RenderedFile[] = [];
+  let siteHasMermaid = false;
 
-  // Render each markdown file
   for (const navItem of navItems) {
     const filePath = path.join(resolvedDocsDir, navItem.path);
     const markdownContent = fs.readFileSync(filePath, 'utf-8');
+    const pageHasMermaid = contentHasMermaid(markdownContent);
+    if (pageHasMermaid) siteHasMermaid = true;
 
-    // Render markdown to HTML
     let html = renderMarkdown(markdownContent);
 
-    // Determine the base path for link resolution (directory of current file)
     const fileDir = path.dirname(navItem.path);
     const baseLinkPath = fileDir === '.' ? '' : fileDir;
 
-    // Rewrite links
     html = rewriteLinks(html, baseLinkPath, owner, repo);
 
-    // Determine page title
     const pageTitle = extractTitle(markdownContent, navItem.path);
 
-    // Build canonical URL
     const canonicalUrl = `${baseUrl}${siteBase}${navItem.href}`;
 
-    // Mark active nav item
     const navWithActive: NavItem[] = navItems.map((item) => ({
       ...item,
       active: item.path === navItem.path,
     }));
 
-    // Wrap in template
+    const outputPath = navItem.href === ''
+      ? 'index.html'
+      : navItem.href.replace(/\/$/, '') + '/index.html';
+
     const fullHtml = wrapInTemplate({
       title: pageTitle,
       siteTitle,
@@ -83,12 +100,9 @@ export async function renderSite(options: RenderOptions): Promise<RenderedSite> 
       nav: navWithActive,
       canonicalUrl,
       baseUrl: siteBase,
+      includeMermaid: pageHasMermaid,
+      mermaidScriptSrc: pageHasMermaid ? mermaidScriptSrcForOutput(outputPath) : null,
     });
-
-    // Determine output path
-    const outputPath = navItem.href === ''
-      ? 'index.html'
-      : navItem.href.replace(/\/$/, '') + '/index.html';
 
     renderedFiles.push({
       path: outputPath,
@@ -96,11 +110,16 @@ export async function renderSite(options: RenderOptions): Promise<RenderedSite> 
     });
   }
 
-  // Collect static assets
+  if (siteHasMermaid) {
+    renderedFiles.push({
+      path: MERMAID_ARTIFACT_PATH,
+      content: loadMermaidRuntime(),
+    });
+  }
+
   const assets = collectAssets(resolvedDocsDir);
   renderedFiles.push(...assets);
 
-  // Build manifest
   const manifest: Record<string, unknown> = {
     version: 1,
     generator: 'nrdocs-cli',

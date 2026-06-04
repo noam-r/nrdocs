@@ -45,9 +45,15 @@ export function resolveServingPath(
     return { type: 'serve', filePath: 'index.html' };
   }
 
-  // Check if this is an asset file (has a non-.html extension in the allowed list)
-  const ext = getExtension(relativePath);
+  const normalizedRelative = relativePath.replace(/\/+$/, '');
+  const ext = getExtension(normalizedRelative);
 
+  // Platform runtime (e.g. _nrdocs/mermaid.min.js) — serve .js without page redirects
+  if (isPlatformRuntimePath(normalizedRelative, ext)) {
+    return { type: 'serve', filePath: normalizedRelative };
+  }
+
+  // Check if this is an asset file (has a non-.html extension in the allowed list)
   if (ext && ext !== '.html' && ALLOWED_ASSET_EXTENSIONS.has(ext)) {
     // Serve asset files directly without redirect
     return { type: 'serve', filePath: relativePath };
@@ -94,6 +100,12 @@ export function isReservedPath(pathname: string): boolean {
     return true;
   }
   return false;
+}
+
+/** Platform-generated scripts under _nrdocs/ (not repo assets). */
+function isPlatformRuntimePath(normalizedRelative: string, ext: string | null): boolean {
+  if (!normalizedRelative.startsWith('_nrdocs/')) return false;
+  return ext === '.js' || ext === '.mjs' || ext === '.cjs';
 }
 
 /** Extracts the file extension (lowercase, including the dot). */

@@ -20,8 +20,13 @@ import {
   matchRules,
   writeAuditEvent,
   hasPassword,
+  storeSelfServicePassword,
 } from '../db/index.js';
-import { DEFAULT_MAX_ARCHIVE_SIZE_MB } from '@nrdocs/shared';
+import {
+  DEFAULT_MAX_ARCHIVE_SIZE_MB,
+  DEFAULT_MIN_PASSWORD_LENGTH,
+  DEFAULT_MAX_PASSWORD_LENGTH,
+} from '@nrdocs/shared';
 
 interface PublishMetadata {
   site_title?: string;
@@ -66,9 +71,10 @@ export async function handlePublish(
   }
 
   // 5. Check publish allowlist: repo must be already known OR match an auto-approval rule
+  let matchedRuleForNewRepo: Awaited<ReturnType<typeof matchRules>> = null;
   if (!existingRepo) {
-    const matchedRule = await matchRules(env.DB, fullName);
-    if (!matchedRule) {
+    matchedRuleForNewRepo = await matchRules(env.DB, fullName);
+    if (!matchedRuleForNewRepo) {
       return jsonError(
         'REPO_NOT_ALLOWED',
         `Repository '${fullName}' is not allowed to publish to this instance. The operator must add an auto-approval rule first. Run: nrdocs rules add '${ownerName}/*' --access password`,
@@ -146,6 +152,7 @@ export async function handlePublish(
     full_name: fullName,
     site_title: metadata.site_title,
     requested_access: metadata.requested_access,
+    allow_repo_owner_password: matchedRuleForNewRepo?.default_allow_repo_owner_password,
   });
 
   // 9. Create build record (status: uploading)
@@ -161,12 +168,13 @@ export async function handlePublish(
   // 10. Store all extracted files in R2
   try {
     for (const file of files) {
-      const contentType = getMimeType(file.path) ?? 'application/octet-stream';
+      const artifactPath = file.path.toLowerCase();
+      const contentType = getMimeType(artifactPath) ?? 'application/octet-stream';
       await storeArtifactFile(
         env.ARTIFACTS,
         repo.id,
         build.id,
-        file.path,
+        artifactPath,
         file.content.buffer as ArrayBuffer,
         contentType,
       );
@@ -199,6 +207,63 @@ export async function handlePublish(
       total_size: totalSize,
     },
   });
+
+  // 15a. Self-service password handling
+  // Read the optional password field AFTER the build is committed but BEFORE
+  // auto-approval evaluation. The variable is never logged or echoed.
+  const passwordRaw = formData.get('password');
+  if (typeof passwordRaw === 'string') {
+    // Re-fetch the repo to pick up the current allow_repo_owner_password flag
+    // (important for brand-new repos that were just stamped by a rule in upsertRepo)
+    const currentRepo = await findRepoByGithubId(env.DB, claims.repository_id);
+    if (currentRepo && currentRepo.allow_repo_owner_password === true) {
+      // Validate password length bounds
+      if (
+        passwordRaw.length < DEFAULT_MIN_PASSWORD_LENGTH ||
+        passwordRaw.length > DEFAULT_MAX_PASSWORD_LENGTH
+      ) {
+        return jsonError(
+          'INVALID_PASSWORD',
+          `Password must be between ${DEFAULT_MIN_PASSWORD_LENGTH} and ${DEFAULT_MAX_PASSWORD_LENGTH} characters`,
+          400,
+        );
+      }
+
+      // Store password + audit atomically via db.batch
+      const result = await storeSelfServicePassword(env.DB, {
+        repo: currentRepo,
+        plaintext: passwordRaw,
+        fullName,
+        buildId: build.id,
+      });
+      if (!result.ok) {
+        return jsonError(
+          'AUDIT_WRITE_FAILED',
+          'Failed to record self-service password change',
+          500,
+        );
+      }
+    } else if (currentRepo && currentRepo.allow_repo_owner_password === false) {
+      // Flag is false: silently discard the password, write ignore audit event.
+      // Do NOT include plaintext or any hash in metadata (R5.6).
+      try {
+        await writeAuditEvent(env.DB, {
+          event_type: 'repo.self_password_ignored',
+          actor_type: 'github_action',
+          actor_id: fullName,
+          repo_id: currentRepo.id,
+          build_id: build.id,
+        });
+      } catch (_e) {
+        // R5.9: audit-write failure for the ignore path is also a hard fail
+        return jsonError(
+          'AUDIT_WRITE_FAILED',
+          'Failed to record self-service password decision',
+          500,
+        );
+      }
+    }
+  }
 
   // 13. Evaluate auto-approval rules
   let approvalState = repo.approval_state;

@@ -41,6 +41,7 @@ export interface RepoRecord {
   default_branch: string | null;
   approval_state: ApprovalState;
   access_mode: AccessMode;
+  allow_repo_owner_password: boolean;
   latest_successful_build_id: string | null;
   last_publish_status: string | null;
   requested_access: string | null;
@@ -83,6 +84,7 @@ export interface AutoApprovalRule {
   access_mode: 'public' | 'password';
   enabled: boolean;
   priority: number;
+  default_allow_repo_owner_password: boolean;
   created_at: string;
   created_by: string;
   updated_at: string;

@@ -40,7 +40,8 @@ export async function handleStatus(args: string[]): Promise<void> {
     process.exit(2);
   }
 
-  const [owner, repo] = parts as [string, string];
+  const owner = parts[0]!.toLowerCase();
+  const repo = parts[1]!.toLowerCase();
 
   let creds;
   try {
@@ -63,8 +64,9 @@ export async function handleStatus(args: string[]): Promise<void> {
     return;
   }
 
-  const data = res.data as Record<string, unknown>;
-  console.log(`Repository: ${owner}/${repo}`);
+  const payload = res.data as Record<string, unknown>;
+  const data = (payload['repo'] ?? payload) as Record<string, unknown>;
+  console.log(`Repository: ${String(data['full_name'] ?? `${owner}/${repo}`)}`);
   console.log(`State:      ${String(data['approval_state'] ?? '-')}`);
   console.log(`Access:     ${String(data['access_mode'] ?? '-')}`);
   console.log(`Created:    ${String(data['created_at'] ?? '-')}`);

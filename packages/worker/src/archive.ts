@@ -87,7 +87,12 @@ export function validateExtension(filePath: string): ExtractionError | null {
 
   const ext = basename.slice(lastDot).toLowerCase();
 
+  // Platform-generated runtime under _nrdocs/ (e.g. mermaid.min.js)
   if (REJECTED_EXTENSIONS.has(ext)) {
+    const normalized = filePath.replace(/\\/g, '/');
+    if (normalized.startsWith('_nrdocs/')) {
+      return null;
+    }
     return { code: 'REJECTED_EXTENSION', message: `Rejected extension ${ext}: ${filePath}` };
   }
 

@@ -8,7 +8,12 @@ import { jsonError } from '../responses.js';
 import { findRepoByFullName } from '../db/repos.js';
 import { getActivePassword } from '../db/passwords.js';
 import { verifyPassword } from '../crypto.js';
-import { createSessionCookie, buildSetCookieHeader } from '../session.js';
+import {
+  createSessionCookie,
+  buildSetCookieHeader,
+  normalizeRepoFullName,
+  normalizeRepoPath,
+} from '../session.js';
 import { renderPasswordPage } from './password-page.js';
 
 const SESSION_MAX_AGE_SECONDS = 86400; // 24 hours
@@ -32,7 +37,7 @@ export async function handlePasswordLogin(
   }
 
   const password = formData.get('password') ?? '';
-  const repoFullName = formData.get('repo') ?? '';
+  const repoFullName = normalizeRepoFullName(formData.get('repo') ?? '');
 
   if (!password || !repoFullName) {
     return jsonError('BAD_REQUEST', 'Missing required fields', 400);
@@ -72,14 +77,14 @@ export async function handlePasswordLogin(
   };
 
   const cookieValue = await createSessionCookie(sessionData, env.SESSION_SECRET);
-  const repoPath = `/${repo.full_name}`;
+  const repoPath = normalizeRepoPath(`/${repo.full_name}`);
   const setCookie = buildSetCookieHeader(cookieValue, repoPath, SESSION_MAX_AGE_SECONDS);
 
-  // Redirect to the docs root
+  // Redirect to the docs root (canonical lowercase URL)
   return new Response(null, {
     status: 303,
     headers: {
-      Location: `/${repo.full_name}/`,
+      Location: `${repoPath}/`,
       'Set-Cookie': setCookie,
     },
   });

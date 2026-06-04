@@ -27,9 +27,9 @@ export async function handleCreateRule(
   const auth = requireOperator(request, env);
   if (!auth.authenticated) return auth.response;
 
-  let body: { pattern?: string; access_mode?: string; priority?: number };
+  let body: { pattern?: string; access_mode?: string; priority?: number; default_allow_repo_owner_password?: unknown };
   try {
-    body = await request.json() as { pattern?: string; access_mode?: string; priority?: number };
+    body = await request.json() as { pattern?: string; access_mode?: string; priority?: number; default_allow_repo_owner_password?: unknown };
   } catch {
     return jsonError('INVALID_BODY', 'Request body must be valid JSON', 400);
   }
@@ -61,7 +61,21 @@ export async function handleCreateRule(
   const accessMode = body.access_mode as 'public' | 'password';
   const priority = typeof body.priority === 'number' ? body.priority : 0;
 
-  const rule = await createRule(env.DB, body.pattern, accessMode, 'operator', priority);
+  // R11.7: default to true when omitted; R11.8: reject non-boolean values
+  let defaultAllowSelfPassword = true;
+  if (body.default_allow_repo_owner_password !== undefined) {
+    if (typeof body.default_allow_repo_owner_password !== 'boolean') {
+      return jsonError(
+        'VALIDATION_ERROR',
+        'default_allow_repo_owner_password must be a boolean',
+        400,
+        { field: 'default_allow_repo_owner_password' },
+      );
+    }
+    defaultAllowSelfPassword = body.default_allow_repo_owner_password;
+  }
+
+  const rule = await createRule(env.DB, body.pattern, accessMode, 'operator', priority, defaultAllowSelfPassword);
 
   await writeAuditEvent(env.DB, {
     event_type: 'rule.created',

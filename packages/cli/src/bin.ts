@@ -17,7 +17,8 @@ Usage:
 Repo-owner commands:
   init        Initialize nrdocs in a GitHub repository
   publish     Build and upload docs artifacts
-  doctor      Diagnose setup and connectivity
+  doctor      Diagnose setup and connectivity (--ci for Actions)
+  nav         Navigation helpers (generate)
 
 Operator commands:
   deploy      Deploy or update nrdocs infrastructure
@@ -26,7 +27,7 @@ Operator commands:
   approve     Approve a repo for serving
   disable     Disable serving for a repo
   access      Change access mode
-  password    Set or rotate password
+  password    Manage passwords (set | allow | disallow)
   rules       Manage auto-approval rules
   status      Show repo status
   config      Show configuration

@@ -104,6 +104,21 @@ describe('resolveServingPath', () => {
       const result = resolveServingPath('/acme/docs/readme.txt', owner, repo);
       expect(result).toEqual({ type: 'serve', filePath: 'readme.txt' });
     });
+
+    it('serves platform mermaid runtime directly', () => {
+      const result = resolveServingPath('/acme/docs/_nrdocs/mermaid.min.js', owner, repo);
+      expect(result).toEqual({ type: 'serve', filePath: '_nrdocs/mermaid.min.js' });
+    });
+
+    it('serves platform runtime even with trailing slash', () => {
+      const result = resolveServingPath('/acme/docs/_nrdocs/mermaid.min.js/', owner, repo);
+      expect(result).toEqual({ type: 'serve', filePath: '_nrdocs/mermaid.min.js' });
+    });
+
+    it('does not serve repo .js as asset', () => {
+      const result = resolveServingPath('/acme/docs/assets/app.js', owner, repo);
+      expect(result).toEqual({ type: 'redirect', location: '/acme/docs/assets/app.js/' });
+    });
   });
 
   describe('edge cases', () => {

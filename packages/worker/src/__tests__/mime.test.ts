@@ -50,10 +50,14 @@ describe('getMimeType', () => {
     expect(getMimeType('doc.pdf')).toBe('application/pdf');
   });
 
+  it('returns correct MIME type for .js', () => {
+    expect(getMimeType('_nrdocs/mermaid.min.js')).toBe('text/javascript; charset=utf-8');
+    expect(getMimeType('file.js')).toBe('text/javascript; charset=utf-8');
+  });
+
   it('returns null for unknown extensions', () => {
     expect(getMimeType('file.exe')).toBeNull();
     expect(getMimeType('file.zip')).toBeNull();
-    expect(getMimeType('file.js')).toBeNull();
   });
 
   it('returns null for files without extensions', () => {

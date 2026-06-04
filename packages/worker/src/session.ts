@@ -9,6 +9,22 @@ export interface SessionData {
   expires_at: number;
 }
 
+/** Canonical lowercase repo path: /owner/repo */
+export function normalizeRepoPath(repoPath: string): string {
+  const trimmed = repoPath.replace(/^\//, '').replace(/\/$/, '');
+  if (!trimmed) return '/';
+  const segments = trimmed.split('/').filter(Boolean).map((s) => s.toLowerCase());
+  if (segments.length < 2) return `/${segments.join('/')}`;
+  return `/${segments[0]}/${segments[1]}`;
+}
+
+/** Canonical lowercase full name: owner/repo */
+export function normalizeRepoFullName(fullName: string): string {
+  const parts = fullName.split('/').filter(Boolean);
+  if (parts.length < 2) return fullName.toLowerCase();
+  return `${parts[0]!.toLowerCase()}/${parts[1]!.toLowerCase()}`;
+}
+
 /**
  * Creates a signed session cookie value.
  * Format: base64url(JSON(data)).base64url(HMAC-SHA256(data, secret))
@@ -92,6 +108,39 @@ export function getSessionCookie(
 }
 
 /**
+ * Finds a valid session for a repo, accepting legacy cookies set before
+ * path canonicalization (mixed-case Path / cookie names).
+ */
+export async function findSessionForRepo(
+  request: Request,
+  repoPath: string,
+  repoId: string,
+  secret: string,
+): Promise<SessionData | null> {
+  const cookieHeader = request.headers.get('Cookie');
+  if (!cookieHeader) return null;
+
+  const cookies = parseCookies(cookieHeader);
+  const seen = new Set<string>();
+
+  const preferred = cookies[getSessionCookieName(repoPath)];
+  if (preferred) seen.add(preferred);
+
+  for (const [name, value] of Object.entries(cookies)) {
+    if (name.startsWith('__nrdocs_session_')) {
+      seen.add(value);
+    }
+  }
+
+  for (const value of seen) {
+    const session = await validateSessionCookie(value, secret);
+    if (session?.repo_id === repoId) return session;
+  }
+
+  return null;
+}
+
+/**
  * Creates the Set-Cookie header value for a password session.
  */
 export function buildSetCookieHeader(
@@ -99,15 +148,18 @@ export function buildSetCookieHeader(
   repoPath: string,
   maxAgeSeconds: number,
 ): string {
-  const cookieName = getSessionCookieName(repoPath);
-  const path = repoPath.endsWith('/') ? repoPath : `${repoPath}/`;
-  return `${cookieName}=${cookieValue}; HttpOnly; Secure; SameSite=Lax; Path=${path}; Max-Age=${maxAgeSeconds}`;
+  const canonical = normalizeRepoPath(repoPath);
+  const cookieName = getSessionCookieName(canonical);
+  return `${cookieName}=${cookieValue}; HttpOnly; Secure; SameSite=Lax; Path=${canonical}/; Max-Age=${maxAgeSeconds}`;
 }
 
 /** Session cookie name derived from repo path. */
 function getSessionCookieName(repoPath: string): string {
-  // repoPath is like /owner/repo — normalize to owner_repo
-  const normalized = repoPath.replace(/^\//, '').replace(/\/$/, '').replace(/\//g, '_');
+  // repoPath is like /owner/repo — normalize to owner_repo (lowercase)
+  const normalized = normalizeRepoPath(repoPath)
+    .replace(/^\//, '')
+    .replace(/\/$/, '')
+    .replace(/\//g, '_');
   return `__nrdocs_session_${normalized}`;
 }
 

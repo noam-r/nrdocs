@@ -189,6 +189,33 @@ describe('Arg parsing', () => {
       expect(opts.json).toBe(true);
     });
   });
+
+  describe('doctor', () => {
+    it('parses --json and --ci flags', async () => {
+      const { parseDoctorArgs } = await import('../commands/doctor.js');
+      const opts = parseDoctorArgs(['--json', '--ci']);
+      expect(opts.json).toBe(true);
+      expect(opts.ci).toBe(true);
+    });
+  });
+
+  describe('publish', () => {
+    it('parses --verbose flag', async () => {
+      const { parsePublishArgs } = await import('../commands/publish.js');
+      const opts = parsePublishArgs(['--verbose']);
+      expect(opts.verbose).toBe(true);
+    });
+  });
+
+  describe('nav generate', () => {
+    it('parses flags', async () => {
+      const { parseNavGenerateArgs } = await import('../commands/nav.js');
+      const opts = parseNavGenerateArgs(['--docs-dir', 'docs', '--force', '--dry-run']);
+      expect(opts.docsDir).toBe('docs');
+      expect(opts.force).toBe(true);
+      expect(opts.dryRun).toBe(true);
+    });
+  });
 });
 
 describe('ApiClient', () => {
@@ -339,13 +366,27 @@ describe('ApiClient', () => {
       expect(res.error?.message).toBe('Connection refused');
     });
 
+    it('extracts cause from fetch failed errors', async () => {
+      const inner = Object.assign(new Error('getaddrinfo ENOTFOUND'), { code: 'ENOTFOUND' });
+      fetchSpy.mockRejectedValue(new Error('fetch failed', { cause: inner }));
+      const client = new ApiClient('https://api.example.com', 'tok');
+      const res = await client.listRepos();
+      expect(res.ok).toBe(false);
+      expect(res.error?.code).toBe('network_error');
+      expect(res.error?.cause).toContain('ENOTFOUND');
+    });
+
     it('handles API error responses', async () => {
       fetchSpy.mockResolvedValue({
-        json: () => Promise.resolve({
-          ok: false,
-          error: { code: 'not_found', message: 'Repo not found' },
-        }),
+        text: () =>
+          Promise.resolve(
+            JSON.stringify({
+              ok: false,
+              error: { code: 'not_found', message: 'Repo not found' },
+            }),
+          ),
         status: 404,
+        headers: { get: () => 'application/json' },
       });
       const client = new ApiClient('https://api.example.com', 'tok');
       const res = await client.getRepo('myorg', 'missing');

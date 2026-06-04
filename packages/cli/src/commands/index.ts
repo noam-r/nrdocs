@@ -4,12 +4,13 @@ import { authLogout } from './auth/logout.js';
 import { handleInit } from './init.js';
 import { handlePublish } from './publish.js';
 import { handleDoctor } from './doctor.js';
+import { handleNavGenerate } from './nav.js';
 import { handleDeploy } from './deploy.js';
 import { handleRepos } from './repos.js';
 import { handleApprove } from './approve.js';
 import { handleDisable } from './disable.js';
 import { handleAccessSet } from './access.js';
-import { handlePasswordSet } from './password.js';
+import { handlePasswordSet, handlePasswordAllow, handlePasswordDisallow } from './password.js';
 import { handleRulesList, handleRulesAdd, handleRulesRemove } from './rules.js';
 import { handleStatus } from './status.js';
 import { handleConfigShow } from './config-show.js';
@@ -35,6 +36,15 @@ export async function runCommand(args: string[]): Promise<void> {
 
     case 'doctor':
       await handleDoctor(rest);
+      break;
+
+    case 'nav':
+      if (subCmd === 'generate') {
+        await handleNavGenerate(args.slice(2));
+      } else {
+        console.error('Usage: nrdocs nav generate [--docs-dir docs] [--force] [--dry-run]');
+        process.exitCode = 1;
+      }
       break;
 
     case 'deploy':
@@ -82,11 +92,19 @@ export async function runCommand(args: string[]): Promise<void> {
       break;
 
     case 'password':
-      if (subCmd === 'set') {
-        await handlePasswordSet(args.slice(2));
-      } else {
-        console.error('Usage: nrdocs password set <owner/repo> [--from-stdin]');
-        process.exitCode = 1;
+      switch (subCmd) {
+        case 'set':
+          await handlePasswordSet(args.slice(2));
+          break;
+        case 'allow':
+          await handlePasswordAllow(args.slice(2));
+          break;
+        case 'disallow':
+          await handlePasswordDisallow(args.slice(2));
+          break;
+        default:
+          console.error('Usage: nrdocs password <set|allow|disallow> <owner/repo> [...]');
+          process.exitCode = 1;
       }
       break;
 

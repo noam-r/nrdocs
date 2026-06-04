@@ -10,7 +10,7 @@ import { getArtifactFile } from '../artifacts.js';
 import { findBuildById } from '../db/builds.js';
 import { getMimeType, getSecurityHeaders } from '../mime.js';
 import { resolveServingPath } from '../path-resolver.js';
-import { getSessionCookie, validateSessionCookie } from '../session.js';
+import { findSessionForRepo, normalizeRepoPath } from '../session.js';
 import { renderPasswordPage } from './password-page.js';
 
 export async function handleServe(
@@ -24,8 +24,21 @@ export async function handleServe(
     return notFound();
   }
 
-  const owner = segments[0]!.toLowerCase();
-  const repo = segments[1]!.toLowerCase();
+  const rawOwner = segments[0]!;
+  const rawRepo = segments[1]!;
+  const owner = rawOwner.toLowerCase();
+  const repo = rawRepo.toLowerCase();
+
+  // Redirect mixed-case URLs to lowercase canonical form
+  if (rawOwner !== owner || rawRepo !== repo) {
+    const normalized =
+      url.pathname.replace(`/${rawOwner}/${rawRepo}`, `/${owner}/${repo}`) + url.search;
+    return new Response(null, {
+      status: 301,
+      headers: { Location: normalized },
+    });
+  }
+
   const fullName = `${owner}/${repo}`;
 
   // Look up repo in D1
@@ -39,18 +52,19 @@ export async function handleServe(
 
   // Password access check
   if (repoRecord.access_mode === 'password') {
-    const repoPath = `/${owner}/${repo}`;
-    const sessionCookie = getSessionCookie(request, repoPath);
+    const repoPath = normalizeRepoPath(`/${owner}/${repo}`);
 
     let authenticated = false;
-    if (sessionCookie) {
-      const session = await validateSessionCookie(sessionCookie, env.SESSION_SECRET);
-      if (session && session.repo_id === repoRecord.id) {
-        // Verify password version hasn't changed
-        const credential = await getActivePassword(env.DB, repoRecord.id);
-        if (credential && session.password_version === credential.password_version) {
-          authenticated = true;
-        }
+    const session = await findSessionForRepo(
+      request,
+      repoPath,
+      repoRecord.id,
+      env.SESSION_SECRET,
+    );
+    if (session) {
+      const credential = await getActivePassword(env.DB, repoRecord.id);
+      if (credential && session.password_version === credential.password_version) {
+        authenticated = true;
       }
     }
 
@@ -79,16 +93,39 @@ export async function handleServe(
         return notFound();
       }
 
-      // Normalize file path to lowercase for lookup
-      const filePath = resolution.filePath.toLowerCase();
+      let filePath = resolution.filePath;
 
-      // Fetch from R2
-      const file = await getArtifactFile(
+      // Fetch from R2 (try exact path, then lowercase for legacy publishes)
+      let file = await getArtifactFile(
         env.ARTIFACTS,
         repoRecord.id,
         build.id,
         filePath,
       );
+      if (!file && filePath !== filePath.toLowerCase()) {
+        filePath = filePath.toLowerCase();
+        file = await getArtifactFile(
+          env.ARTIFACTS,
+          repoRecord.id,
+          build.id,
+          filePath,
+        );
+      }
+
+      // Root URL: fall back to first page from manifest when index.html is absent
+      if (!file && filePath === 'index.html') {
+        const fallback = await resolveRootPageFromManifest(
+          env,
+          repoRecord.id,
+          build.id,
+        );
+        if (fallback) {
+          return new Response(null, {
+            status: 302,
+            headers: { Location: `/${owner}/${repo}/${fallback}` },
+          });
+        }
+      }
 
       if (!file) {
         return notFound();
@@ -108,6 +145,34 @@ export async function handleServe(
       });
     }
   }
+}
+
+/** Resolves a root redirect path from the publish manifest (e.g. readme/ for README.md-only docs). */
+async function resolveRootPageFromManifest(
+  env: Env,
+  repoId: string,
+  buildId: string,
+): Promise<string | null> {
+  const manifestFile = await getArtifactFile(env.ARTIFACTS, repoId, buildId, 'nrdocs-manifest.json');
+  if (!manifestFile) return null;
+
+  let manifest: { pages?: Array<{ path?: string }> };
+  try {
+    manifest = JSON.parse(await manifestFile.text()) as { pages?: Array<{ path?: string }> };
+  } catch {
+    return null;
+  }
+
+  const pages = manifest.pages ?? [];
+  if (pages.length === 0) return null;
+
+  const indexPage = pages.find((p) => p.path === 'index.html');
+  const pagePath = indexPage?.path ?? pages[0]?.path;
+  if (!pagePath || pagePath === 'index.html') return null;
+
+  // pagePath is e.g. "getting-started/index.html" → redirect to "getting-started/"
+  const dir = pagePath.replace(/\/index\.html$/, '');
+  return dir ? `${dir}/` : null;
 }
 
 /** Non-revealing 404 response. */

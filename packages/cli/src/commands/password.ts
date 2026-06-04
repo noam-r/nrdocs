@@ -8,6 +8,11 @@ interface PasswordSetOptions {
   json?: boolean;
 }
 
+interface PasswordAllowOptions {
+  repo?: string;
+  json?: boolean;
+}
+
 /**
  * Parses password set flags from args.
  */
@@ -47,28 +52,37 @@ async function promptPassword(question: string): Promise<string> {
     const rl = readline.createInterface({
       input: process.stdin,
       output: process.stdout,
+      terminal: true,
     });
 
-    // Attempt to disable echo for password input
-    if (process.stdin.isTTY) {
-      process.stdin.setRawMode?.(false);
-    }
+    const origWrite = process.stdout.write.bind(process.stdout);
+    let maskInput = false;
+
+    process.stdout.write = ((
+      chunk: string | Uint8Array,
+      encodingOrCb?: BufferEncoding | ((err?: Error | null) => void),
+      cb?: (err?: Error | null) => void,
+    ) => {
+      if (maskInput && typeof chunk === 'string' && chunk !== '\n' && chunk !== '\r\n') {
+        if (typeof encodingOrCb === 'function') encodingOrCb();
+        else if (typeof cb === 'function') cb();
+        return true;
+      }
+      return origWrite(chunk, encodingOrCb as BufferEncoding, cb);
+    }) as typeof process.stdout.write;
 
     rl.question(question, (answer) => {
+      maskInput = false;
+      process.stdout.write = origWrite;
       rl.close();
-      console.log(''); // newline after hidden input
+      process.stdout.write('\n');
       resolve(answer.trim());
     });
 
-    // Hide input by writing to stdout directly
-    const origWrite = process.stdout.write.bind(process.stdout);
-    process.stdout.write = ((chunk: string | Uint8Array) => {
-      // Only suppress the echoed characters, not the prompt itself
-      if (typeof chunk === 'string' && !chunk.includes(question) && chunk !== '\n') {
-        return true;
-      }
-      return origWrite(chunk);
-    }) as typeof process.stdout.write;
+    // readline writes the prompt synchronously; mask only subsequent keystrokes
+    setImmediate(() => {
+      maskInput = true;
+    });
   });
 }
 
@@ -139,5 +153,115 @@ export async function handlePasswordSet(args: string[]): Promise<void> {
     console.log(JSON.stringify(res.data, null, 2));
   } else {
     console.log(`Password set for ${owner}/${repo}.`);
+  }
+}
+
+
+/**
+ * Parses password allow flags from args.
+ */
+export function parsePasswordAllowArgs(args: string[]): PasswordAllowOptions {
+  const opts: PasswordAllowOptions = {};
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i];
+    if (arg === '--json') {
+      opts.json = true;
+    } else if (!arg?.startsWith('--') && !opts.repo) {
+      opts.repo = arg;
+    }
+  }
+  return opts;
+}
+
+/**
+ * Parses password disallow flags from args.
+ */
+export function parsePasswordDisallowArgs(args: string[]): PasswordAllowOptions {
+  return parsePasswordAllowArgs(args);
+}
+
+/**
+ * Handles the `nrdocs password allow` command.
+ * Usage: nrdocs password allow owner/repo
+ */
+export async function handlePasswordAllow(args: string[]): Promise<void> {
+  const opts = parsePasswordAllowArgs(args);
+
+  if (!opts.repo) {
+    console.error('Error: Repository required. Usage: nrdocs password allow owner/repo');
+    process.exit(2);
+  }
+
+  const parts = opts.repo.split('/');
+  if (parts.length !== 2 || !parts[0] || !parts[1]) {
+    console.error('Error: Repository must be in "owner/repo" format.');
+    process.exit(2);
+  }
+
+  const [owner, repo] = parts as [string, string];
+
+  let creds;
+  try {
+    creds = resolveCredentials();
+  } catch (e) {
+    console.error(e instanceof Error ? e.message : String(e));
+    process.exit(1);
+  }
+
+  const client = new ApiClient(creds.api_url, creds.operator_token);
+  const res = await client.setSelfPasswordAllow(owner, repo, true);
+
+  if (!res.ok) {
+    console.error(`Error: ${res.error?.message ?? 'Unknown error'}`);
+    process.exit(1);
+  }
+
+  if (opts.json) {
+    console.log(JSON.stringify(res.data, null, 2));
+  } else {
+    console.log(`Self-service password enabled for ${owner}/${repo}.`);
+  }
+}
+
+/**
+ * Handles the `nrdocs password disallow` command.
+ * Usage: nrdocs password disallow owner/repo
+ */
+export async function handlePasswordDisallow(args: string[]): Promise<void> {
+  const opts = parsePasswordDisallowArgs(args);
+
+  if (!opts.repo) {
+    console.error('Error: Repository required. Usage: nrdocs password disallow owner/repo');
+    process.exit(2);
+  }
+
+  const parts = opts.repo.split('/');
+  if (parts.length !== 2 || !parts[0] || !parts[1]) {
+    console.error('Error: Repository must be in "owner/repo" format.');
+    process.exit(2);
+  }
+
+  const [owner, repo] = parts as [string, string];
+
+  let creds;
+  try {
+    creds = resolveCredentials();
+  } catch (e) {
+    console.error(e instanceof Error ? e.message : String(e));
+    process.exit(1);
+  }
+
+  const client = new ApiClient(creds.api_url, creds.operator_token);
+  const res = await client.setSelfPasswordAllow(owner, repo, false);
+
+  if (!res.ok) {
+    console.error(`Error: ${res.error?.message ?? 'Unknown error'}`);
+    process.exit(1);
+  }
+
+  if (opts.json) {
+    console.log(JSON.stringify(res.data, null, 2));
+  } else {
+    console.log(`Self-service password disabled for ${owner}/${repo}.`);
   }
 }

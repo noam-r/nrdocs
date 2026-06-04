@@ -2,7 +2,8 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as os from 'node:os';
-import { renderMarkdown } from '../renderer/markdown.js';
+import { renderMarkdown, contentHasMermaid } from '../renderer/markdown.js';
+import { mermaidScriptSrcForOutput } from '../renderer/mermaid-runtime.js';
 import { generateAutoNav, extractTitle } from '../renderer/navigation.js';
 import { rewriteLinks } from '../renderer/links.js';
 import { collectAssets } from '../renderer/assets.js';
@@ -28,6 +29,24 @@ describe('Markdown rendering', () => {
     expect(html).toContain('<pre>');
     expect(html).toContain('<code');
     expect(html).toContain('const x = 1;');
+  });
+
+  it('renders mermaid fences as pre.mermaid with escaped content', () => {
+    const html = renderMarkdown('```mermaid\ngraph TD\n  A-->B\n```');
+    expect(html).toContain('<pre class="mermaid">');
+    expect(html).toContain('graph TD');
+    expect(html).not.toContain('<code');
+  });
+
+  it('escapes HTML inside mermaid fences', () => {
+    const html = renderMarkdown('```mermaid\n<script>alert(1)</script>\n```');
+    expect(html).toContain('&lt;script&gt;');
+    expect(html).not.toMatch(/<pre class="mermaid">[\s\S]*<script>/);
+  });
+
+  it('detects mermaid fences via contentHasMermaid', () => {
+    expect(contentHasMermaid('```mermaid\nflowchart LR\n```')).toBe(true);
+    expect(contentHasMermaid('```js\ncode\n```')).toBe(false);
   });
 
   it('renders inline code', () => {
@@ -395,7 +414,53 @@ describe('Template', () => {
       baseUrl: '/',
     });
     expect(html).toContain('&lt;script&gt;');
-    expect(html).not.toContain('<script>');
+    expect(html).toContain('<title>Test &lt;script&gt; - Docs</title>');
+  });
+
+  it('includes theme toggle and CSS variables', () => {
+    const html = wrapInTemplate({
+      title: 'Page',
+      siteTitle: 'Docs',
+      content: '<p>Hi</p>',
+      nav: [],
+      canonicalUrl: 'https://example.com/',
+      baseUrl: '/',
+    });
+    expect(html).toContain('id="theme-toggle"');
+    expect(html).toContain('--text:');
+    expect(html).toContain('data-theme');
+    expect(html).toContain('nrdocs-theme');
+  });
+
+  it('includes mermaid script only when requested', () => {
+    const without = wrapInTemplate({
+      title: 'Page',
+      siteTitle: 'Docs',
+      content: '',
+      nav: [],
+      canonicalUrl: 'https://example.com/',
+      baseUrl: '/',
+      includeMermaid: false,
+    });
+    expect(without).not.toContain('mermaid.min.js');
+
+    const withMermaid = wrapInTemplate({
+      title: 'Page',
+      siteTitle: 'Docs',
+      content: '<pre class="mermaid">graph TD</pre>',
+      nav: [],
+      canonicalUrl: 'https://example.com/',
+      baseUrl: '/',
+      includeMermaid: true,
+      mermaidScriptSrc: '_nrdocs/mermaid.min.js',
+    });
+    expect(withMermaid).toContain('src="_nrdocs/mermaid.min.js"');
+    expect(withMermaid).toContain('initMermaid');
+  });
+
+  it('computes relative mermaid script paths by page depth', () => {
+    expect(mermaidScriptSrcForOutput('index.html')).toBe('_nrdocs/mermaid.min.js');
+    expect(mermaidScriptSrcForOutput('guide/index.html')).toBe('../_nrdocs/mermaid.min.js');
   });
 });
 
@@ -505,5 +570,48 @@ describe('Full render pipeline', () => {
     const html = indexFile!.content.toString('utf-8');
     expect(html).not.toContain('<script>alert');
     expect(html).toContain('&lt;script&gt;');
+  });
+
+  it('includes mermaid runtime when site has mermaid diagrams', async () => {
+    fs.writeFileSync(path.join(tmpDir, 'index.md'), '# Home\n\nIntro.');
+    fs.writeFileSync(
+      path.join(tmpDir, 'diagram.md'),
+      '# Diagram\n\n```mermaid\nflowchart LR\n  A --> B\n```',
+    );
+
+    const site = await renderSite({
+      docsDir: tmpDir,
+      siteTitle: 'Test',
+      baseUrl: 'https://example.com',
+      owner: 'org',
+      repo: 'repo',
+    });
+
+    const runtime = site.files.find((f) => f.path === '_nrdocs/mermaid.min.js');
+    expect(runtime).toBeDefined();
+    expect(runtime!.content.length).toBeGreaterThan(1000);
+
+    const diagramPage = site.files.find((f) => f.path === 'diagram/index.html');
+    expect(diagramPage).toBeDefined();
+    const diagramHtml = diagramPage!.content.toString('utf-8');
+    expect(diagramHtml).toContain('src="../_nrdocs/mermaid.min.js"');
+    expect(diagramHtml).toContain('<pre class="mermaid">');
+
+    const indexPage = site.files.find((f) => f.path === 'index.html');
+    expect(indexPage!.content.toString('utf-8')).not.toContain('mermaid.min.js');
+  });
+
+  it('omits mermaid runtime when no mermaid diagrams', async () => {
+    fs.writeFileSync(path.join(tmpDir, 'index.md'), '# Home\n\nNo diagrams.');
+
+    const site = await renderSite({
+      docsDir: tmpDir,
+      siteTitle: 'Test',
+      baseUrl: 'https://example.com',
+      owner: 'org',
+      repo: 'repo',
+    });
+
+    expect(site.files.find((f) => f.path === '_nrdocs/mermaid.min.js')).toBeUndefined();
   });
 });

@@ -79,6 +79,10 @@ describe('Extension filtering', () => {
     expect(err!.code).toBe('REJECTED_EXTENSION');
   });
 
+  it('allows platform runtime .js under _nrdocs/', () => {
+    expect(validateExtension('_nrdocs/mermaid.min.js')).toBeNull();
+  });
+
   it('rejects .mjs files', () => {
     const err = validateExtension('module.mjs');
     expect(err).not.toBeNull();

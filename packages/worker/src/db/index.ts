@@ -6,12 +6,14 @@ export { generateId } from './id.js';
 export type { IdPrefix } from './id.js';
 
 export {
+  normalizeRepo,
   findRepoByFullName,
   findRepoByGithubId,
   upsertRepo,
   approveRepo,
   disableRepo,
   setAccessMode,
+  setSelfPasswordAllowFlag,
   updateLatestBuild,
   listRepos,
 } from './repos.js';
@@ -37,7 +39,9 @@ export {
   setPassword,
   getActivePassword,
   hasPassword,
+  storeSelfServicePassword,
 } from './passwords.js';
+export type { StoreSelfServicePasswordArgs } from './passwords.js';
 
 export { writeAuditEvent } from './audit.js';
 export type { AuditEventInput } from './audit.js';

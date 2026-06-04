@@ -4,6 +4,9 @@ import {
   validateSessionCookie,
   getSessionCookie,
   buildSetCookieHeader,
+  normalizeRepoPath,
+  normalizeRepoFullName,
+  findSessionForRepo,
 } from '../session.js';
 import type { SessionData } from '../session.js';
 
@@ -112,6 +115,66 @@ describe('createSessionCookie / validateSessionCookie', () => {
   });
 });
 
+describe('normalizeRepoPath', () => {
+  it('lowercases owner and repo segments', () => {
+    expect(normalizeRepoPath('/SolisPlatform/solis_sdk')).toBe('/solisplatform/solis_sdk');
+    expect(normalizeRepoPath('/SolisPlatform/solis_sdk/')).toBe('/solisplatform/solis_sdk');
+  });
+});
+
+describe('normalizeRepoFullName', () => {
+  it('lowercases owner and repo', () => {
+    expect(normalizeRepoFullName('SolisPlatform/solis_sdk')).toBe('solisplatform/solis_sdk');
+  });
+});
+
+describe('findSessionForRepo', () => {
+  it('accepts a legacy mixed-case cookie name for the same repo', async () => {
+    const data = {
+      repo_id: 'repo_abc123',
+      password_version: 1,
+      expires_at: Date.now() + 86400000,
+    };
+    const cookie = await createSessionCookie(data, TEST_SECRET);
+    const request = new Request('http://localhost/SolisPlatform/solis_sdk/', {
+      headers: {
+        Cookie: `__nrdocs_session_SolisPlatform_solis_sdk=${cookie}`,
+      },
+    });
+
+    const session = await findSessionForRepo(
+      request,
+      '/solisplatform/solis_sdk',
+      'repo_abc123',
+      TEST_SECRET,
+    );
+    expect(session).not.toBeNull();
+    expect(session!.repo_id).toBe('repo_abc123');
+  });
+
+  it('rejects sessions for a different repo', async () => {
+    const data = {
+      repo_id: 'repo_other',
+      password_version: 1,
+      expires_at: Date.now() + 86400000,
+    };
+    const cookie = await createSessionCookie(data, TEST_SECRET);
+    const request = new Request('http://localhost/acme/docs/', {
+      headers: {
+        Cookie: `__nrdocs_session_acme_docs=${cookie}`,
+      },
+    });
+
+    const session = await findSessionForRepo(
+      request,
+      '/solisplatform/solis_sdk',
+      'repo_abc123',
+      TEST_SECRET,
+    );
+    expect(session).toBeNull();
+  });
+});
+
 describe('getSessionCookie', () => {
   it('extracts the session cookie for a repo path', () => {
     const request = new Request('http://localhost/acme/docs/', {
@@ -173,6 +236,12 @@ describe('buildSetCookieHeader', () => {
     expect(header).toContain('SameSite=Lax');
     expect(header).toContain('Path=/acme/docs/');
     expect(header).toContain('Max-Age=86400');
+  });
+
+  it('canonicalizes mixed-case paths', () => {
+    const header = buildSetCookieHeader('val', '/SolisPlatform/solis_sdk', 3600);
+    expect(header).toContain('__nrdocs_session_solisplatform_solis_sdk=val');
+    expect(header).toContain('Path=/solisplatform/solis_sdk/');
   });
 
   it('ensures path ends with trailing slash', () => {

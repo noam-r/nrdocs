@@ -14,6 +14,8 @@ import {
   handleDisableRepo,
   handleSetAccess,
   handleSetPassword,
+  handleAllowSelfPassword,
+  handleDisallowSelfPassword,
 } from './handlers/repos.js';
 import { handleListRules, handleCreateRule, handleDeleteRule } from './handlers/rules.js';
 import { handleListStatic, handleSetStatic, handleDeleteStatic } from './handlers/static-files.js';
@@ -47,6 +49,8 @@ router.post('/api/repos/:owner/:repo/approve', handleApproveRepo);
 router.post('/api/repos/:owner/:repo/disable', handleDisableRepo);
 router.post('/api/repos/:owner/:repo/access', handleSetAccess);
 router.post('/api/repos/:owner/:repo/password', handleSetPassword);
+router.post('/api/repos/:owner/:repo/allow-self-password', handleAllowSelfPassword);
+router.post('/api/repos/:owner/:repo/disallow-self-password', handleDisallowSelfPassword);
 
 // Auto-approval rules
 router.get('/api/auto-approval-rules', handleListRules);

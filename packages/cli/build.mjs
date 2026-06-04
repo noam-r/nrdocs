@@ -26,6 +26,8 @@ await esbuild.build({
     'node:crypto',
     'node:child_process',
     'node:zlib',
+    // yaml uses dynamic require('process'); must load from node_modules at runtime
+    'yaml',
   ],
   packages: 'bundle',
 });

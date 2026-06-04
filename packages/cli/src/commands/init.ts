@@ -2,6 +2,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as readline from 'node:readline';
 import { getProfile, getDefaultProfileName } from '../config/index.js';
+import { generateNavInConfig } from '../config/docs-config.js';
 
 interface InitOptions {
   docsDir?: string;
@@ -28,29 +29,20 @@ async function prompt(question: string, defaultValue?: string): Promise<string> 
   });
 }
 
-function generateNrdocsYml(title: string, requestedAccess?: string): string {
+function generateNrdocsYml(title: string, apiUrl: string, requestedAccess?: string): string {
   let yml = `# nrdocs site configuration
 site:
   title: "${title}"
+  api_url: ${apiUrl}
 
 content:
-  index: index.md
+  source_dir: .
+  nav: auto
 `;
   if (requestedAccess) {
     yml += `\nrequest:\n  access: ${requestedAccess}\n`;
   }
   return yml;
-}
-
-function generateIndexMd(title: string): string {
-  return `# ${title}
-
-Welcome to your documentation site powered by nrdocs.
-
-## Getting Started
-
-Edit this file to add your documentation content.
-`;
 }
 
 function generateWorkflowYml(docsDir: string, apiUrl: string): string {
@@ -82,10 +74,16 @@ jobs:
       - name: Install nrdocs CLI
         run: npm install -g nrdocs
 
+      - name: Diagnose setup
+        run: nrdocs doctor --ci
+        env:
+          NRDOCS_API_URL: ${apiUrl}
+
       - name: Publish docs
         run: nrdocs publish --docs-dir ${docsDir}
         env:
           NRDOCS_API_URL: ${apiUrl}
+          NRDOCS_DOCS_PASSWORD: \${{ secrets.NRDOCS_DOCS_PASSWORD }}
 `;
 }
 
@@ -216,7 +214,6 @@ export async function handleInit(args: string[]): Promise<void> {
   // Validate URL has protocol
   apiUrl = normalizeUrl(apiUrl);
 
-  const indexFile = path.join(docsPath, 'index.md');
   const workflowDir = path.resolve('.github', 'workflows');
   const workflowFile = path.join(workflowDir, 'nrdocs.yml');
 
@@ -235,17 +232,16 @@ export async function handleInit(args: string[]): Promise<void> {
   // Write nrdocs config only if it doesn't exist or --force is set
   const createdConfig = !configExists || opts.force;
   if (createdConfig) {
-    fs.writeFileSync(configFile, generateNrdocsYml(title, opts.requestedAccess));
-  }
-
-  // Only create index.md if it doesn't already exist
-  const createdIndex = !fs.existsSync(indexFile);
-  if (createdIndex) {
-    fs.writeFileSync(indexFile, generateIndexMd(title));
+    fs.writeFileSync(configFile, generateNrdocsYml(title, apiUrl, opts.requestedAccess));
   }
 
   // Always write/update the workflow
   fs.writeFileSync(workflowFile, generateWorkflowYml(docsDir, apiUrl));
+
+  let navPageCount = 0;
+  if (createdConfig || opts.force) {
+    navPageCount = generateNavInConfig(docsDir, { generatedBy: 'nrdocs init' });
+  }
 
   console.log('nrdocs initialized successfully!');
   console.log('');
@@ -253,16 +249,21 @@ export async function handleInit(args: string[]): Promise<void> {
   if (createdConfig) {
     console.log(`  ${path.relative(process.cwd(), configFile)}`);
   }
-  if (createdIndex) {
-    console.log(`  ${path.relative(process.cwd(), indexFile)}`);
-  }
   console.log(`  ${path.relative(process.cwd(), workflowFile)}`);
   if (!createdConfig) {
     console.log('');
     console.log(`Using existing: ${path.relative(process.cwd(), configFile)}`);
   }
+  if (navPageCount > 0) {
+    console.log(`  content.nav: ${navPageCount} page(s) from markdown under ${docsDir}/`);
+  }
   console.log('');
   console.log('Next steps:');
-  console.log('  1. Commit and push to trigger the workflow');
-  console.log('  2. Ask your operator to approve the repo');
+  if (navPageCount === 0) {
+    console.log(`  1. Add markdown files under ${docsDir}/, then run: nrdocs nav generate`);
+  } else {
+    console.log(`  1. Edit content.nav in ${path.relative(process.cwd(), configFile)} to reorder pages`);
+  }
+  console.log('  2. Commit and push to trigger the workflow');
+  console.log('  3. Ask your operator to approve the repo');
 }

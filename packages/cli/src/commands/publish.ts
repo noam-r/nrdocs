@@ -1,11 +1,21 @@
 import * as fs from 'node:fs';
-import * as path from 'node:path';
 import { renderSite } from '../renderer/index.js';
 import { createArchive } from '../renderer/packager.js';
 import { ApiClient } from '../api-client.js';
+import {
+  formatPublishFailure,
+  normalizeApiBaseUrl,
+  printFailure,
+} from '../errors.js';
+import {
+  loadDocsConfig,
+  getExplicitNav,
+  validateNavPaths,
+} from '../config/docs-config.js';
 
 interface PublishOptions {
   docsDir?: string;
+  verbose?: boolean;
 }
 
 /**
@@ -17,6 +27,8 @@ export function parsePublishArgs(args: string[]): PublishOptions {
     const arg = args[i];
     if (arg === '--docs-dir' && i + 1 < args.length) {
       opts.docsDir = args[++i];
+    } else if (arg === '--verbose' || arg === '-v') {
+      opts.verbose = true;
     }
   }
   return opts;
@@ -44,7 +56,6 @@ function validateConfig(configPath: string): {
     return { valid: false, error: 'Config file missing "title:" field' };
   }
 
-  // Extract title (simple YAML parsing for the fields we need)
   const titleMatch = content.match(/title:\s*["']?([^"'\n]+)["']?/);
   const title = titleMatch ? titleMatch[1]!.trim() : 'Documentation';
 
@@ -104,16 +115,33 @@ async function getOIDCToken(): Promise<string | null> {
 export async function handlePublish(args: string[]): Promise<void> {
   const opts = parsePublishArgs(args);
   const docsDir = opts.docsDir || 'docs';
-  const configPath = path.resolve(docsDir, 'nrdocs.yml');
 
-  // Validate config
-  const validation = validateConfig(configPath);
+  let docsConfig;
+  try {
+    docsConfig = loadDocsConfig(docsDir);
+  } catch (e) {
+    console.error(`Error: ${e instanceof Error ? e.message : String(e)}`);
+    process.exit(10);
+  }
+
+  const validation = validateConfig(docsConfig.configPath);
   if (!validation.valid) {
     console.error(`Error: ${validation.error}`);
     process.exit(10);
   }
 
-  // Check CI environment
+  const explicitNav = getExplicitNav(docsConfig.config);
+  if (explicitNav) {
+    const navCheck = validateNavPaths(explicitNav, docsConfig.contentDir);
+    if (!navCheck.valid) {
+      console.error('Error: Invalid content.nav in nrdocs.yml:');
+      for (const err of navCheck.errors) {
+        console.error(`  - ${err}`);
+      }
+      process.exit(10);
+    }
+  }
+
   const ci = detectCI();
 
   if (!ci.inCI) {
@@ -133,7 +161,6 @@ export async function handlePublish(args: string[]): Promise<void> {
     process.exit(12);
   }
 
-  // Get repo info from environment
   const repoInfo = getRepoInfo();
   if (!repoInfo) {
     console.error('Error: GITHUB_REPOSITORY environment variable not set.');
@@ -141,36 +168,46 @@ export async function handlePublish(args: string[]): Promise<void> {
   }
 
   const { owner, repo } = repoInfo;
+  const ownerLower = owner.toLowerCase();
+  const repoLower = repo.toLowerCase();
+  const fullName = `${ownerLower}/${repoLower}`;
   const siteTitle = validation.title || 'Documentation';
-  const apiUrl = validation.apiUrl || process.env['NRDOCS_API_URL'] || '';
+  const rawApiUrl = validation.apiUrl || process.env['NRDOCS_API_URL'] || '';
 
-  if (!apiUrl) {
+  if (!rawApiUrl) {
     console.error('Error: No API URL configured. Set api_url in nrdocs.yml or NRDOCS_API_URL env var.');
     process.exit(10);
   }
 
-  console.log(`Publishing docs for ${owner}/${repo}...`);
+  const { url: apiUrl } = normalizeApiBaseUrl(rawApiUrl);
+
+  console.log(`Publishing docs for ${fullName}...`);
   console.log(`Docs directory: ${docsDir}`);
   console.log(`Site title: ${siteTitle}`);
+  if (opts.verbose) {
+    console.log(`API base: ${apiUrl}`);
+  }
 
-  // Render site
   console.log('Rendering Markdown...');
+  const indexPath = docsConfig.config.content?.index ?? 'index.md';
+  const navOption = explicitNav ?? 'auto';
+
   const site = await renderSite({
-    docsDir,
+    docsDir: docsConfig.contentDir,
     siteTitle,
     baseUrl: apiUrl,
-    owner,
-    repo,
+    owner: ownerLower,
+    repo: repoLower,
+    nav: navOption,
+    indexPath,
   });
 
   console.log(`Rendered ${site.files.length} files.`);
 
-  // Create archive
   console.log('Creating archive...');
   const archive = await createArchive(site.files, site.manifest);
   console.log(`Archive size: ${(archive.length / 1024).toFixed(1)} KB`);
 
-  // Get OIDC token and upload
   console.log('Requesting OIDC token...');
   const token = await getOIDCToken();
   if (!token) {
@@ -181,7 +218,6 @@ export async function handlePublish(args: string[]): Promise<void> {
   console.log('Uploading to nrdocs...');
   const client = new ApiClient(apiUrl, token);
 
-  // Build FormData with archive
   const formData = new FormData();
   formData.append('artifact', new Blob([archive], { type: 'application/gzip' }), 'docs.tar.gz');
   formData.append('metadata', JSON.stringify({
@@ -191,13 +227,54 @@ export async function handlePublish(args: string[]): Promise<void> {
     nrdocs: { cli_version: '0.1.1' },
   }));
 
-  const result = await client.publish(formData);
+  const docsPasswordRaw = process.env['NRDOCS_DOCS_PASSWORD'];
+  if (typeof docsPasswordRaw === 'string' && docsPasswordRaw.length > 0) {
+    formData.append('password', docsPasswordRaw);
+  }
+
+  const result = await client.publish(formData, opts.verbose);
 
   if (result.ok) {
+    const data = result.data as Record<string, unknown> | undefined;
+    const approval = data?.['approval'] as { state?: string } | undefined;
+    const serving = data?.['serving'] as { visible?: boolean; reason?: string; url?: string } | undefined;
+    const access = data?.['access'] as { mode?: string } | undefined;
+
     console.log('Published successfully!');
-    console.log(`View at: ${apiUrl}/${owner}/${repo}/`);
-  } else {
-    console.error(`Error: Upload failed — ${result.error?.message || 'unknown error'}`);
-    process.exit(14);
+    if (approval?.state) {
+      console.log(`Approval: ${approval.state}`);
+    }
+    if (access?.mode) {
+      console.log(`Access:   ${access.mode}`);
+    }
+    if (serving) {
+      if (serving.visible) {
+        console.log(`Serving:  live (${serving.reason ?? 'serving'})`);
+      } else {
+        console.log(`Serving:  not visible (${serving.reason ?? 'unknown'})`);
+        if (serving.reason === 'awaiting_operator_approval') {
+          console.log('');
+          console.log('An operator must approve this repo before docs are visible.');
+          console.log(`  nrdocs approve ${fullName} --access public`);
+        } else if (serving.reason === 'needs_password') {
+          console.log('');
+          console.log('Operator must set a password before password-protected docs are served.');
+          console.log(`  nrdocs password set ${fullName}`);
+        }
+      }
+    }
+    const viewUrl = serving?.url ?? `${apiUrl}/${fullName}/`;
+    console.log(`View at: ${viewUrl}`);
+    return;
   }
+
+  const apiError = result.error ?? { code: 'unknown', message: 'unknown error' };
+  const formatted = formatPublishFailure(apiError, {
+    command: 'publish',
+    apiBaseUrl: apiUrl,
+    fullName,
+    archiveSizeBytes: archive.length,
+  });
+  printFailure(formatted);
+  process.exit(formatted.exitCode);
 }
