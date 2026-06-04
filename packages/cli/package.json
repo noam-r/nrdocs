@@ -1,6 +1,6 @@
 {
   "name": "nrdocs",
-  "version": "0.2.0",
+  "version": "0.2.3",
   "description": "CLI for nrdocs - serverless docs publishing for private GitHub repos",
   "type": "module",
   "bin": {
@@ -8,12 +8,13 @@
   },
   "files": [
     "dist/bin.mjs",
-    "dist/runtime/mermaid.min.js"
+    "dist/runtime/mermaid.min.js",
+    "dist/deploy-worker"
   ],
   "scripts": {
     "build": "tsc",
-    "bundle": "node build.mjs && node scripts/bundle-mermaid.mjs",
-    "prepublishOnly": "node build.mjs && node scripts/bundle-mermaid.mjs",
+    "bundle": "node build.mjs && node scripts/bundle-mermaid.mjs && node scripts/bundle-worker.mjs",
+    "prepublishOnly": "node build.mjs && node scripts/bundle-mermaid.mjs && node scripts/bundle-worker.mjs",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "lint": "echo 'no lint configured yet'"

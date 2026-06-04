@@ -5,12 +5,13 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { renderMarkdown, contentHasMermaid } from './markdown.js';
 import {
-  generateAutoNav,
   extractTitle,
   navConfigToNavItems,
+  navConfigToSidebar,
+  discoverNavEntries,
 } from './navigation.js';
 import type { NavItem } from './navigation.js';
-import type { NavConfigEntry } from './navigation.js';
+import type { NavConfigEntry, NavSidebarEntry } from './navigation.js';
 import { rewriteLinks } from './links.js';
 import { wrapInTemplate } from './template.js';
 import { collectAssets } from './assets.js';
@@ -43,15 +44,22 @@ export interface RenderedFile {
   content: Buffer;
 }
 
-function resolveNavItems(
+function resolveNav(
   resolvedDocsDir: string,
   nav: NavConfigEntry[] | 'auto' | undefined,
   indexPath: string,
-): NavItem[] {
+): { items: NavItem[]; sidebarConfig: NavConfigEntry[] } {
   if (nav && nav !== 'auto' && Array.isArray(nav)) {
-    return navConfigToNavItems(nav, resolvedDocsDir);
+    return {
+      items: navConfigToNavItems(nav, resolvedDocsDir),
+      sidebarConfig: nav,
+    };
   }
-  return generateAutoNav(resolvedDocsDir, indexPath);
+  const sidebarConfig = discoverNavEntries(resolvedDocsDir, { indexPath });
+  return {
+    items: navConfigToNavItems(sidebarConfig, resolvedDocsDir),
+    sidebarConfig,
+  };
 }
 
 /**
@@ -61,7 +69,7 @@ export async function renderSite(options: RenderOptions): Promise<RenderedSite> 
   const { docsDir, siteTitle, baseUrl, owner, repo, nav, indexPath = 'index.md' } = options;
   const resolvedDocsDir = path.resolve(docsDir);
 
-  const navItems = resolveNavItems(resolvedDocsDir, nav, indexPath);
+  const { items: navItems, sidebarConfig } = resolveNav(resolvedDocsDir, nav, indexPath);
   const siteBase = `/${owner}/${repo}/`;
 
   const renderedFiles: RenderedFile[] = [];
@@ -84,10 +92,7 @@ export async function renderSite(options: RenderOptions): Promise<RenderedSite> 
 
     const canonicalUrl = `${baseUrl}${siteBase}${navItem.href}`;
 
-    const navWithActive: NavItem[] = navItems.map((item) => ({
-      ...item,
-      active: item.path === navItem.path,
-    }));
+    const sidebar: NavSidebarEntry[] = navConfigToSidebar(sidebarConfig, navItem.path);
 
     const outputPath = navItem.href === ''
       ? 'index.html'
@@ -97,7 +102,7 @@ export async function renderSite(options: RenderOptions): Promise<RenderedSite> 
       title: pageTitle,
       siteTitle,
       content: html,
-      nav: navWithActive,
+      nav: sidebar,
       canonicalUrl,
       baseUrl: siteBase,
       includeMermaid: pageHasMermaid,

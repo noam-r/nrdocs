@@ -1,15 +1,16 @@
-import { NRDOCS_VERSION } from '@nrdocs/shared';
+import { getCliVersion } from './version.js';
 import { runCommand } from './commands/index.js';
 
 const args = process.argv.slice(2);
+const version = getCliVersion();
 
 if (args.includes('--version') || args.includes('-v')) {
-  console.log(`nrdocs ${NRDOCS_VERSION}`);
+  console.log(`nrdocs ${version}`);
   process.exit(0);
 }
 
 if (args.includes('--help') || args.includes('-h') || args.length === 0) {
-  console.log(`nrdocs ${NRDOCS_VERSION}
+  console.log(`nrdocs ${version}
 
 Usage:
   nrdocs <command> [options]

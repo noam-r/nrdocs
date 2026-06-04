@@ -6,6 +6,7 @@ import * as path from 'node:path';
 import YAML from 'yaml';
 import {
   discoverNavEntries,
+  flattenNavPaths,
   type NavConfigEntry,
 } from '../renderer/navigation.js';
 
@@ -72,16 +73,21 @@ export function parseNavEntries(nav: unknown): NavConfigEntry[] {
   const entries: NavConfigEntry[] = [];
   for (const item of nav) {
     if (!item || typeof item !== 'object') {
-      throw new Error('Each nav entry must have title and path');
+      throw new Error('Each nav entry must be an object with title');
     }
     const rec = item as Record<string, unknown>;
-    if (typeof rec['title'] !== 'string' || typeof rec['path'] !== 'string') {
-      throw new Error('Each nav entry must have title and path strings');
+    if (typeof rec['title'] !== 'string') {
+      throw new Error('Each nav entry must have a title string');
     }
-    const entry: NavConfigEntry = {
-      title: rec['title'],
-      path: rec['path'].replace(/\\/g, '/'),
-    };
+    const hasPath = typeof rec['path'] === 'string';
+    const hasChildren = Array.isArray(rec['children']) && rec['children'].length > 0;
+    if (!hasPath && !hasChildren) {
+      throw new Error('Each nav entry needs path and/or children');
+    }
+    const entry: NavConfigEntry = { title: rec['title'] };
+    if (hasPath) {
+      entry.path = (rec['path'] as string).replace(/\\/g, '/');
+    }
     if (Array.isArray(rec['children'])) {
       entry.children = parseNavEntries(rec['children']);
     }
@@ -112,15 +118,21 @@ export function validateNavPaths(
 
   const walk = (list: NavConfigEntry[]) => {
     for (const e of list) {
-      const p = e.path.replace(/\\/g, '/');
-      if (seen.has(p)) {
-        errors.push(`Duplicate nav path: ${p}`);
+      if (!e.path && !e.children?.length) {
+        errors.push(`Nav entry "${e.title}" has no path or children`);
+        continue;
       }
-      seen.add(p);
+      if (e.path) {
+        const p = e.path.replace(/\\/g, '/');
+        if (seen.has(p)) {
+          errors.push(`Duplicate nav path: ${p}`);
+        }
+        seen.add(p);
 
-      const full = path.join(contentDir, p);
-      if (!fs.existsSync(full)) {
-        errors.push(`Nav path not found: ${p}`);
+        const full = path.join(contentDir, p);
+        if (!fs.existsSync(full)) {
+          errors.push(`Nav path not found: ${p}`);
+        }
       }
       if (e.children?.length) walk(e.children);
     }
@@ -144,9 +156,10 @@ export function resolveContentIndex(
   navEntries: NavConfigEntry[],
   indexPath = 'index.md',
 ): string {
+  const paths = flattenNavPaths(navEntries);
   const preferred = indexPath.replace(/\\/g, '/');
-  if (navEntries.some((e) => e.path === preferred)) return preferred;
-  return navEntries[0]!.path;
+  if (paths.includes(preferred)) return preferred;
+  return paths[0]!;
 }
 
 /**
@@ -188,9 +201,10 @@ export function generateNavInConfig(
   const loaded = loadDocsConfig(docsDir);
   const indexPath = options?.indexPath ?? loaded.config.content?.index ?? 'index.md';
   const entries = discoverNavEntries(loaded.contentDir, { indexPath });
-  if (entries.length === 0) return 0;
+  const pageCount = flattenNavPaths(entries).length;
+  if (pageCount === 0) return 0;
   writeNavToConfig(loaded.configPath, entries, { ...options, indexPath });
-  return entries.length;
+  return pageCount;
 }
 
 /**

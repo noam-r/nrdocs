@@ -5,12 +5,16 @@ import * as os from 'node:os';
 import {
   sortNavPaths,
   discoverNavEntries,
+  groupNavEntriesByFolders,
   navConfigToNavItems,
+  navConfigToSidebar,
+  flattenNavPaths,
 } from '../renderer/navigation.js';
 import {
   loadDocsConfig,
   writeNavToConfig,
   getExplicitNav,
+  parseNavEntries,
   validateNavPaths,
   resolveContentIndex,
   generateNavInConfig,
@@ -38,13 +42,53 @@ describe('discoverNavEntries', () => {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
-  it('orders numbered prefixes after index', () => {
+  it('orders numbered prefixes after index at root', () => {
     fs.writeFileSync(path.join(tmpDir, 'index.md'), '# Home');
     fs.writeFileSync(path.join(tmpDir, '00-intro.md'), '# Intro');
     fs.writeFileSync(path.join(tmpDir, '01-setup.md'), '# Setup');
 
     const entries = discoverNavEntries(tmpDir);
-    expect(entries.map((e) => e.path)).toEqual(['index.md', '00-intro.md', '01-setup.md']);
+    expect(flattenNavPaths(entries)).toEqual(['index.md', '00-intro.md', '01-setup.md']);
+    expect(entries.every((e) => e.path)).toBe(true);
+  });
+
+  it('groups files under top-level folders into sections', () => {
+    fs.writeFileSync(path.join(tmpDir, 'index.md'), '# Home');
+    fs.mkdirSync(path.join(tmpDir, 'guides'), { recursive: true });
+    fs.writeFileSync(path.join(tmpDir, 'guides', 'intro.md'), '# Intro');
+    fs.writeFileSync(path.join(tmpDir, 'guides', 'install.md'), '# Install');
+
+    const entries = discoverNavEntries(tmpDir);
+    expect(entries).toHaveLength(2);
+    expect(entries[0]!.path).toBe('index.md');
+    expect(entries[1]!.title).toBe('Guides');
+    expect(entries[1]!.children?.map((c) => c.path)).toEqual([
+      'guides/install.md',
+      'guides/intro.md',
+    ]);
+  });
+});
+
+describe('groupNavEntriesByFolders', () => {
+  let tmpDir: string;
+
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'nrdocs-group-'));
+    fs.writeFileSync(path.join(tmpDir, 'index.md'), '# Home');
+    fs.mkdirSync(path.join(tmpDir, 'api'), { recursive: true });
+    fs.mkdirSync(path.join(tmpDir, 'guides'), { recursive: true });
+    fs.writeFileSync(path.join(tmpDir, 'api', 'a.md'), '# API');
+    fs.writeFileSync(path.join(tmpDir, 'guides', 'b.md'), '# Guide');
+  });
+
+  afterEach(() => {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it('sorts folder sections alphabetically after root pages', () => {
+    const files = ['api/a.md', 'guides/b.md', 'index.md'];
+    const grouped = groupNavEntriesByFolders(files, tmpDir, 'index.md');
+    expect(grouped.map((e) => e.title)).toEqual(['Home', 'Api', 'Guides']);
   });
 });
 
@@ -142,6 +186,24 @@ describe('renderSite explicit nav order', () => {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
+  it('renders sidebar sections from folder-grouped auto nav', async () => {
+    fs.mkdirSync(path.join(tmpDir, 'guide'), { recursive: true });
+    fs.writeFileSync(path.join(tmpDir, 'guide', 'page.md'), '# Guide page\n');
+
+    const site = await renderSite({
+      docsDir: tmpDir,
+      siteTitle: 'Test',
+      baseUrl: 'https://example.com',
+      owner: 'o',
+      repo: 'r',
+      nav: 'auto',
+    });
+
+    const homeHtml = site.files.find((f) => f.path === 'index.html')!.content.toString('utf-8');
+    expect(homeHtml).toContain('<details class="nav-details"');
+    expect(homeHtml).toContain('<summary>Guide</summary>');
+  });
+
   it('renders pages in explicit nav order', async () => {
     const explicitNav = [
       { title: 'Last', path: 'zzz.md' },
@@ -180,5 +242,57 @@ describe('navConfigToNavItems', () => {
   it('maps paths to hrefs', () => {
     const items = navConfigToNavItems([{ title: 'Page', path: 'page.md' }], tmpDir);
     expect(items[0]!.href).toBe('page/');
+  });
+
+  it('flattens section children for page list', () => {
+    fs.writeFileSync(path.join(tmpDir, 'index.md'), '# Home');
+    fs.mkdirSync(path.join(tmpDir, 'guides'), { recursive: true });
+    fs.writeFileSync(path.join(tmpDir, 'guides', 'intro.md'), '# Intro');
+    const items = navConfigToNavItems(
+      [
+        { title: 'Home', path: 'index.md' },
+        {
+          title: 'Guides',
+          children: [{ title: 'Intro', path: 'guides/intro.md' }],
+        },
+      ],
+      tmpDir,
+    );
+    expect(items.map((i) => i.path)).toEqual(['index.md', 'guides/intro.md']);
+  });
+});
+
+describe('navConfigToSidebar', () => {
+  it('marks active link and opens section containing it', () => {
+    const tree = navConfigToSidebar(
+      [
+        { title: 'Home', path: 'index.md' },
+        {
+          title: 'Guides',
+          children: [
+            { title: 'Intro', path: 'guides/intro.md' },
+            { title: 'Setup', path: 'guides/setup.md' },
+          ],
+        },
+      ],
+      'guides/setup.md',
+    );
+    expect(tree[1]!.kind).toBe('section');
+    if (tree[1]!.kind === 'section') {
+      expect(tree[1]!.open).toBe(true);
+      const setup = tree[1]!.children[1]!;
+      expect(setup.kind).toBe('link');
+      if (setup.kind === 'link') expect(setup.active).toBe(true);
+    }
+  });
+});
+
+describe('parseNavEntries sections', () => {
+  it('accepts section-only entries without path', () => {
+    const entries = parseNavEntries([
+      { title: 'Overview', children: [{ title: 'Home', path: 'index.md' }] },
+    ]);
+    expect(entries[0]!.path).toBeUndefined();
+    expect(entries[0]!.children![0]!.path).toBe('index.md');
   });
 });

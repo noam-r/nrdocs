@@ -357,8 +357,8 @@ describe('Template', () => {
       siteTitle: 'Docs',
       content: '<p>Content</p>',
       nav: [
-        { title: 'Home', path: 'index.md', href: '' },
-        { title: 'Guide', path: 'guide.md', href: 'guide/', active: true },
+        { kind: 'link', title: 'Home', path: 'index.md', href: '' },
+        { kind: 'link', title: 'Guide', path: 'guide.md', href: 'guide/', active: true },
       ],
       canonicalUrl: 'https://example.com/guide/',
       baseUrl: '/org/repo/',
@@ -366,6 +366,28 @@ describe('Template', () => {
     expect(html).toContain('Home');
     expect(html).toContain('Guide');
     expect(html).toContain('class="active"');
+  });
+
+  it('renders collapsible nav sections', () => {
+    const html = wrapInTemplate({
+      title: 'Test',
+      siteTitle: 'Docs',
+      content: '<p>Content</p>',
+      nav: [
+        {
+          kind: 'section',
+          title: 'Guides',
+          open: true,
+          children: [
+            { kind: 'link', title: 'Intro', path: 'guides/intro.md', href: 'guides/intro/' },
+          ],
+        },
+      ],
+      canonicalUrl: 'https://example.com/',
+      baseUrl: '/',
+    });
+    expect(html).toContain('<details class="nav-details" open>');
+    expect(html).toContain('<summary>Guides</summary>');
   });
 
   it('includes site title in sidebar', () => {

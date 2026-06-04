@@ -103,22 +103,34 @@ function normalizeUrl(url: string): string {
   return normalized;
 }
 
+/** Worker bundle shipped with the npm CLI (`dist/deploy-worker`). */
+function packagedWorkerDir(): string | null {
+  const cliEntry = process.argv[1];
+  if (!cliEntry) return null;
+  const distDir = path.dirname(path.resolve(cliEntry));
+  const dir = path.join(distDir, 'deploy-worker');
+  if (fs.existsSync(path.join(dir, 'index.js'))) return dir;
+  return null;
+}
+
 /**
- * Finds the packages/worker directory by looking relative to the CLI package.
+ * Finds the Worker project for Wrangler (bundled in npm CLI, or monorepo dev checkout).
  */
 function findWorkerDir(): string | null {
-  // Try common locations
-  const candidates = [
+  const packaged = packagedWorkerDir();
+  if (packaged) return packaged;
+
+  const monorepoCandidates = [
     path.resolve('packages/worker'),
     path.resolve('../worker'),
   ];
+  if (process.argv[1]) {
+    const cliDir = path.dirname(path.resolve(process.argv[1]));
+    monorepoCandidates.push(path.resolve(cliDir, '../../../worker'));
+    monorepoCandidates.push(path.resolve(cliDir, '../../../../packages/worker'));
+  }
 
-  // Also try relative to the CLI dist directory
-  const cliDir = process.argv[1] ? path.dirname(process.argv[1]) : process.cwd();
-  candidates.push(path.resolve(cliDir, '../../../worker'));
-  candidates.push(path.resolve(cliDir, '../../../../packages/worker'));
-
-  for (const candidate of candidates) {
+  for (const candidate of monorepoCandidates) {
     if (fs.existsSync(path.join(candidate, 'src', 'index.ts'))) {
       return candidate;
     }
@@ -126,8 +138,32 @@ function findWorkerDir(): string | null {
   return null;
 }
 
+function isDocsContentRepo(cwd: string): boolean {
+  return (
+    fs.existsSync(path.join(cwd, 'docs', 'nrdocs.yml')) &&
+    !fs.existsSync(path.join(cwd, 'packages', 'worker', 'src', 'index.ts'))
+  );
+}
+
+function workerUsesBundledEntry(workerDir: string): boolean {
+  return fs.existsSync(path.join(workerDir, 'index.js'));
+}
+
 export async function handleDeploy(args: string[]): Promise<void> {
   const opts = parseDeployArgs(args);
+
+  console.log('nrdocs deploy — Cloudflare infrastructure (Worker, D1, R2)');
+  console.log('This does not publish markdown from the current repo.');
+  console.log('Repo owners publish docs via GitHub Actions: nrdocs publish');
+  console.log('');
+
+  if (isDocsContentRepo(process.cwd())) {
+    console.warn(
+      'Note: This directory looks like a documentation repository (docs/nrdocs.yml).',
+    );
+    console.warn('You are deploying the nrdocs hosting stack, not site content here.');
+    console.log('');
+  }
 
   // Check wrangler is available
   if (!checkWrangler()) {
@@ -173,7 +209,12 @@ export async function handleDeploy(args: string[]): Promise<void> {
     if (!baseUrl) { console.error('Error: --base-url is required in non-interactive mode.'); process.exit(2); }
   } else {
     instance = instance || await prompt('Instance name', 'default');
-    baseUrl = baseUrl || await prompt('Docs base URL', 'https://docs.example.com');
+    baseUrl =
+      baseUrl ||
+      (await prompt(
+        'Public site URL (readers visit this host)',
+        'https://docs.example.com',
+      ));
   }
 
   // Normalize and validate base URL
@@ -224,10 +265,12 @@ export async function handleDeploy(args: string[]): Promise<void> {
   // Find the worker package directory
   const workerDir = findWorkerDir();
   if (!workerDir) {
-    console.error('Error: Cannot find packages/worker directory.');
-    console.error('Run nrdocs deploy from the nrdocs project root.');
+    console.error('Error: Cannot find the nrdocs Worker bundle.');
+    console.error('Reinstall the CLI (npm install -g nrdocs) or run from the nrdocs monorepo.');
     process.exit(4);
   }
+
+  const workerMain = workerUsesBundledEntry(workerDir) ? 'index.js' : 'src/index.ts';
 
   // Step 1: Create or verify R2 bucket
   console.log(`Creating R2 bucket ${names.r2}...`);
@@ -267,7 +310,7 @@ export async function handleDeploy(args: string[]): Promise<void> {
 
   // Step 3: Generate wrangler.toml in the worker directory (needed before migrations)
   const wranglerToml = `name = "${names.worker}"
-main = "src/index.ts"
+main = "${workerMain}"
 compatibility_date = "2026-05-07"
 
 [[d1_databases]]
@@ -368,11 +411,13 @@ BASE_URL = "${baseUrl}"
   }
 
   console.log('');
-  console.log('Deployment complete.');
-  console.log(`  API:  ${baseUrl}/api`);
-  console.log(`  Docs: ${baseUrl}/`);
+  console.log('Infrastructure deployment complete.');
+  console.log(`  API:         ${baseUrl}/api`);
+  console.log(`  Public site: ${baseUrl}/`);
   console.log('');
-  console.log('Next:');
+  console.log('Next (operator):');
   console.log(`  nrdocs rules add 'OWNER/*' --access password`);
   console.log('  nrdocs repos');
+  console.log('');
+  console.log('Repo owners publish content with GitHub Actions (nrdocs publish), not deploy.');
 }

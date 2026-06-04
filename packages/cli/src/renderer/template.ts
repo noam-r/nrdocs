@@ -1,13 +1,13 @@
 /**
  * HTML template generation for rendered documentation pages.
  */
-import type { NavItem } from './navigation.js';
+import type { NavSidebarEntry } from './navigation.js';
 
 export interface TemplateOptions {
   title: string;
   siteTitle: string;
   content: string;
-  nav: NavItem[];
+  nav: NavSidebarEntry[];
   canonicalUrl: string;
   baseUrl: string;
   /** Page contains mermaid diagrams */
@@ -153,6 +153,13 @@ nav.sidebar .site-title{font-weight:700;font-size:1.1rem;color:var(--text);flex:
 #theme-toggle:hover{background:var(--bg-active)}
 nav.sidebar ul{list-style:none}
 nav.sidebar li{margin-bottom:0.25rem}
+nav.sidebar .nav-section{margin-top:0.5rem}
+nav.sidebar .nav-section>summary{cursor:pointer;font-size:0.8rem;font-weight:600;text-transform:uppercase;letter-spacing:0.04em;color:var(--toc-title);padding:0.35rem 0.6rem;list-style:none;border-radius:4px;user-select:none}
+nav.sidebar .nav-section>summary::-webkit-details-marker{display:none}
+nav.sidebar .nav-section>summary::before{content:"▸";display:inline-block;margin-right:0.35rem;transition:transform 0.15s ease}
+nav.sidebar .nav-section[open]>summary::before{transform:rotate(90deg)}
+nav.sidebar .nav-section>summary:hover{background:var(--bg-hover);color:var(--text)}
+nav.sidebar .nav-section ul{padding-left:0.25rem;margin-top:0.15rem;margin-bottom:0.35rem}
 nav.sidebar a{color:var(--text-muted);text-decoration:none;padding:0.3rem 0.6rem;display:block;border-radius:4px;font-size:0.95rem}
 nav.sidebar a:hover{background:var(--bg-hover);color:var(--text)}
 nav.sidebar a.active{background:var(--bg-active);color:var(--link-active);font-weight:500}
@@ -194,7 +201,7 @@ footer a{color:var(--link)}
 <button type="button" id="theme-toggle" aria-label="Toggle color theme" title="Toggle light/dark mode">&#9789;</button>
 </div>
 <ul>
-${renderNavItems(nav, baseUrl)}
+${renderNavTree(nav, baseUrl)}
 </ul>
 </nav>
 <div class="content-wrapper">
@@ -248,14 +255,22 @@ ${items}
 </aside>`;
 }
 
-function renderNavItems(items: NavItem[], baseUrl: string): string {
-  return items
-    .map((item) => {
-      const href = baseUrl + item.href;
-      const activeClass = item.active ? ' class="active"' : '';
-      return `<li><a href="${escapeHtml(href)}"${activeClass}>${escapeHtml(item.title)}</a></li>`;
-    })
-    .join('\n');
+function renderNavTree(entries: NavSidebarEntry[], baseUrl: string): string {
+  return entries.map((entry) => renderNavNode(entry, baseUrl)).join('\n');
+}
+
+function renderNavNode(entry: NavSidebarEntry, baseUrl: string): string {
+  if (entry.kind === 'link') {
+    const href = baseUrl + entry.href;
+    const activeClass = entry.active ? ' class="active"' : '';
+    return `<li><a href="${escapeHtml(href)}"${activeClass}>${escapeHtml(entry.title)}</a></li>`;
+  }
+
+  const openAttr = entry.open !== false ? ' open' : '';
+  const childItems = entry.children.map((c) => renderNavNode(c, baseUrl)).join('\n');
+  return `<li class="nav-section"><details class="nav-details"${openAttr}><summary>${escapeHtml(entry.title)}</summary><ul>
+${childItems}
+</ul></details></li>`;
 }
 
 function escapeHtml(str: string): string {
