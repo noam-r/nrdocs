@@ -75,11 +75,15 @@ site:
   title: Repo A Docs
   requested_access: password
 
+export: true
+
 content:
   source_dir: .
   index: index.md
   nav: auto
 ```
+
+`export` (optional, default `true`): when `true`, publish bundles original Markdown for nav pages under `_nrdocs/sources/` plus `_nrdocs/export/site.zip`, and rendered HTML includes export download links. When `false`, export UI and source artifacts are omitted.
 
 Because the config file lives inside `docs/`, `content.source_dir: .` means the docs directory itself.
 
@@ -93,6 +97,7 @@ Repo owners may control:
 - Navigation preference
 - Markdown page content
 - Requested access mode
+- Whether readers may download Markdown exports (`export`)
 ```
 
 Repo owners may not control:

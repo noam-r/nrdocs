@@ -11,6 +11,7 @@ import {
   loadDocsConfig,
   getExplicitNav,
   validateNavPaths,
+  isExportEnabled,
 } from '../config/docs-config.js';
 import { getOIDCToken } from '../github-oidc.js';
 
@@ -199,6 +200,7 @@ export async function handlePublish(args: string[]): Promise<void> {
     nav: navOption,
     indexPath,
     allowUnlistedAssets,
+    exportEnabled: isExportEnabled(docsConfig.config),
   });
 
   console.log(`Rendered ${site.files.length} files.`);

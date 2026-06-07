@@ -20,6 +20,11 @@ import {
   MERMAID_ARTIFACT_PATH,
   mermaidScriptSrcForOutput,
 } from './mermaid-runtime.js';
+import { buildSiteZip } from './site-zip.js';
+import {
+  NRDOCS_EXPORT_SITE_ZIP,
+  nrdocsSourceArtifactPath,
+} from '@nrdocs/shared';
 
 export type { NavConfigEntry };
 
@@ -34,6 +39,8 @@ export interface RenderOptions {
   indexPath?: string;
   /** When true, non-whitelist asset extensions may be included (operator rule consent). */
   allowUnlistedAssets?: boolean;
+  /** When true, bundle Markdown sources and show export UI (default true). */
+  exportEnabled?: boolean;
 }
 
 export interface RenderedSite {
@@ -68,13 +75,24 @@ function resolveNav(
  * Renders the full documentation site from Markdown sources.
  */
 export async function renderSite(options: RenderOptions): Promise<RenderedSite> {
-  const { docsDir, siteTitle, baseUrl, owner, repo, nav, indexPath = 'index.md' } = options;
+  const {
+    docsDir,
+    siteTitle,
+    baseUrl,
+    owner,
+    repo,
+    nav,
+    indexPath = 'index.md',
+    exportEnabled = true,
+  } = options;
   const resolvedDocsDir = path.resolve(docsDir);
 
   const { items: navItems, sidebarConfig } = resolveNav(resolvedDocsDir, nav, indexPath);
   const siteBase = `/${owner}/${repo}/`;
+  const siteZipDownloadUrl = exportEnabled ? `${siteBase}${NRDOCS_EXPORT_SITE_ZIP}` : null;
 
   const renderedFiles: RenderedFile[] = [];
+  const zipEntries: Array<{ name: string; data: Buffer }> = [];
   let siteHasMermaid = false;
 
   for (const navItem of navItems) {
@@ -100,6 +118,23 @@ export async function renderSite(options: RenderOptions): Promise<RenderedSite> 
       ? 'index.html'
       : navItem.href.replace(/\/$/, '') + '/index.html';
 
+    const sourceArtifactPath = nrdocsSourceArtifactPath(navItem.path);
+    const pageSourceDownloadUrl = exportEnabled
+      ? `${siteBase}${sourceArtifactPath.split('/').map(encodeURIComponent).join('/')}`
+      : null;
+
+    if (exportEnabled) {
+      const sourceContent = fs.readFileSync(filePath);
+      renderedFiles.push({
+        path: sourceArtifactPath,
+        content: sourceContent,
+      });
+      zipEntries.push({
+        name: navItem.path.replace(/\\/g, '/'),
+        data: sourceContent,
+      });
+    }
+
     const fullHtml = wrapInTemplate({
       title: pageTitle,
       siteTitle,
@@ -109,11 +144,21 @@ export async function renderSite(options: RenderOptions): Promise<RenderedSite> 
       baseUrl: siteBase,
       includeMermaid: pageHasMermaid,
       mermaidScriptSrc: pageHasMermaid ? mermaidScriptSrcForOutput(outputPath) : null,
+      exportEnabled,
+      pageSourceDownloadUrl,
+      siteZipDownloadUrl,
     });
 
     renderedFiles.push({
       path: outputPath,
       content: Buffer.from(fullHtml, 'utf-8'),
+    });
+  }
+
+  if (exportEnabled && zipEntries.length > 0) {
+    renderedFiles.push({
+      path: NRDOCS_EXPORT_SITE_ZIP,
+      content: buildSiteZip(zipEntries),
     });
   }
 
@@ -145,10 +190,12 @@ export async function renderSite(options: RenderOptions): Promise<RenderedSite> 
     baseUrl,
     generatedAt: new Date().toISOString(),
     fileCount: renderedFiles.length,
+    export: { enabled: exportEnabled },
     pages: navItems.map((item) => ({
       title: item.title,
       path: item.href === '' ? 'index.html' : item.href.replace(/\/$/, '') + '/index.html',
       sourcePath: item.path,
+      sourceArtifactPath: exportEnabled ? nrdocsSourceArtifactPath(item.path) : undefined,
     })),
   };
 

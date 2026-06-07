@@ -449,6 +449,9 @@ describe('Template', () => {
       baseUrl: '/',
     });
     expect(html).toContain('id="theme-toggle"');
+    expect(html).toContain('class="icon-btn"');
+    expect(html).toContain('stroke-width="1.75"');
+    expect(html).not.toMatch(/&#9789;|\\u263E|\\u2600/);
     expect(html).toContain('--text:');
     expect(html).toContain('data-theme');
     expect(html).toContain('nrdocs-theme');
@@ -483,6 +486,45 @@ describe('Template', () => {
   it('computes relative mermaid script paths by page depth', () => {
     expect(mermaidScriptSrcForOutput('index.html')).toBe('_nrdocs/mermaid.min.js');
     expect(mermaidScriptSrcForOutput('guide/index.html')).toBe('../_nrdocs/mermaid.min.js');
+  });
+
+  it('includes export menu in right panel when exportEnabled', () => {
+    const html = wrapInTemplate({
+      title: 'Page',
+      siteTitle: 'Docs',
+      content: '# Hi',
+      nav: [],
+      canonicalUrl: 'https://example.com/o/r/',
+      baseUrl: '/o/r/',
+      exportEnabled: true,
+      pageSourceDownloadUrl: '/o/r/_nrdocs/sources/index.md',
+      siteZipDownloadUrl: '/o/r/_nrdocs/export/site.zip',
+    });
+    expect(html).toContain('id="export-toggle"');
+    expect(html).toContain('Page (.md)');
+    expect(html).toContain('Site (.zip)');
+    expect(html).toContain('toc-panel');
+    expect(html).toContain('toc-toolbar');
+    expect(html).toContain('M12 4.75v9.5');
+    expect(html).toContain('_nrdocs/sources/index.md');
+    expect(html).not.toContain('export-links');
+  });
+
+  it('omits export control when exportEnabled is false', () => {
+    const html = wrapInTemplate({
+      title: 'Page',
+      siteTitle: 'Docs',
+      content: '',
+      nav: [],
+      canonicalUrl: 'https://example.com/',
+      baseUrl: '/',
+      exportEnabled: false,
+    });
+    expect(html).not.toContain('id="export-toggle"');
+    expect(html).not.toContain('Page (.md)');
+    expect(html).toContain('id="theme-toggle"');
+    expect(html).toContain('toc-toolbar');
+    expect(html).toContain('M20.25 14.15');
   });
 });
 
@@ -542,6 +584,13 @@ describe('Full render pipeline', () => {
     expect(site.manifest['version']).toBe(1);
     expect(site.manifest['owner']).toBe('testorg');
     expect(site.manifest['repo']).toBe('testrepo');
+    expect(site.manifest['export']).toEqual({ enabled: true });
+
+    const sourceFile = site.files.find((f) => f.path === '_nrdocs/sources/index.md');
+    expect(sourceFile).toBeDefined();
+    expect(sourceFile!.content.toString('utf-8')).toContain('# Welcome');
+    const zipFile = site.files.find((f) => f.path === '_nrdocs/export/site.zip');
+    expect(zipFile).toBeDefined();
 
     // Check index.html exists
     const indexFile = site.files.find((f) => f.path === 'index.html');
@@ -635,5 +684,24 @@ describe('Full render pipeline', () => {
     });
 
     expect(site.files.find((f) => f.path === '_nrdocs/mermaid.min.js')).toBeUndefined();
+  });
+
+  it('skips export artifacts when exportEnabled is false', async () => {
+    fs.writeFileSync(path.join(tmpDir, 'index.md'), '# Home\n');
+
+    const site = await renderSite({
+      docsDir: tmpDir,
+      siteTitle: 'Test',
+      baseUrl: 'https://example.com',
+      owner: 'org',
+      repo: 'repo',
+      exportEnabled: false,
+    });
+
+    expect(site.manifest['export']).toEqual({ enabled: false });
+    expect(site.files.some((f) => f.path.startsWith('_nrdocs/sources/'))).toBe(false);
+    expect(site.files.some((f) => f.path === '_nrdocs/export/site.zip')).toBe(false);
+    const indexHtml = site.files.find((f) => f.path === 'index.html')!.content.toString('utf-8');
+    expect(indexHtml).not.toContain('id="export-toggle"');
   });
 });

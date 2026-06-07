@@ -27,6 +27,7 @@ vi.mock('../config/docs-config.js', () => ({
   }),
   getExplicitNav: vi.fn().mockReturnValue(null),
   validateNavPaths: vi.fn().mockReturnValue({ valid: true, errors: [] }),
+  isExportEnabled: vi.fn().mockReturnValue(true),
 }));
 
 vi.mock('node:fs', () => ({

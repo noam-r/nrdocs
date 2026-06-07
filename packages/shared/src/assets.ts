@@ -44,12 +44,39 @@ export function getExtensionFromPath(filePath: string): string | null {
   return basename.slice(lastDot).toLowerCase();
 }
 
+/** Prefix for published Markdown sources (export). */
+export const NRDOCS_SOURCES_PREFIX = '_nrdocs/sources/';
+
+/** Path to the all-pages Markdown zip in artifacts. */
+export const NRDOCS_EXPORT_SITE_ZIP = '_nrdocs/export/site.zip';
+
 /**
- * True for platform-generated paths under _nrdocs/ (e.g. mermaid.min.js).
+ * True for export bundle paths (_nrdocs/sources/, _nrdocs/export/).
+ */
+export function isNrdocsExportArtifactPath(filePath: string): boolean {
+  const normalized = filePath.replace(/\\/g, '/');
+  return (
+    normalized.startsWith(NRDOCS_SOURCES_PREFIX) ||
+    normalized.startsWith('_nrdocs/export/')
+  );
+}
+
+/**
+ * True for platform-generated paths under _nrdocs/ (e.g. mermaid.min.js), excluding export bundles.
  */
 export function isPlatformRuntimePath(filePath: string): boolean {
   const normalized = filePath.replace(/\\/g, '/');
-  return normalized.startsWith('_nrdocs/');
+  if (!normalized.startsWith('_nrdocs/')) return false;
+  if (isNrdocsExportArtifactPath(normalized)) return false;
+  return true;
+}
+
+/**
+ * Artifact path for a nav page's source Markdown.
+ */
+export function nrdocsSourceArtifactPath(sourcePath: string): string {
+  const normalized = sourcePath.replace(/\\/g, '/');
+  return `${NRDOCS_SOURCES_PREFIX}${normalized}`;
 }
 
 /**
@@ -90,7 +117,7 @@ export function validateAssetFilePath(
     return { ok: true, classification: 'whitelisted' };
   }
 
-  if (isPlatformRuntimePath(filePath)) {
+  if (isNrdocsExportArtifactPath(filePath) || isPlatformRuntimePath(filePath)) {
     return { ok: true, classification: 'whitelisted' };
   }
 

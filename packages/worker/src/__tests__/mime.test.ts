@@ -61,6 +61,10 @@ describe('getMimeType', () => {
     expect(getMimeType('bundle.zip')).toBe('application/zip');
   });
 
+  it('returns correct MIME type for .md', () => {
+    expect(getMimeType('_nrdocs/sources/index.md')).toBe('text/markdown; charset=utf-8');
+  });
+
   it('returns correct MIME type for .js', () => {
     expect(getMimeType('_nrdocs/mermaid.min.js')).toBe('text/javascript; charset=utf-8');
     expect(getMimeType('file.js')).toBe('text/javascript; charset=utf-8');

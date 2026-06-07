@@ -4,6 +4,8 @@ import {
   classifyAssetExtension,
   validateAssetFilePath,
   findUnlistedAssetPaths,
+  isNrdocsExportArtifactPath,
+  nrdocsSourceArtifactPath,
 } from '../assets.js';
 
 describe('asset extension policy', () => {
@@ -36,6 +38,14 @@ describe('asset extension policy', () => {
     const r = validateAssetFilePath('schemas/data.zip', {});
     expect(r.ok).toBe(false);
     expect(r.code).toBe('EXTENSION_NOT_PERMITTED');
+  });
+
+  it('allows export source and site zip under _nrdocs/', () => {
+    expect(isNrdocsExportArtifactPath('_nrdocs/sources/index.md')).toBe(true);
+    expect(isNrdocsExportArtifactPath('_nrdocs/export/site.zip')).toBe(true);
+    expect(validateAssetFilePath('_nrdocs/sources/guide.md').ok).toBe(true);
+    expect(validateAssetFilePath('_nrdocs/export/site.zip').ok).toBe(true);
+    expect(nrdocsSourceArtifactPath('docs/page.md')).toBe('_nrdocs/sources/docs/page.md');
   });
 
   it('findUnlistedAssetPaths skips manifest and whitelisted files', () => {

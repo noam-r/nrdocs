@@ -13,6 +13,8 @@ import {
 export type NavConfig = 'auto' | NavConfigEntry[];
 
 export interface DocsConfig {
+  /** When false, disables Markdown export UI and omits source files from artifacts. Default true when omitted. */
+  export?: boolean;
   site?: {
     title?: string;
     description?: string;
@@ -27,6 +29,13 @@ export interface DocsConfig {
   request?: {
     access?: string;
   };
+}
+
+/**
+ * Returns whether Markdown export is enabled for this repo (default true).
+ */
+export function isExportEnabled(config: DocsConfig): boolean {
+  return config.export !== false;
 }
 
 export interface LoadDocsConfigResult {

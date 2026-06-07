@@ -8,6 +8,11 @@ import { findRepoByFullName } from '../db/repos.js';
 import { getActivePassword } from '../db/passwords.js';
 import { getArtifactFile } from '../artifacts.js';
 import { findBuildById } from '../db/builds.js';
+import {
+  isNrdocsExportArtifactPath,
+  NRDOCS_EXPORT_SITE_ZIP,
+  NRDOCS_SOURCES_PREFIX,
+} from '@nrdocs/shared';
 import { getMimeType, getSecurityHeaders } from '../mime.js';
 import { resolveServingPath } from '../path-resolver.js';
 import { findSessionForRepo, normalizeRepoPath } from '../session.js';
@@ -131,20 +136,72 @@ export async function handleServe(
         return notFound();
       }
 
+      if (isNrdocsExportArtifactPath(filePath)) {
+        const exportAllowed = await isExportEnabledInManifest(
+          env,
+          repoRecord.id,
+          build.id,
+        );
+        if (!exportAllowed) {
+          return notFound();
+        }
+      }
+
       // Determine MIME type
       const mimeType = getMimeType(filePath) ?? 'application/octet-stream';
       const securityHeaders = getSecurityHeaders(filePath);
+      const headers: Record<string, string> = {
+        'Content-Type': mimeType,
+        'Cache-Control': 'public, max-age=300',
+        ...securityHeaders,
+      };
+
+      const attachmentName = exportAttachmentFilename(filePath);
+      if (attachmentName) {
+        const safe = attachmentName.replace(/["\\]/g, '_');
+        headers['Content-Disposition'] = `attachment; filename="${safe}"`;
+      }
 
       return new Response(file.body, {
         status: 200,
-        headers: {
-          'Content-Type': mimeType,
-          'Cache-Control': 'public, max-age=300',
-          ...securityHeaders,
-        },
+        headers,
       });
     }
   }
+}
+
+/** Reads export.enabled from the publish manifest (false when absent or legacy). */
+async function isExportEnabledInManifest(
+  env: Env,
+  repoId: string,
+  buildId: string,
+): Promise<boolean> {
+  const manifestFile = await getArtifactFile(
+    env.ARTIFACTS,
+    repoId,
+    buildId,
+    'nrdocs-manifest.json',
+  );
+  if (!manifestFile) return false;
+
+  try {
+    const manifest = JSON.parse(await manifestFile.text()) as {
+      export?: { enabled?: boolean };
+    };
+    return manifest.export?.enabled === true;
+  } catch {
+    return false;
+  }
+}
+
+/** Filename for Content-Disposition on export artifact downloads. */
+function exportAttachmentFilename(filePath: string): string | null {
+  if (!isNrdocsExportArtifactPath(filePath)) return null;
+  if (filePath === NRDOCS_EXPORT_SITE_ZIP) return 'site.zip';
+  if (filePath.startsWith(NRDOCS_SOURCES_PREFIX)) {
+    return filePath.slice(NRDOCS_SOURCES_PREFIX.length) || 'page.md';
+  }
+  return null;
 }
 
 /** Resolves a root redirect path from the publish manifest (e.g. readme/ for README.md-only docs). */

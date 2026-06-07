@@ -3,6 +3,10 @@
  */
 import type { NavSidebarEntry } from './navigation.js';
 
+const DOWNLOAD_ICON_SVG = `<svg aria-hidden="true" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4.75v9.5"/><path d="M8 10.5 12 14.5l4-4"/><path d="M5.25 15.75v2.5a1.5 1.5 0 0 0 1.5 1.5h10.5a1.5 1.5 0 0 0 1.5-1.5v-2.5"/></svg>`;
+
+const MOON_ICON_SVG = `<svg aria-hidden="true" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M20.25 14.15A7.85 7.85 0 0 1 9.85 3.75a8.25 8.25 0 1 0 10.4 10.4z"/></svg>`;
+
 export interface TemplateOptions {
   title: string;
   siteTitle: string;
@@ -14,6 +18,12 @@ export interface TemplateOptions {
   includeMermaid?: boolean;
   /** Relative src to _nrdocs/mermaid.min.js from this page */
   mermaidScriptSrc?: string | null;
+  /** Show Markdown export menu in the right panel toolbar */
+  exportEnabled?: boolean;
+  /** Relative URL to download this page's source .md */
+  pageSourceDownloadUrl?: string | null;
+  /** Relative URL to download all pages as .zip */
+  siteZipDownloadUrl?: string | null;
 }
 
 /**
@@ -61,12 +71,20 @@ export function wrapInTemplate(options: TemplateOptions): string {
     baseUrl,
     includeMermaid = false,
     mermaidScriptSrc = null,
+    exportEnabled = false,
+    pageSourceDownloadUrl = null,
+    siteZipDownloadUrl = null,
   } = options;
   const pageTitle = title === siteTitle ? siteTitle : `${title} - ${siteTitle}`;
 
   const contentWithIds = addHeadingIds(content);
   const toc = extractToc(contentWithIds);
   const hasToc = toc.length > 1;
+
+  const showExport = Boolean(
+    exportEnabled && pageSourceDownloadUrl && siteZipDownloadUrl,
+  );
+  const rightPanel = renderRightPanel(toc, hasToc, showExport, pageSourceDownloadUrl, siteZipDownloadUrl);
 
   const mermaidBlock =
     includeMermaid && mermaidScriptSrc
@@ -147,10 +165,17 @@ html[data-theme="light"]{
 *{margin:0;padding:0;box-sizing:border-box}
 body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;font-size:1.0625rem;line-height:1.7;color:var(--text);background:var(--bg-body);display:flex;min-height:100vh}
 nav.sidebar{width:260px;padding:1.5rem;border-right:1px solid var(--border);background:var(--bg-sidebar);overflow-y:auto;flex-shrink:0;position:sticky;top:0;height:100vh}
-.site-header{display:flex;align-items:center;justify-content:space-between;gap:0.5rem;margin-bottom:1rem}
-nav.sidebar .site-title{font-weight:700;font-size:1.1rem;color:var(--text);flex:1;min-width:0}
-#theme-toggle{background:var(--bg-hover);border:1px solid var(--border);border-radius:6px;padding:0.35rem 0.5rem;cursor:pointer;font-size:1rem;line-height:1;color:var(--text);flex-shrink:0}
-#theme-toggle:hover{background:var(--bg-active)}
+.site-header{margin-bottom:1rem}
+nav.sidebar .site-title{font-weight:700;font-size:1.1rem;color:var(--text)}
+.toc-toolbar{display:flex;justify-content:flex-end;gap:0.35rem;margin-bottom:1rem}
+.icon-btn{width:2.5rem;height:2.5rem;border:1px solid currentColor;border-radius:0.5rem;background:var(--bg-body);color:var(--text);display:inline-grid;place-items:center;cursor:pointer;padding:0;flex-shrink:0}
+.icon-btn svg{display:block}
+.icon-btn:hover{background:var(--text);color:var(--bg-body)}
+.export-menu{position:relative}
+#export-menu-list{display:none;position:absolute;right:0;top:calc(100% + 4px);min-width:10rem;background:var(--bg-body);border:1px solid var(--border);border-radius:6px;box-shadow:0 4px 12px rgba(0,0,0,0.12);z-index:20;padding:0.25rem 0;list-style:none}
+#export-menu-list.open{display:block}
+#export-menu-list a{color:var(--text);text-decoration:none;font-size:0.85rem;padding:0.4rem 0.75rem;display:block;white-space:nowrap}
+#export-menu-list a:hover{background:var(--bg-hover);color:var(--link)}
 nav.sidebar ul{list-style:none}
 nav.sidebar li{margin-bottom:0.25rem}
 nav.sidebar .nav-section{margin-top:0.5rem}
@@ -181,16 +206,16 @@ main img{max-width:100%;height:auto;border-radius:4px}
 main blockquote{border-left:4px solid var(--border);padding-left:1rem;margin-bottom:1.1rem;color:var(--blockquote);font-style:italic}
 main ul,main ol{margin-bottom:1.1rem;padding-left:1.5rem}
 main li{margin-bottom:0.3rem}
-aside.toc{width:220px;padding:1.5rem 1rem;position:sticky;top:0;height:100vh;overflow-y:auto;flex-shrink:0;border-left:1px solid var(--border-light);background:var(--bg-body)}
-aside.toc .toc-title{font-size:0.8rem;font-weight:600;text-transform:uppercase;letter-spacing:0.05em;color:var(--toc-title);margin-bottom:0.75rem}
-aside.toc ul{list-style:none}
-aside.toc li{margin-bottom:0.3rem}
-aside.toc a{color:var(--toc-link);text-decoration:none;font-size:0.85rem;display:block;padding:0.15rem 0;border-radius:2px}
-aside.toc a:hover{color:var(--link)}
-aside.toc .toc-h3{padding-left:0.75rem}
+aside.toc-panel{width:220px;padding:1.5rem 1rem;position:sticky;top:0;height:100vh;overflow-y:auto;flex-shrink:0;border-left:1px solid var(--border-light);background:var(--bg-body)}
+aside.toc-panel .toc-title{font-size:0.8rem;font-weight:600;text-transform:uppercase;letter-spacing:0.05em;color:var(--toc-title);margin-bottom:0.75rem}
+aside.toc-panel .toc-nav ul{list-style:none}
+aside.toc-panel .toc-nav li{margin-bottom:0.3rem}
+aside.toc-panel .toc-nav a{color:var(--toc-link);text-decoration:none;font-size:0.85rem;display:block;padding:0.15rem 0;border-radius:2px}
+aside.toc-panel .toc-nav a:hover{color:var(--link)}
+aside.toc-panel .toc-nav .toc-h3{padding-left:0.75rem}
 footer{padding:1.5rem 0;border-top:1px solid var(--border-light);color:var(--text-footer);font-size:0.8rem;text-align:center;margin-top:2rem}
 footer a{color:var(--link)}
-@media(max-width:1100px){aside.toc{display:none}}
+@media(max-width:1100px){aside.toc-panel .toc-nav{display:none}}
 @media(max-width:768px){body{flex-direction:column}nav.sidebar{width:100%;border-right:none;border-bottom:1px solid var(--border);position:static;height:auto}main{padding:1.5rem}}
 </style>
 </head>
@@ -198,7 +223,6 @@ footer a{color:var(--link)}
 <nav class="sidebar">
 <div class="site-header">
 <div class="site-title">${escapeHtml(siteTitle)}</div>
-<button type="button" id="theme-toggle" aria-label="Toggle color theme" title="Toggle light/dark mode">&#9789;</button>
 </div>
 <ul>
 ${renderNavTree(nav, baseUrl)}
@@ -209,7 +233,7 @@ ${renderNavTree(nav, baseUrl)}
 ${contentWithIds}
 <footer>Generated with <a href="https://github.com/noam-r/nrdocs">nrdocs</a></footer>
 </main>
-${hasToc ? renderToc(toc) : ''}
+${rightPanel}
 </div>
 <script>
 (function(){
@@ -224,15 +248,24 @@ ${hasToc ? renderToc(toc) : ''}
     root.dataset.theme=next;
     try{localStorage.setItem(key,next);}catch(e){}
     document.dispatchEvent(new CustomEvent('nrdocs-theme-change',{detail:{theme:next}}));
-    var btn=document.getElementById('theme-toggle');
-    if(btn)btn.textContent=next==='dark'?'\\u2600':'\\u263E';
   }
   var btn=document.getElementById('theme-toggle');
   if(btn){
-    btn.textContent=resolved()==='dark'?'\\u2600':'\\u263E';
     btn.addEventListener('click',function(){
       apply(resolved()==='dark'?'light':'dark');
     });
+  }
+  var exportBtn=document.getElementById('export-toggle');
+  var exportMenu=document.getElementById('export-menu-list');
+  if(exportBtn&&exportMenu){
+    exportBtn.addEventListener('click',function(e){
+      e.stopPropagation();
+      exportMenu.classList.toggle('open');
+    });
+    document.addEventListener('click',function(){
+      exportMenu.classList.remove('open');
+    });
+    exportMenu.addEventListener('click',function(e){e.stopPropagation();});
   }
 })();
 </script>
@@ -241,17 +274,42 @@ ${mermaidBlock}
 </html>`;
 }
 
-function renderToc(toc: Array<{ id: string; text: string; level: number }>): string {
-  const items = toc.map((entry) => {
-    const cls = entry.level === 3 ? ' class="toc-h3"' : '';
-    return `<li${cls}><a href="#${escapeHtml(entry.id)}">${escapeHtml(entry.text)}</a></li>`;
-  }).join('\n');
-
-  return `<aside class="toc">
-<div class="toc-title">On this page</div>
-<ul>
-${items}
+function renderRightPanel(
+  toc: Array<{ id: string; text: string; level: number }>,
+  hasToc: boolean,
+  showExport: boolean,
+  pageSourceDownloadUrl: string | null,
+  siteZipDownloadUrl: string | null,
+): string {
+  const exportControl = showExport
+    ? `<div class="export-menu">
+<button type="button" class="icon-btn" id="export-toggle" aria-label="Export" aria-haspopup="true">${DOWNLOAD_ICON_SVG}</button>
+<ul id="export-menu-list">
+<li><a href="${escapeHtml(pageSourceDownloadUrl!)}" download>Page (.md)</a></li>
+<li><a href="${escapeHtml(siteZipDownloadUrl!)}" download>Site (.zip)</a></li>
 </ul>
+</div>`
+    : '';
+
+  const tocBlock = hasToc
+    ? (() => {
+        const items = toc.map((entry) => {
+          const cls = entry.level === 3 ? ' class="toc-h3"' : '';
+          return `<li${cls}><a href="#${escapeHtml(entry.id)}">${escapeHtml(entry.text)}</a></li>`;
+        }).join('\n');
+        return `<div class="toc-title">On this page</div>
+<div class="toc-nav"><ul>
+${items}
+</ul></div>`;
+      })()
+    : '';
+
+  return `<aside class="toc-panel">
+<div class="toc-toolbar">
+${exportControl}
+<button type="button" class="icon-btn" id="theme-toggle" aria-label="Toggle light/dark mode">${MOON_ICON_SVG}</button>
+</div>
+${tocBlock}
 </aside>`;
 }
 

@@ -311,6 +311,17 @@ nrdocs rules update RULE_ID --allow-unlisted-files false
 
 Omitting `--allow-unlisted-files` on create means `false`.
 
+## Markdown export artifacts
+
+When `export: true` in `docs/nrdocs.yml` (default), each publish also stores:
+
+```text
+_nrdocs/sources/{sourcePath}   # original Markdown per nav page
+_nrdocs/export/site.zip        # zip of the same sources
+```
+
+The manifest includes `export.enabled`. Readers download via the same `/:owner/:repo/` serving path with password/public gates unchanged. `export: false` omits these files and export UI in HTML.
+
 ## MIME Types
 
 The Worker must set safe MIME types based on file extension for files that were allowed into the artifact.

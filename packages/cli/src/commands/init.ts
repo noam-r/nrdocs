@@ -35,6 +35,9 @@ site:
   title: "${title}"
   api_url: ${apiUrl}
 
+# Set export: false to hide download buttons and omit Markdown sources from publishes
+export: true
+
 content:
   source_dir: .
   nav: auto

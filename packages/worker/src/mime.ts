@@ -24,6 +24,7 @@ const MIME_MAP: Record<string, string> = {
   '.txt': 'text/plain; charset=utf-8',
   '.pdf': 'application/pdf',
   '.zip': 'application/zip',
+  '.md': 'text/markdown; charset=utf-8',
 };
 
 /**

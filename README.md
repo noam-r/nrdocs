@@ -172,6 +172,16 @@ nrdocs publish
 nrdocs doctor
 ```
 
+## Markdown export (readers)
+
+Published sites can offer an **Export** menu (page `.md` or site `.zip`) in the right panel, above “On this page” (same access rules as viewing docs). Controlled in `docs/nrdocs.yml`:
+
+```yaml
+export: true   # default when omitted
+```
+
+Set `export: false` to hide the buttons and omit source files from the artifact. Republish after changing this flag.
+
 ## Auth & profiles
 
 ```bash
