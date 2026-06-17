@@ -89,3 +89,11 @@ describe('parseApiUrlFromWorkflow', () => {
     expect(parseApiUrlFromWorkflow(content)).toBe('https://docs.example.com');
   });
 });
+
+describe('usesInsecureHttp', () => {
+  it('detects http URLs', async () => {
+    const { usesInsecureHttp } = await import('../errors.js');
+    expect(usesInsecureHttp('http://docs.example.com')).toBe(true);
+    expect(usesInsecureHttp('https://docs.example.com')).toBe(false);
+  });
+});

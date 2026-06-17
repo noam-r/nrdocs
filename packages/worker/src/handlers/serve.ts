@@ -16,7 +16,8 @@ import {
 import { getMimeType, getSecurityHeaders } from '../mime.js';
 import { resolveServingPath } from '../path-resolver.js';
 import { findSessionForRepo, normalizeRepoPath } from '../session.js';
-import { renderPasswordPage } from './password-page.js';
+import { isSecureRequest, buildHttpsRepoUrl } from '../request-security.js';
+import { renderPasswordPage, renderHttpsRequiredPage } from './password-page.js';
 
 export async function handleServe(
   request: Request,
@@ -74,7 +75,12 @@ export async function handleServe(
     }
 
     if (!authenticated) {
-      return renderPasswordPage(fullName);
+      if (!isSecureRequest(request)) {
+        return renderHttpsRequiredPage(buildHttpsRepoUrl(request, fullName), fullName);
+      }
+      return renderPasswordPage(fullName, undefined, {
+        secureHint: 'Use an https:// link to this site. HTTP cannot keep you signed in.',
+      });
     }
   }
 

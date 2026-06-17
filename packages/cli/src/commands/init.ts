@@ -1,8 +1,16 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import * as readline from 'node:readline';
 import { getProfile, getDefaultProfileName } from '../config/index.js';
-import { generateNavInConfig } from '../config/docs-config.js';
+import {
+  buildDocsConfig,
+  generateNavInConfig,
+  parseDocsConfigFile,
+  resolveDocsApiUrl,
+  salvageDocsFields,
+  validateDocsConfigFile,
+  writeDocsConfigFile,
+  type DocsConfig,
+} from '../config/docs-config.js';
 
 interface InitOptions {
   docsDir?: string;
@@ -12,40 +20,12 @@ interface InitOptions {
   force?: boolean;
 }
 
-/**
- * Prompts for a value from stdin if not provided.
- */
-async function prompt(question: string, defaultValue?: string): Promise<string> {
-  const rl = readline.createInterface({
-    input: process.stdin,
-    output: process.stdout,
-  });
-  const suffix = defaultValue ? ` (${defaultValue})` : '';
-  return new Promise((resolve) => {
-    rl.question(`${question}${suffix}: `, (answer) => {
-      rl.close();
-      resolve(answer.trim() || defaultValue || '');
-    });
-  });
-}
-
-function generateNrdocsYml(title: string, apiUrl: string, requestedAccess?: string): string {
-  let yml = `# nrdocs site configuration
-site:
-  title: "${title}"
-  api_url: ${apiUrl}
-
-# Set export: false to hide download buttons and omit Markdown sources from publishes
-export: true
-
-content:
-  source_dir: .
-  nav: auto
-`;
-  if (requestedAccess) {
-    yml += `\nrequest:\n  access: ${requestedAccess}\n`;
-  }
-  return yml;
+export interface InitPlan {
+  writeConfig: boolean;
+  repaired: boolean;
+  repairNotes: string[];
+  title: string;
+  apiUrl: string;
 }
 
 function generateWorkflowYml(docsDir: string, apiUrl: string): string {
@@ -114,47 +94,130 @@ export function parseInitArgs(args: string[]): InitOptions {
 
 /**
  * Validates and normalizes a URL. Adds https:// if no protocol is present.
- * Exits with error if the URL is invalid after normalization.
  */
-function normalizeUrl(url: string): string {
+export function normalizeInitUrl(url: string): string {
   let normalized = url.trim();
 
-  // Add https:// if no protocol
   if (!normalized.startsWith('http://') && !normalized.startsWith('https://')) {
     normalized = `https://${normalized}`;
   }
 
-  // Remove trailing slash
   normalized = normalized.replace(/\/+$/, '');
 
-  // Validate it's a parseable URL
   try {
     new URL(normalized);
   } catch {
-    console.error(`Error: "${url}" is not a valid URL.`);
-    console.error('Expected format: https://docs.example.com');
-    process.exit(2);
+    throw new Error(`"${url}" is not a valid URL`);
   }
 
   return normalized;
 }
 
+function getProfileApiUrl(): string | undefined {
+  const profileName = getDefaultProfileName();
+  const profile = getProfile(profileName);
+  return profile?.api_url?.trim() || undefined;
+}
+
+export function describeApiUrlSource(
+  opts: InitOptions,
+  configFile: string,
+  workflowFile: string,
+): string {
+  if (opts.apiUrl) return '--api-url';
+  if (process.env['NRDOCS_API_URL']) return 'NRDOCS_API_URL';
+  if (validateDocsConfigFile(configFile).apiUrl) return 'docs/nrdocs.yml';
+  if (fs.existsSync(workflowFile)) return 'workflow';
+  return 'operator profile';
+}
+
 /**
- * Reads an existing nrdocs.yml and extracts known values.
+ * Plans what init should write based on existing config and flags.
  */
-function readExistingConfig(configPath: string): { title?: string; apiUrl?: string } {
-  if (!fs.existsSync(configPath)) return {};
-  try {
-    const content = fs.readFileSync(configPath, 'utf-8');
-    const titleMatch = content.match(/(?:title|name):\s*["']?([^"'\n]+)["']?/);
-    const apiMatch = content.match(/api_url:\s*["']?([^"'\n]+)["']?/);
+export function planInit(
+  configFile: string,
+  opts: InitOptions,
+  context: {
+    defaultTitle: string;
+    apiUrl: string;
+    apiUrlSource: string;
+  },
+): InitPlan {
+  const configExists = fs.existsSync(configFile);
+  const repairNotes: string[] = [];
+  const parsed = configExists ? parseDocsConfigFile(configFile) : null;
+  const salvaged = parsed
+    ? salvageDocsFields(parsed as DocsConfig & Record<string, unknown>)
+    : { exportEnabled: true as const };
+  const title = opts.title || salvaged.title || context.defaultTitle;
+
+  if (!configExists) {
+    repairNotes.push('created docs/nrdocs.yml');
     return {
-      title: titleMatch ? titleMatch[1]!.trim() : undefined,
-      apiUrl: apiMatch ? apiMatch[1]!.trim() : undefined,
+      writeConfig: true,
+      repaired: false,
+      repairNotes,
+      title,
+      apiUrl: context.apiUrl,
     };
-  } catch {
-    return {};
   }
+
+  if (opts.force) {
+    repairNotes.push('replaced config (--force)');
+    return {
+      writeConfig: true,
+      repaired: true,
+      repairNotes,
+      title,
+      apiUrl: context.apiUrl,
+    };
+  }
+
+  const validation = validateDocsConfigFile(configFile);
+  if (validation.valid) {
+    return {
+      writeConfig: false,
+      repaired: false,
+      repairNotes: [],
+      title: validation.title!,
+      apiUrl: validation.apiUrl!,
+    };
+  }
+
+  repairNotes.push('repaired invalid docs/nrdocs.yml');
+  if (validation.error) {
+    repairNotes.push(`was: ${validation.error}`);
+  }
+  if (salvaged.title) {
+    repairNotes.push('preserved site.title');
+  } else if (opts.title) {
+    repairNotes.push('set site.title from --title');
+  } else {
+    repairNotes.push(`set site.title to "${title}"`);
+  }
+  repairNotes.push('added site: and content: sections');
+  repairNotes.push(`set site.api_url from ${context.apiUrlSource}`);
+
+  return {
+    writeConfig: true,
+    repaired: true,
+    repairNotes,
+    title,
+    apiUrl: context.apiUrl,
+  };
+}
+
+function failMissingApiUrl(): never {
+  console.error('Error: Cannot initialize docs/nrdocs.yml — missing site.api_url.');
+  console.error('');
+  console.error('Checked: --api-url, NRDOCS_API_URL, docs/nrdocs.yml, workflow, operator profile');
+  console.error('');
+  console.error('If you are the operator, run:');
+  console.error('  nrdocs auth login');
+  console.error('');
+  console.error('Otherwise ask your operator for the deployment URL, then run:');
+  console.error('  nrdocs init --api-url https://docs.example.com');
+  process.exit(2);
 }
 
 /**
@@ -163,7 +226,6 @@ function readExistingConfig(configPath: string): { title?: string; apiUrl?: stri
 export async function handleInit(args: string[]): Promise<void> {
   const opts = parseInitArgs(args);
 
-  // Validate requested-access if provided
   if (opts.requestedAccess && !['public', 'password'].includes(opts.requestedAccess)) {
     console.error('Error: --requested-access must be "public" or "password".');
     process.exit(2);
@@ -172,94 +234,116 @@ export async function handleInit(args: string[]): Promise<void> {
   const docsDir = opts.docsDir || 'docs';
   const docsPath = path.resolve(docsDir);
   const configFile = path.join(docsPath, 'nrdocs.yml');
-
-  // Read existing config if present
-  const existing = readExistingConfig(configFile);
-  const configExists = fs.existsSync(configFile);
-
-  // Resolve title: flag → existing config → prompt
-  const dirName = path.basename(process.cwd());
-  let title = opts.title || existing.title;
-  if (!title) {
-    title = await prompt('Site title', `${dirName} Docs`);
-  }
-
-  // Resolve API URL: flag → env → existing config → local profile → prompt
-  let apiUrl = opts.apiUrl || process.env['NRDOCS_API_URL'] || existing.apiUrl;
-  if (!apiUrl) {
-    const profileName = getDefaultProfileName();
-    const profile = getProfile(profileName);
-    if (profile?.api_url) {
-      apiUrl = profile.api_url;
-    }
-  }
-  if (!apiUrl) {
-    console.log('');
-    console.log('The API URL is the address of your nrdocs deployment.');
-    console.log('If you don\'t know it, ask your nrdocs operator to run:');
-    console.log('');
-    console.log('  nrdocs auth status');
-    console.log('');
-    apiUrl = await prompt('API URL (e.g. https://docs.example.com)');
-  }
-
-  if (!apiUrl) {
-    console.error('Error: API URL is required.');
-    console.error('');
-    console.error('Get it from your nrdocs operator:');
-    console.error('  nrdocs auth status');
-    console.error('');
-    console.error('Or pass it directly:');
-    console.error('  nrdocs init --api-url https://your-docs-url.com');
-    process.exit(2);
-  }
-
-  // Validate URL has protocol
-  apiUrl = normalizeUrl(apiUrl);
-
   const workflowDir = path.resolve('.github', 'workflows');
   const workflowFile = path.join(workflowDir, 'nrdocs.yml');
 
-  // Check for existing workflow (the only nrdocs-managed file that blocks without --force)
-  if (!opts.force && fs.existsSync(workflowFile)) {
-    console.error('Error: Workflow already exists:');
-    console.error(`  ${workflowFile}`);
-    console.error('Use --force to overwrite.');
-    process.exit(3);
+  let apiUrl = resolveDocsApiUrl({
+    flag: opts.apiUrl,
+    env: process.env['NRDOCS_API_URL'],
+    configPath: configFile,
+    workflowPath: workflowFile,
+    profileUrl: getProfileApiUrl(),
+  });
+
+  if (!apiUrl) {
+    failMissingApiUrl();
   }
 
-  // Create directories
+  try {
+    apiUrl = normalizeInitUrl(apiUrl);
+  } catch (e) {
+    console.error(`Error: ${e instanceof Error ? e.message : String(e)}`);
+    console.error('Expected format: https://docs.example.com');
+    process.exit(2);
+  }
+
+  if (apiUrl.startsWith('http://')) {
+    console.error('');
+    console.error('Warning: API URL uses http://');
+    console.error('Password-protected docs require HTTPS — readers cannot log in over HTTP.');
+    console.error('Set site.api_url and NRDOCS_API_URL to https:// after TLS is configured.');
+    console.error('');
+  }
+
+  const apiUrlSource = describeApiUrlSource(opts, configFile, workflowFile);
+  const plan = planInit(configFile, opts, {
+    defaultTitle: `${path.basename(process.cwd())} Docs`,
+    apiUrl,
+    apiUrlSource,
+  });
+
   fs.mkdirSync(docsPath, { recursive: true });
   fs.mkdirSync(workflowDir, { recursive: true });
 
-  // Write nrdocs config only if it doesn't exist or --force is set
-  const createdConfig = !configExists || opts.force;
-  if (createdConfig) {
-    fs.writeFileSync(configFile, generateNrdocsYml(title, apiUrl, opts.requestedAccess));
+  let salvagedExport = true;
+  let salvagedDescription: string | undefined;
+  let salvagedRequestedAccess = opts.requestedAccess;
+
+  if (fs.existsSync(configFile)) {
+    const parsed = parseDocsConfigFile(configFile);
+    if (parsed) {
+      const salvaged = salvageDocsFields(parsed as DocsConfig & Record<string, unknown>);
+      salvagedExport = salvaged.exportEnabled;
+      salvagedDescription = salvaged.description;
+      salvagedRequestedAccess = opts.requestedAccess || salvaged.requestedAccess;
+    }
   }
 
-  // Always write/update the workflow
-  fs.writeFileSync(workflowFile, generateWorkflowYml(docsDir, apiUrl));
+  if (plan.writeConfig) {
+    writeDocsConfigFile(
+      configFile,
+      buildDocsConfig({
+        title: plan.title,
+        apiUrl: plan.apiUrl,
+        requestedAccess: salvagedRequestedAccess,
+        exportEnabled: salvagedExport,
+        description: salvagedDescription,
+      }),
+    );
+  }
+
+  const workflowExisted = fs.existsSync(workflowFile);
+  fs.writeFileSync(workflowFile, generateWorkflowYml(docsDir, plan.apiUrl));
 
   let navPageCount = 0;
-  if (createdConfig || opts.force) {
-    navPageCount = generateNavInConfig(docsDir, { generatedBy: 'nrdocs init' });
+  if (plan.writeConfig) {
+    try {
+      navPageCount = generateNavInConfig(docsDir, { generatedBy: 'nrdocs init' });
+      if (navPageCount > 0 && plan.repaired) {
+        plan.repairNotes.push(`generated content.nav (${navPageCount} page(s))`);
+      }
+    } catch {
+      // Nav generation is best-effort during init when markdown is missing.
+    }
   }
 
   console.log('nrdocs initialized successfully!');
   console.log('');
-  console.log('Created/updated:');
-  if (createdConfig) {
-    console.log(`  ${path.relative(process.cwd(), configFile)}`);
+
+  if (plan.writeConfig) {
+    if (plan.repaired) {
+      console.log(`Repaired ${path.relative(process.cwd(), configFile)}:`);
+      for (const note of plan.repairNotes) {
+        console.log(`  - ${note}`);
+      }
+    } else {
+      console.log('Created/updated:');
+      console.log(`  ${path.relative(process.cwd(), configFile)}`);
+    }
+  } else {
+    console.log(`${path.relative(process.cwd(), configFile)} is valid`);
   }
-  console.log(`  ${path.relative(process.cwd(), workflowFile)}`);
-  if (!createdConfig) {
-    console.log('');
-    console.log(`Using existing: ${path.relative(process.cwd(), configFile)}`);
+
+  if (!workflowExisted) {
+    console.log(`  ${path.relative(process.cwd(), workflowFile)}`);
+  } else {
+    console.log(`  ${path.relative(process.cwd(), workflowFile)} (synced NRDOCS_API_URL)`);
   }
-  if (navPageCount > 0) {
+
+  if (navPageCount > 0 && !plan.repaired) {
     console.log(`  content.nav: ${navPageCount} page(s) from markdown under ${docsDir}/`);
   }
+
   console.log('');
   console.log('Next steps:');
   if (navPageCount === 0) {

@@ -25,6 +25,18 @@ export interface FormattedFailure {
   exitCode: number;
 }
 
+/** True when a URL uses plain http:// (password-protected docs require HTTPS). */
+export function usesInsecureHttp(url: string): boolean {
+  const trimmed = url.trim();
+  if (!trimmed) return false;
+  try {
+    const withProto = /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
+    return new URL(withProto).protocol === 'http:';
+  } catch {
+    return false;
+  }
+}
+
 /** Normalizes API base URL: trim slashes, strip duplicate /api suffix. */
 export function normalizeApiBaseUrl(url: string): { url: string; strippedApiSuffix: boolean } {
   let normalized = url.trim().replace(/\/+$/, '');

@@ -1,6 +1,7 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { resolveCredentials } from '../config/index.js';
+import { validateDocsConfigFile } from '../config/docs-config.js';
 import { ApiClient } from '../api-client.js';
 import { getOIDCToken } from '../github-oidc.js';
 import { scanDocsForUnlistedAssets } from '../renderer/assets.js';
@@ -9,6 +10,7 @@ import {
   parseApiUrlFromConfig,
   parseApiUrlFromWorkflow,
   probeApiStatus,
+  usesInsecureHttp,
 } from '../errors.js';
 
 export interface DoctorOptions {
@@ -68,12 +70,25 @@ export async function handleDoctor(args: string[]): Promise<void> {
 
   const configPath = path.resolve('docs', 'nrdocs.yml');
   const hasConfig = fs.existsSync(configPath);
-  checks.push({
-    section: 'Repo setup',
-    name: 'Docs config',
-    status: hasConfig ? 'ok' : 'fail',
-    message: hasConfig ? 'Found docs/nrdocs.yml' : 'Missing docs/nrdocs.yml — run: nrdocs init',
-  });
+  if (hasConfig) {
+    const validation = validateDocsConfigFile(configPath);
+    checks.push({
+      section: 'Repo setup',
+      name: 'Docs config',
+      status: validation.valid ? 'ok' : 'fail',
+      message: validation.valid
+        ? 'docs/nrdocs.yml is valid'
+        : (validation.error ?? 'Invalid docs/nrdocs.yml'),
+      fixes: validation.valid ? undefined : ['Run: nrdocs init', 'Or fix docs/nrdocs.yml manually'],
+    });
+  } else {
+    checks.push({
+      section: 'Repo setup',
+      name: 'Docs config',
+      status: 'fail',
+      message: 'Missing docs/nrdocs.yml — run: nrdocs init',
+    });
+  }
 
   const docsDir = path.resolve('docs');
   const mdCount = countMarkdownFiles(docsDir);
@@ -120,7 +135,7 @@ export async function handleDoctor(args: string[]): Promise<void> {
       name: 'Workflow NRDOCS_API_URL',
       status: workflowApiUrl ? 'ok' : 'fail',
       message: workflowApiUrl ?? 'Missing NRDOCS_API_URL in workflow',
-      fixes: workflowApiUrl ? undefined : ['Re-run nrdocs init --api-url https://your-docs-url.com'],
+      fixes: workflowApiUrl ? undefined : ['Run: nrdocs init'],
     });
   }
 
@@ -142,6 +157,19 @@ export async function handleDoctor(args: string[]): Promise<void> {
 
   if (publishBaseUrl) {
     const { url } = normalizeApiBaseUrl(publishBaseUrl);
+    if (usesInsecureHttp(url)) {
+      checks.push({
+        section: 'Publish URL',
+        name: 'HTTPS for password docs',
+        status: 'fail',
+        message:
+          'Publish URL uses http:// — password-protected docs cannot authenticate over HTTP',
+        fixes: [
+          'Set site.api_url and NRDOCS_API_URL to https://…',
+          'Ask the operator to configure TLS and redeploy with an https:// base URL',
+        ],
+      });
+    }
     const probe = await probeApiStatus(url);
     checks.push({
       section: 'API reachability',
@@ -163,7 +191,7 @@ export async function handleDoctor(args: string[]): Promise<void> {
       status: 'fail',
       message: 'No publish URL configured',
       fixes: [
-        'Run nrdocs init --api-url https://your-docs-url.com',
+        'Run: nrdocs init',
         'Or set NRDOCS_API_URL in .github/workflows/nrdocs.yml',
       ],
     });

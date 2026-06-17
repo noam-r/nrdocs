@@ -4,6 +4,7 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import YAML from 'yaml';
+import { parseApiUrlFromConfig, parseApiUrlFromWorkflow } from '../errors.js';
 import {
   discoverNavEntries,
   flattenNavPaths,
@@ -42,6 +43,203 @@ export interface LoadDocsConfigResult {
   config: DocsConfig;
   configPath: string;
   contentDir: string;
+}
+
+export interface DocsConfigValidation {
+  valid: boolean;
+  error?: string;
+  title?: string;
+  apiUrl?: string;
+}
+
+export interface DocsApiUrlSources {
+  flag?: string;
+  env?: string;
+  configPath?: string;
+  workflowPath?: string;
+  profileUrl?: string;
+}
+
+export interface BuildDocsConfigOptions {
+  title: string;
+  apiUrl: string;
+  requestedAccess?: string;
+  exportEnabled?: boolean;
+  sourceDir?: string;
+  nav?: NavConfig;
+  index?: string;
+  description?: string;
+}
+
+/**
+ * Validates parsed docs/nrdocs.yml structure required for publish.
+ */
+export function validateDocsConfig(config: DocsConfig): DocsConfigValidation {
+  const errors: string[] = [];
+
+  if (!config.site || typeof config.site !== 'object') {
+    errors.push('missing "site:" section');
+  } else {
+    if (!config.site.title?.trim()) {
+      errors.push('site.title is required');
+    }
+    if (!config.site.api_url?.trim()) {
+      errors.push('site.api_url is required');
+    }
+  }
+
+  if (!config.content || typeof config.content !== 'object') {
+    errors.push('missing "content:" section');
+  }
+
+  if (errors.length > 0) {
+    return { valid: false, error: errors.join('; ') };
+  }
+
+  return {
+    valid: true,
+    title: config.site!.title!.trim(),
+    apiUrl: config.site!.api_url!.trim(),
+  };
+}
+
+/**
+ * Parses docs/nrdocs.yml from disk without throwing.
+ */
+export function parseDocsConfigFile(configPath: string): DocsConfig | null {
+  if (!fs.existsSync(configPath)) {
+    return null;
+  }
+
+  try {
+    const parsed = YAML.parse(fs.readFileSync(configPath, 'utf-8'));
+    if (!parsed || typeof parsed !== 'object') {
+      return null;
+    }
+    return parsed as DocsConfig;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Loads and validates docs/nrdocs.yml from disk.
+ */
+export function validateDocsConfigFile(configPath: string): DocsConfigValidation {
+  if (!fs.existsSync(configPath)) {
+    return { valid: false, error: `Config file not found: ${configPath}` };
+  }
+
+  const config = parseDocsConfigFile(configPath);
+  if (!config) {
+    return { valid: false, error: `Invalid YAML: ${configPath}` };
+  }
+
+  return validateDocsConfig(config);
+}
+
+/**
+ * Extracts salvageable fields from a parsed (possibly invalid) config.
+ */
+export function salvageDocsFields(
+  config: DocsConfig & Record<string, unknown>,
+): {
+  title?: string;
+  description?: string;
+  apiUrl?: string;
+  exportEnabled: boolean;
+  requestedAccess?: string;
+} {
+  const title =
+    config.site?.title?.trim() ||
+    (typeof config.title === 'string' ? config.title.trim() : undefined);
+  const description =
+    config.site?.description?.trim() ||
+    (typeof config.description === 'string' ? config.description.trim() : undefined);
+  const apiUrl = config.site?.api_url?.trim();
+  const requestedAccess =
+    config.request?.access?.trim() ||
+    config.site?.requested_access?.trim() ||
+    (typeof config.requested_access === 'string' ? config.requested_access.trim() : undefined);
+
+  return {
+    title,
+    description,
+    apiUrl,
+    exportEnabled: config.export !== false,
+    requestedAccess,
+  };
+}
+
+/**
+ * Resolves the publish API URL from known local sources (no prompts).
+ */
+export function resolveDocsApiUrl(sources: DocsApiUrlSources): string | undefined {
+  const pick = (value?: string) => {
+    const trimmed = value?.trim();
+    return trimmed || undefined;
+  };
+
+  const fromFlag = pick(sources.flag);
+  if (fromFlag) return fromFlag;
+
+  const fromEnv = pick(sources.env);
+  if (fromEnv) return fromEnv;
+
+  if (sources.configPath && fs.existsSync(sources.configPath)) {
+    const validation = validateDocsConfigFile(sources.configPath);
+    if (validation.apiUrl) return validation.apiUrl;
+
+    const content = fs.readFileSync(sources.configPath, 'utf-8');
+    const fromRegex = pick(parseApiUrlFromConfig(content));
+    if (fromRegex) return fromRegex;
+  }
+
+  if (sources.workflowPath && fs.existsSync(sources.workflowPath)) {
+    const workflow = fs.readFileSync(sources.workflowPath, 'utf-8');
+    const fromWorkflow = pick(parseApiUrlFromWorkflow(workflow));
+    if (fromWorkflow) return fromWorkflow;
+  }
+
+  return pick(sources.profileUrl);
+}
+
+/**
+ * Builds a valid docs/nrdocs.yml object.
+ */
+export function buildDocsConfig(options: BuildDocsConfigOptions): DocsConfig {
+  const config: DocsConfig = {
+    export: options.exportEnabled !== false,
+    site: {
+      title: options.title,
+      api_url: options.apiUrl,
+    },
+    content: {
+      source_dir: options.sourceDir ?? '.',
+      nav: options.nav ?? 'auto',
+    },
+  };
+
+  if (options.description) {
+    config.site!.description = options.description;
+  }
+  if (options.index) {
+    config.content!.index = options.index;
+  }
+  if (options.requestedAccess) {
+    config.request = { access: options.requestedAccess };
+  }
+
+  return config;
+}
+
+/**
+ * Writes docs/nrdocs.yml to disk.
+ */
+export function writeDocsConfigFile(configPath: string, config: DocsConfig): void {
+  const doc = new YAML.Document(config);
+  const body = doc.toString();
+  fs.writeFileSync(configPath, `# nrdocs site configuration\n${body}`, 'utf-8');
 }
 
 /**

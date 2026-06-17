@@ -19,16 +19,23 @@ vi.mock('../renderer/packager.js', () => ({
   createArchive: vi.fn().mockResolvedValue(new Uint8Array([0x1f, 0x8b, 0, 0])),
 }));
 
-vi.mock('../config/docs-config.js', () => ({
-  loadDocsConfig: vi.fn().mockReturnValue({
-    config: { site: { title: 'Test' }, content: { index: 'index.md' } },
-    configPath: '/fake/docs/nrdocs.yml',
-    contentDir: '/fake/docs',
-  }),
-  getExplicitNav: vi.fn().mockReturnValue(null),
-  validateNavPaths: vi.fn().mockReturnValue({ valid: true, errors: [] }),
-  isExportEnabled: vi.fn().mockReturnValue(true),
-}));
+vi.mock('../config/docs-config.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../config/docs-config.js')>();
+  return {
+    ...actual,
+    loadDocsConfig: vi.fn().mockReturnValue({
+      config: {
+        site: { title: 'Test', api_url: 'https://docs.example.com' },
+        content: { source_dir: '.', index: 'index.md' },
+      },
+      configPath: '/fake/docs/nrdocs.yml',
+      contentDir: '/fake/docs',
+    }),
+    getExplicitNav: vi.fn().mockReturnValue(null),
+    validateNavPaths: vi.fn().mockReturnValue({ valid: true, errors: [] }),
+    isExportEnabled: vi.fn().mockReturnValue(true),
+  };
+});
 
 vi.mock('node:fs', () => ({
   existsSync: vi.fn().mockReturnValue(true),

@@ -1,4 +1,3 @@
-import * as fs from 'node:fs';
 import { renderSite } from '../renderer/index.js';
 import { createArchive } from '../renderer/packager.js';
 import { ApiClient } from '../api-client.js';
@@ -12,6 +11,7 @@ import {
   getExplicitNav,
   validateNavPaths,
   isExportEnabled,
+  validateDocsConfig,
 } from '../config/docs-config.js';
 import { getOIDCToken } from '../github-oidc.js';
 
@@ -34,37 +34,6 @@ export function parsePublishArgs(args: string[]): PublishOptions {
     }
   }
   return opts;
-}
-
-/**
- * Validates the nrdocs.yml config file exists and has basic structure.
- * Returns parsed config values on success.
- */
-function validateConfig(configPath: string): {
-  valid: boolean;
-  error?: string;
-  title?: string;
-  apiUrl?: string;
-} {
-  if (!fs.existsSync(configPath)) {
-    return { valid: false, error: `Config file not found: ${configPath}` };
-  }
-
-  const content = fs.readFileSync(configPath, 'utf-8');
-  if (!content.includes('site:')) {
-    return { valid: false, error: 'Config file missing "site:" section' };
-  }
-  if (!content.includes('title:')) {
-    return { valid: false, error: 'Config file missing "title:" field' };
-  }
-
-  const titleMatch = content.match(/title:\s*["']?([^"'\n]+)["']?/);
-  const title = titleMatch ? titleMatch[1]!.trim() : 'Documentation';
-
-  const apiUrlMatch = content.match(/api_url:\s*["']?([^"'\n]+)["']?/);
-  const apiUrl = apiUrlMatch ? apiUrlMatch[1]!.trim() : undefined;
-
-  return { valid: true, title, apiUrl };
 }
 
 /**
@@ -107,7 +76,7 @@ export async function handlePublish(args: string[]): Promise<void> {
     process.exit(10);
   }
 
-  const validation = validateConfig(docsConfig.configPath);
+  const validation = validateDocsConfig(docsConfig.config);
   if (!validation.valid) {
     console.error(`Error: ${validation.error}`);
     process.exit(10);

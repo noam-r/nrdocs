@@ -14,7 +14,8 @@ import {
   normalizeRepoFullName,
   normalizeRepoPath,
 } from '../session.js';
-import { renderPasswordPage } from './password-page.js';
+import { isSecureRequest, buildHttpsRepoUrl } from '../request-security.js';
+import { renderPasswordPage, renderHttpsRequiredPage } from './password-page.js';
 
 const SESSION_MAX_AGE_SECONDS = 86400; // 24 hours
 
@@ -41,6 +42,14 @@ export async function handlePasswordLogin(
 
   if (!password || !repoFullName) {
     return jsonError('BAD_REQUEST', 'Missing required fields', 400);
+  }
+
+  if (!isSecureRequest(request)) {
+    return renderHttpsRequiredPage(
+      buildHttpsRepoUrl(request, repoFullName),
+      repoFullName,
+      'Submit the password again after switching to HTTPS.',
+    );
   }
 
   // Look up repo

@@ -281,6 +281,13 @@ export async function handleDeploy(args: string[]): Promise<void> {
   // Normalize and validate base URL
   baseUrl = normalizeUrl(baseUrl!);
 
+  if (baseUrl.startsWith('http://')) {
+    console.warn('');
+    console.warn('Warning: Base URL uses http://');
+    console.warn('Password-protected docs require HTTPS — configure TLS and use https://');
+    console.warn('');
+  }
+
   // Validate instance name
   const validation = validateInstanceName(instance!);
   if (!validation.valid) {
