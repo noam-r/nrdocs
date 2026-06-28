@@ -216,7 +216,7 @@ aside.toc-panel .toc-nav .toc-h3{padding-left:0.75rem}
 footer{padding:1.5rem 0;border-top:1px solid var(--border-light);color:var(--text-footer);font-size:0.8rem;text-align:center;margin-top:2rem}
 footer a{color:var(--link)}
 @media(max-width:1100px){aside.toc-panel .toc-nav{display:none}}
-@media(max-width:768px){body{flex-direction:column}nav.sidebar{width:100%;border-right:none;border-bottom:1px solid var(--border);position:static;height:auto}main{padding:1.5rem}}
+@media(max-width:768px){body{flex-direction:column}nav.sidebar{width:100%;border-right:none;border-bottom:1px solid var(--border);position:static;height:auto}main{padding:1.5rem}.content-wrapper{flex-direction:column}aside.toc-panel{width:100%;height:auto;position:static;border-left:none;border-bottom:1px solid var(--border-light);padding:0.75rem 1rem;order:-1}aside.toc-panel .toc-toolbar{justify-content:flex-end}aside.toc-panel .toc-nav{display:none}}
 </style>
 </head>
 <body>

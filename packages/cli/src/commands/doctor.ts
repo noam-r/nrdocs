@@ -197,6 +197,16 @@ export async function handleDoctor(args: string[]): Promise<void> {
     });
   }
 
+  let operatorApiUrl: string | undefined;
+  let operatorToken: string | undefined;
+  try {
+    const creds = resolveCredentials();
+    operatorApiUrl = creds.api_url;
+    operatorToken = creds.operator_token;
+  } catch {
+    // no operator profile — expected for repo owners
+  }
+
   if (inCI) {
     const hasOidcUrl = !!process.env['ACTIONS_ID_TOKEN_REQUEST_URL'];
     const hasOidcToken = !!process.env['ACTIONS_ID_TOKEN_REQUEST_TOKEN'];
@@ -241,16 +251,46 @@ export async function handleDoctor(args: string[]): Promise<void> {
             const client = new ApiClient(url, token);
             const capsRes = await client.getPublishCapabilities();
             if (capsRes.ok) {
-              const caps = capsRes.data as { allow_unlisted_assets?: boolean } | undefined;
+              const caps = capsRes.data as { allow_unlisted_assets?: boolean; full_name?: string; rule_matched?: boolean; rule_id?: string | null } | undefined;
               allowed = caps?.allow_unlisted_assets === true;
-              capMessage = allowed
-                ? 'Matching auto-approval rule allows unlisted asset files'
-                : 'Publish rule does not allow unlisted asset files';
+              const resolvedName = caps?.full_name ?? '(unknown)';
+              if (caps?.rule_matched === false) {
+                capMessage = `No auto-approval rule matches repo '${resolvedName}'`;
+              } else {
+                capMessage = allowed
+                  ? `Matching rule ${caps?.rule_id ?? '?'} allows unlisted asset files (repo: ${resolvedName})`
+                  : `Matching rule ${caps?.rule_id ?? '?'} does NOT allow unlisted asset files (repo: ${resolvedName})`;
+              }
             } else {
               capMessage = capsRes.error?.message ?? 'publish-capabilities request failed';
             }
           } else {
             capMessage = 'Failed to obtain OIDC token for capabilities check';
+          }
+        } else if (publishBaseUrl || operatorApiUrl) {
+          // Fallback: no OIDC available (running locally with --ci).
+          // Use operator credentials to list rules and check if any matching rule allows unlisted assets.
+          const opUrl = operatorApiUrl ?? (publishBaseUrl ? normalizeApiBaseUrl(publishBaseUrl).url : undefined);
+          if (opUrl && operatorToken) {
+            const client = new ApiClient(opUrl, operatorToken);
+            const rulesRes = await client.listRules();
+            if (rulesRes.ok) {
+              const rules = ((rulesRes.data as { rules?: Array<Record<string, unknown>> })?.rules ?? []) as Array<Record<string, unknown>>;
+              // Check if any enabled rule with allow_unlisted_assets=true could match this repo.
+              // Without GITHUB_REPOSITORY we can't do exact matching, but we can check wildcard rules.
+              const unlistedRules = rules.filter((r) => r['allow_unlisted_assets'] === true);
+              if (unlistedRules.length > 0) {
+                const patterns = unlistedRules.map((r) => String(r['pattern'] ?? '?')).join(', ');
+                allowed = true;
+                capMessage = `Operator rule(s) allow unlisted assets (patterns: ${patterns}) — full verification requires GitHub Actions OIDC`;
+              } else {
+                capMessage = 'No operator rules with allow_unlisted_assets=true found';
+              }
+            } else {
+              capMessage = 'Could not list rules via operator token to verify unlisted asset permission';
+            }
+          } else {
+            capMessage = 'OIDC unavailable (not in GitHub Actions) and no operator credentials to verify rules';
           }
         }
         const sample = unlisted.slice(0, 5).join(', ');
@@ -271,16 +311,6 @@ export async function handleDoctor(args: string[]): Promise<void> {
         });
       }
     }
-  }
-
-  let operatorApiUrl: string | undefined;
-  let operatorToken: string | undefined;
-  try {
-    const creds = resolveCredentials();
-    operatorApiUrl = creds.api_url;
-    operatorToken = creds.operator_token;
-  } catch {
-    // no operator profile — expected for repo owners
   }
 
   if (operatorApiUrl && operatorToken) {

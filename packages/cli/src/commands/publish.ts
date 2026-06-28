@@ -153,8 +153,13 @@ export async function handlePublish(args: string[]): Promise<void> {
     console.error(`Error: Could not load publish capabilities: ${capsRes.error?.message ?? 'unknown'}`);
     process.exit(10);
   }
-  const caps = capsRes.data as { allow_unlisted_assets?: boolean } | undefined;
+  const caps = capsRes.data as { allow_unlisted_assets?: boolean; full_name?: string; rule_matched?: boolean; rule_id?: string | null } | undefined;
   const allowUnlistedAssets = caps?.allow_unlisted_assets === true;
+  if (opts.verbose) {
+    console.log(`  Resolved repo: ${caps?.full_name ?? '(unknown)'}`);
+    console.log(`  Rule matched: ${caps?.rule_matched ?? '(unknown)'} (id: ${caps?.rule_id ?? 'none'})`);
+    console.log(`  Allow unlisted assets: ${allowUnlistedAssets}`);
+  }
 
   console.log('Rendering Markdown...');
   const indexPath = docsConfig.config.content?.index ?? 'index.md';

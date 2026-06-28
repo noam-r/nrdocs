@@ -3,7 +3,7 @@
  */
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { validateAssetFilePath, findUnlistedAssetPaths } from '@nrdocs/shared';
+import { validateAssetFilePath, findUnlistedAssetPaths, isIgnoredPublishPath, IGNORED_PUBLISH_DIR_NAMES } from '@nrdocs/shared';
 import type { RenderedFile } from './index.js';
 
 export interface CollectAssetsOptions {
@@ -68,16 +68,18 @@ function collectFromDir(
     }
 
     if (entry.isDirectory()) {
-      if (entry.name.startsWith('.')) continue;
+      const dirLower = entry.name.toLowerCase();
+      if (entry.name.startsWith('.') || IGNORED_PUBLISH_DIR_NAMES.has(dirLower)) continue;
       collectFromDir(fullPath, rootDir, results, rejected, allowUnlisted);
     } else if (entry.isFile()) {
+      const relativePath = path.relative(rootDir, fullPath).replace(/\\/g, '/');
+      if (relativePath.includes('..')) continue;
+      if (isIgnoredPublishPath(relativePath)) continue;
+
       const ext = path.extname(entry.name).toLowerCase();
 
       if (ext === '.md') continue;
       if (ext === '.html') continue;
-
-      const relativePath = path.relative(rootDir, fullPath).replace(/\\/g, '/');
-      if (relativePath.includes('..')) continue;
 
       const check = validateAssetFilePath(relativePath, { allowUnlisted });
       if (!check.ok) {

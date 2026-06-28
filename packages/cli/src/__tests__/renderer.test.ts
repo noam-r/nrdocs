@@ -320,6 +320,28 @@ describe('Asset collection', () => {
     expect(paths).not.toContain('binary.exe');
     expect(paths).not.toContain('archive.zip');
   });
+
+  it('silently skips OS junk files like .DS_Store', () => {
+    fs.writeFileSync(path.join(tmpDir, '.DS_Store'), 'junk');
+    fs.mkdirSync(path.join(tmpDir, 'images'));
+    fs.writeFileSync(path.join(tmpDir, 'images', '.DS_Store'), 'junk');
+    fs.writeFileSync(path.join(tmpDir, 'images', '._logo.png'), 'junk');
+    fs.writeFileSync(path.join(tmpDir, 'logo.png'), 'PNG');
+
+    const { files, rejected } = collectAssets(tmpDir);
+    const paths = files.map((a) => a.path);
+    expect(paths).toEqual(['logo.png']);
+    expect(rejected).toEqual([]);
+  });
+
+  it('skips node_modules directories', () => {
+    fs.mkdirSync(path.join(tmpDir, 'node_modules', 'pkg'), { recursive: true });
+    fs.writeFileSync(path.join(tmpDir, 'node_modules', 'pkg', 'index.js'), 'js');
+    fs.writeFileSync(path.join(tmpDir, 'style.css'), 'body {}');
+
+    const paths = collectAssets(tmpDir).files.map((a) => a.path);
+    expect(paths).toEqual(['style.css']);
+  });
 });
 
 describe('Template', () => {
