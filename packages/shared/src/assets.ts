@@ -30,7 +30,49 @@ export const WHITELISTED_ASSET_EXTENSIONS = new Set([
 /** @deprecated Use WHITELISTED_ASSET_EXTENSIONS */
 export const ALLOWED_ASSET_EXTENSIONS = WHITELISTED_ASSET_EXTENSIONS;
 
-export type AssetExtensionClass = 'whitelisted' | 'unlisted' | 'forbidden';
+export type AssetExtensionClass = 'whitelisted' | 'unlisted' | 'forbidden' | 'ignored';
+
+/** Basenames always omitted from published artifacts (case-insensitive). */
+const IGNORED_PUBLISH_BASENAMES = new Set([
+  '.ds_store',
+  'thumbs.db',
+  'desktop.ini',
+  'ehthumbs.db',
+  '.gitkeep',
+]);
+
+/** Directory names skipped when walking docs (case-insensitive). */
+export const IGNORED_PUBLISH_DIR_NAMES = new Set([
+  'node_modules',
+  '__macosx',
+]);
+
+/**
+ * True for OS junk, dotfiles, and other paths that must not be published.
+ * These are skipped silently and never fail validation.
+ */
+export function isIgnoredPublishPath(filePath: string): boolean {
+  const normalized = filePath.replace(/\\/g, '/');
+  const parts = normalized.split('/').filter(Boolean);
+
+  for (const part of parts) {
+    if (IGNORED_PUBLISH_DIR_NAMES.has(part.toLowerCase())) {
+      return true;
+    }
+  }
+
+  const basename = parts[parts.length - 1] ?? '';
+  if (!basename) return false;
+
+  const lowerBase = basename.toLowerCase();
+  if (IGNORED_PUBLISH_BASENAMES.has(lowerBase)) return true;
+  // macOS AppleDouble resource forks (._filename)
+  if (basename.startsWith('._')) return true;
+  // Dotfiles and dot-directories (spec: ignore unless explicitly allowlisted)
+  if (basename.startsWith('.')) return true;
+
+  return false;
+}
 
 const MANIFEST_BASENAME = 'nrdocs-manifest.json';
 
@@ -117,6 +159,10 @@ export function validateAssetFilePath(
     return { ok: true, classification: 'whitelisted' };
   }
 
+  if (isIgnoredPublishPath(filePath)) {
+    return { ok: true, classification: 'ignored' };
+  }
+
   if (isNrdocsExportArtifactPath(filePath) || isPlatformRuntimePath(filePath)) {
     return { ok: true, classification: 'whitelisted' };
   }
@@ -172,6 +218,7 @@ export function validateAssetFilePath(
 export function findUnlistedAssetPaths(filePaths: string[]): string[] {
   const unlisted: string[] = [];
   for (const p of filePaths) {
+    if (isIgnoredPublishPath(p)) continue;
     const basename = p.split('/').pop() ?? p;
     if (basename === MANIFEST_BASENAME) continue;
     const ext = getExtensionFromPath(p);

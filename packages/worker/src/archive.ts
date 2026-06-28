@@ -8,6 +8,7 @@ import {
   DEFAULT_MAX_FILE_COUNT,
   DEFAULT_MAX_EXTRACTED_SIZE_MB,
   DEFAULT_MAX_SINGLE_FILE_SIZE_MB,
+  isIgnoredPublishPath,
 } from '@nrdocs/shared';
 
 export interface ExtractedFile {
@@ -152,6 +153,13 @@ export async function extractArtifact(
     // Validate path
     const pathError = validatePath(header.name);
     if (pathError) return { ok: false, error: pathError };
+
+    // Skip OS junk / dotfiles — never published, must not fail the upload
+    if (isIgnoredPublishPath(header.name)) {
+      const blocks = Math.ceil(header.size / 512);
+      offset += blocks * 512;
+      continue;
+    }
 
     // Validate extension
     const extError = validateExtension(header.name, {

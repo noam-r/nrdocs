@@ -33,5 +33,7 @@ export async function handlePublishCapabilities(
   return jsonSuccess({
     full_name: fullName,
     allow_unlisted_assets: matchedRule?.allow_unlisted_assets ?? false,
+    rule_matched: matchedRule !== null,
+    rule_id: matchedRule?.id ?? null,
   });
 }

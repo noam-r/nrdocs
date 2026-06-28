@@ -97,4 +97,11 @@ describe('validateExtension', () => {
     expect(validateExtension('STYLE.CSS')).toBeNull();
     expect(validateExtension('SCRIPT.JS')!.code).toBe('REJECTED_EXTENSION');
   });
+
+  it('accepts ignored OS junk paths without failing', () => {
+    expect(validateExtension('.DS_Store')).toBeNull();
+    expect(validateExtension('images/.DS_Store')).toBeNull();
+    expect(validateExtension('images/._photo.png')).toBeNull();
+    expect(validateExtension('Thumbs.db')).toBeNull();
+  });
 });

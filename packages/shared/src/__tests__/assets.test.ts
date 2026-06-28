@@ -4,6 +4,7 @@ import {
   classifyAssetExtension,
   validateAssetFilePath,
   findUnlistedAssetPaths,
+  isIgnoredPublishPath,
   isNrdocsExportArtifactPath,
   nrdocsSourceArtifactPath,
 } from '../assets.js';
@@ -56,5 +57,25 @@ describe('asset extension policy', () => {
       'bundle.zip',
     ]);
     expect(paths).toEqual(['bundle.zip']);
+  });
+
+  it('ignores common OS junk files', () => {
+    expect(isIgnoredPublishPath('.DS_Store')).toBe(true);
+    expect(isIgnoredPublishPath('assets/.DS_Store')).toBe(true);
+    expect(isIgnoredPublishPath('Thumbs.db')).toBe(true);
+    expect(isIgnoredPublishPath('images/._photo.png')).toBe(true);
+    expect(isIgnoredPublishPath('.hidden')).toBe(true);
+    expect(isIgnoredPublishPath('node_modules/pkg/index.js')).toBe(true);
+    expect(isIgnoredPublishPath('logo.png')).toBe(false);
+  });
+
+  it('validateAssetFilePath accepts ignored junk without failing', () => {
+    const r = validateAssetFilePath('docs/.DS_Store');
+    expect(r.ok).toBe(true);
+    expect(r.classification).toBe('ignored');
+  });
+
+  it('findUnlistedAssetPaths skips ignored junk', () => {
+    expect(findUnlistedAssetPaths(['.DS_Store', 'bundle.zip'])).toEqual(['bundle.zip']);
   });
 });
