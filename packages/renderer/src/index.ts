@@ -1,6 +1,5 @@
 /**
- * Local Markdown discovery, validation, and publication-graph construction.
- * HTML rendering and artifact packaging arrive in Phase 4.
+ * Local Markdown discovery, validation, rendering, and packaging.
  */
 import { CONTRACTS_PACKAGE } from '@nrdocs/contracts';
 
@@ -19,3 +18,17 @@ export * from './build-graph.js';
 export * from './serialize-nav.js';
 export { decodeMarkdownSource } from './utf8.js';
 export { extractFirstH1, loadAndNormalizeMarkdown, collectLinks } from './markdown-scan.js';
+export { routeRelativeHref, pageObjectPath, mediaObjectPath } from './relative-href.js';
+export { highlightCode, normalizeHighlightLanguage } from './highlight.js';
+export { assemblePageDocument, flattenNavigablePages } from './shell.js';
+export {
+  renderPublication,
+  type InMemoryArtifact,
+  type RenderedFile,
+} from './render-publication.js';
+export { packArtifact, buildDeterministicTar, gzipDeterministic } from './pack-artifact.js';
+export {
+  buildArtifactFromConfig,
+  buildArtifactFromGraph,
+  FIXED_PAGE_VALIDATOR_GAP,
+} from './artifact.js';
