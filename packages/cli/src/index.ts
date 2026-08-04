@@ -10,13 +10,14 @@ import {
   rootHelp,
   runCredentialsCommand,
   runInstanceCommand,
-  runStubCommand,
   type CommandContext,
 } from './dispatch.js';
 import { runGenerateNavCommand } from './generate-nav.js';
 import { runPreviewCommand } from './preview.js';
 import { runDeployCommand, type DeployOptions } from './deploy.js';
 import { runAdminSiteCommand, runAdminTokenCommand, type AdminOptions } from './admin.js';
+import { runConnectCommand, type ConnectOptions } from './connect.js';
+import { runPublishCommand, type PublishOptions } from './publish.js';
 import { presentError, presentHumanSuccess } from './present.js';
 import { assertSupportedPlatform, createProcessRuntime, type Runtime } from './runtime.js';
 import { createRejectingTerminal, type Terminal } from './terminal.js';
@@ -43,12 +44,17 @@ export type RunOptions = {
   terminal?: Terminal;
   deploy?: DeployOptions;
   admin?: AdminOptions;
+  publisher?: ConnectOptions & PublishOptions;
 };
 
 async function dispatch(
   ctx: CommandContext,
   rest: string[],
-  options: { deploy?: DeployOptions; admin?: AdminOptions } = {},
+  options: {
+    deploy?: DeployOptions;
+    admin?: AdminOptions;
+    publisher?: ConnectOptions & PublishOptions;
+  } = {},
 ): Promise<void> {
   if (rest.length === 0) {
     if (ctx.help) {
@@ -71,10 +77,10 @@ async function dispatch(
       await runInstanceCommand(ctx, tail);
       return;
     case 'connect':
-      await runStubCommand('connect', ctx);
+      await runConnectCommand(ctx, tail, options.publisher ?? {});
       return;
     case 'publish':
-      await runStubCommand('publish', ctx);
+      await runPublishCommand(ctx, tail, options.publisher ?? {});
       return;
     case 'preview':
       await runPreviewCommand(ctx, tail);
@@ -151,6 +157,7 @@ export async function runCli(
     await dispatch(ctx, rest, {
       ...(options.deploy !== undefined ? { deploy: options.deploy } : {}),
       ...(options.admin !== undefined ? { admin: options.admin } : {}),
+      ...(options.publisher !== undefined ? { publisher: options.publisher } : {}),
     });
     return ExitCode.Success;
   } catch (error) {
@@ -227,3 +234,7 @@ export {
   generatePublishingToken,
 } from './admin.js';
 export type { AdminOptions } from './admin.js';
+export { runConnectCommand } from './connect.js';
+export type { ConnectOptions } from './connect.js';
+export { runPublishCommand } from './publish.js';
+export type { PublishOptions } from './publish.js';

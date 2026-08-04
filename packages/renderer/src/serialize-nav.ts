@@ -22,12 +22,12 @@ function dumpNav(entries: NavigationEntry[], indent: number): string[] {
   return lines;
 }
 
-/** Serialize nrdocs.yml preserving known fields and writing explicit navigation. */
+/** Serialize nrdocs.yml preserving known fields. */
 export function serializeNrdocsYaml(
   config: Pick<NrdocsConfig, 'title' | 'language' | 'direction' | 'navigation'> & {
     publish?: NrdocsConfig['publish'];
   },
-  navigation: NavigationEntry[],
+  navigationOverride?: NavigationEntry[],
 ): string {
   const lines: string[] = [];
   if (config.publish) {
@@ -42,8 +42,14 @@ export function serializeNrdocsYaml(
   if (config.direction !== 'auto') {
     lines.push(`direction: ${config.direction}`);
   }
-  lines.push('navigation:');
-  lines.push(...dumpNav(navigation, 2));
+
+  const navigation = navigationOverride ?? config.navigation;
+  if (navigation === 'auto') {
+    lines.push('navigation: auto');
+  } else {
+    lines.push('navigation:');
+    lines.push(...dumpNav(navigation, 2));
+  }
   lines.push('');
   return lines.join('\n');
 }

@@ -32,6 +32,7 @@
     "yaml": "2.8.0"
   },
   "devDependencies": {
+    "@nrdocs/worker": "workspace:*",
     "@types/node": "^24.13.3"
   }
 }

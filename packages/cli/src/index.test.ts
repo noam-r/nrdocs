@@ -374,7 +374,7 @@ describe('exit codes', () => {
     await withTempHome(async (_home, runtime) => {
       expect(await main(['--help'], { runtime })).toBe(ExitCode.Success);
       expect(await main(['nope'], { runtime })).toBe(ExitCode.Usage);
-      expect(await main(['connect'], { runtime })).toBe(ExitCode.InternalSoftware);
+      expect(await main(['connect'], { runtime })).toBe(ExitCode.Usage);
     });
     await withTempHome(
       async (_h, runtime) => {
