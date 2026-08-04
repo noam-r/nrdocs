@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { applyMigrations, openMemorySqlite, sqliteAsD1Database } from '@nrdocs/persistence';
+import { applyMigrations, sqliteAsD1Database } from '@nrdocs/persistence';
+import { openMemorySqlite } from '@nrdocs/persistence/sqlite';
 import { WORKER_PACKAGE, workerDependencies, workerPersistence } from './index.js';
 
 describe('@nrdocs/worker', () => {

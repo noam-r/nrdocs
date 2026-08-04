@@ -5,16 +5,25 @@ minisite. Git is never required and is never part of site identity.
 
 ## Status
 
-This branch is the clean 2.0 bootstrap. Product commands are not implemented
-yet. Implement against the locked specification set one phase at a time.
+Phases 1–12 of the implementation plan are complete on this branch. The package
+is a **release candidate**: use `pnpm verify` locally; tag `v2.0.0` only after
+the disposable Cloudflare suite in `RELEASE.md` passes.
+
+## Install (published CLI)
+
+```bash
+npm install -g nrdocs
+nrdocs --help
+```
 
 ## Specifications
 
-Start with [`nrdocs-specs-v2/README.md`](./nrdocs-specs-v2/README.md).
+Start with [`nrdocs-specs/README.md`](./nrdocs-specs/README.md).
 
-- [`11-readiness-assessment.md`](./nrdocs-specs-v2/11-readiness-assessment.md) — go/no-go
-- [`06-implementation-plan.md`](./nrdocs-specs-v2/06-implementation-plan.md) — phases
-- [`phase-0a-feasibility-report.md`](./nrdocs-specs-v2/phase-0a-feasibility-report.md) — Cloudflare gate
+- [`11-readiness-assessment.md`](./nrdocs-specs/11-readiness-assessment.md) — go/no-go
+- [`06-implementation-plan.md`](./nrdocs-specs/06-implementation-plan.md) — phases
+- [`acceptance-traceability.md`](./nrdocs-specs/acceptance-traceability.md) — criteria → tests
+- [`RELEASE.md`](./RELEASE.md) — RC and tagging process
 
 ## Workspace
 
@@ -24,7 +33,10 @@ Start with [`nrdocs-specs-v2/README.md`](./nrdocs-specs-v2/README.md).
 | `packages/persistence` | `@nrdocs/persistence` | D1/R2 persistence model (private)    |
 | `packages/renderer`    | `@nrdocs/renderer`    | Local Markdown render/pack (private) |
 | `packages/worker`      | `@nrdocs/worker`      | Cloudflare Worker (private)          |
-| `packages/cli`         | `nrdocs`              | Published CLI binary                 |
+| `packages/cli`         | `nrdocs`              | Published CLI binary + release unit  |
+
+The published `nrdocs` tarball inlines workspace packages and ships the Worker
+module plus fixed platform assets under `packaged/`.
 
 ## Development
 
@@ -35,8 +47,14 @@ pnpm install
 pnpm verify
 ```
 
-`pnpm verify` runs format check, lint, typecheck, unit tests, build, and a dry-run
-pack of the public `nrdocs` package.
+`pnpm verify` runs format check, lint, build (including the release bundle),
+typecheck, unit/integration tests, local e2e smoke, and package-content
+verification (`npm pack` + clean install).
+
+## Reviews
+
+- [`docs/dependency-and-bundle-review.md`](./docs/dependency-and-bundle-review.md)
+- [`docs/security-review.md`](./docs/security-review.md)
 
 ## Legacy 1.x
 

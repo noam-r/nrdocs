@@ -30,13 +30,13 @@ now makes those decisions normative:
 
 ## Gate Versus Gap
 
-| Item | Classification | Required response |
-| --- | --- | --- |
-| Cloudflare API, permission, D1 transaction, R2 REST, Worker upload, and cleanup behavior | External feasibility gate | Run Phase 0A in disposable resources; revise the spec if the platform contradicts it |
-| PBKDF2 cost under the selected Worker plan | Performance conformance test | Benchmark the locked 600,000-iteration verifier before Phase 11; revise the security contract if it cannot meet the platform budget |
-| Streaming validation within Worker CPU, memory, and duration limits | Capacity conformance test | Measure in Phase 0A and test every locked boundary in Phase 9 |
-| Reader accessibility and Mermaid behavior under the fixed CSP | Browser conformance test | Exercise the Phase 11 matrix; fix implementation bugs without changing the contract |
-| Product behavior, public commands, formats, lifetimes, limits, and failure semantics | Specified | Implement exactly; do not choose alternatives in code |
+| Item                                                                                     | Classification               | Required response                                                                                                                   |
+| ---------------------------------------------------------------------------------------- | ---------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| Cloudflare API, permission, D1 transaction, R2 REST, Worker upload, and cleanup behavior | External feasibility gate    | Run Phase 0A in disposable resources; revise the spec if the platform contradicts it                                                |
+| PBKDF2 cost under the selected Worker plan                                               | Performance conformance test | Benchmark the locked 600,000-iteration verifier before Phase 11; revise the security contract if it cannot meet the platform budget |
+| Streaming validation within Worker CPU, memory, and duration limits                      | Capacity conformance test    | Measure in Phase 0A and test every locked boundary in Phase 9                                                                       |
+| Reader accessibility and Mermaid behavior under the fixed CSP                            | Browser conformance test     | Exercise the Phase 11 matrix; fix implementation bugs without changing the contract                                                 |
+| Product behavior, public commands, formats, lifetimes, limits, and failure semantics     | Specified                    | Implement exactly; do not choose alternatives in code                                                                               |
 
 The first three rows are empirical gates because platform behavior must be
 measured. They are not missing design choices: the intended behavior and the
@@ -78,4 +78,3 @@ rendering, and no nrdocs-owned version-management system.
 
 The correct next action is Phase 0A—not another product-question round and not a
 blind rewrite.
-

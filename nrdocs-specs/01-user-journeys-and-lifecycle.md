@@ -75,14 +75,14 @@ password
 
 The states are not conflated.
 
-| Content | Lifecycle | Access | Reader result |
-|---|---|---|---|
-| Empty | Enabled | Public | 404 |
-| Empty | Enabled | Password | 404 |
-| Empty | Disabled | Public or password | 404 |
-| Published | Enabled | Public | Site content |
-| Published | Enabled | Password | Password flow or site content under a valid session |
-| Published | Disabled | Public or password | 404 |
+| Content   | Lifecycle | Access             | Reader result                                       |
+| --------- | --------- | ------------------ | --------------------------------------------------- |
+| Empty     | Enabled   | Public             | 404                                                 |
+| Empty     | Enabled   | Password           | 404                                                 |
+| Empty     | Disabled  | Public or password | 404                                                 |
+| Published | Enabled   | Public             | Site content                                        |
+| Published | Enabled   | Password           | Password flow or site content under a valid session |
+| Published | Disabled  | Public or password | 404                                                 |
 
 There is no pending, approval, draft, archived, or soft-deleted site state.
 

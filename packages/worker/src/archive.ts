@@ -43,16 +43,10 @@ function assertSafePath(path: string): void {
 
 async function gunzipBounded(compressed: Uint8Array, maxUncompressed: number): Promise<Uint8Array> {
   if (typeof DecompressionStream === 'undefined') {
-    // Node fallback via zlib for older runtimes — Workers always have DecompressionStream.
-    const { gunzipSync } = await import('node:zlib');
-    const out = gunzipSync(compressed);
-    if (out.byteLength > maxUncompressed) {
-      throw new ApiError(
-        PublisherApiErrorCode.ArtifactTooLarge,
-        'Uncompressed artifact exceeds size limit.',
-      );
-    }
-    return new Uint8Array(out);
+    throw new ApiError(
+      PublisherApiErrorCode.TemporarilyUnavailable,
+      'gzip decompression is unavailable in this runtime.',
+    );
   }
   const ds = new DecompressionStream('gzip');
   const stream = new Blob([Uint8Array.from(compressed)]).stream().pipeThrough(ds);

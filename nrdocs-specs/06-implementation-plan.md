@@ -21,18 +21,18 @@ The plan turns the locked nrdocs 2.0 product and technical specifications into a
 
 The coding agent must treat these documents as normative.
 
-| Document | Authority |
-|---|---|
-| [`00-product-brief.md`](./00-product-brief.md) | Product definition, actors, scope, fixed feature set, and non-goals |
-| [`01-user-journeys-and-lifecycle.md`](./01-user-journeys-and-lifecycle.md) | User-visible flows, state behavior, command outcomes, and lifecycle expectations |
-| [`02-cli-configuration-and-credentials.md`](./02-cli-configuration-and-credentials.md) | Exact command surface, configuration schema, navigation behavior, local stores, credential resolution, output, and errors |
-| [`03-system-architecture.md`](./03-system-architecture.md) | Component boundaries, Cloudflare model, administrative boundary, publication architecture, serving path, and failure isolation |
-| [`04-data-model-and-state-invariants.md`](./04-data-model-and-state-invariants.md) | D1 entities, state invariants, concurrency, deletion ordering, token lifecycle, and R2 artifact states |
-| [`05-publication-api-and-artifact-lifecycle.md`](./05-publication-api-and-artifact-lifecycle.md) | HTTP contract, manifest and archive formats, server validation, atomic promotion, idempotency, and reader routes |
-| [`07-security-and-resource-limits.md`](./07-security-and-resource-limits.md) | Token, password, session, CSRF, abuse, lock, redaction, and numeric resource-limit contract |
-| [`08-cloudflare-deployment-and-operations.md`](./08-cloudflare-deployment-and-operations.md) | Cloudflare authentication, permissions, resource identity, deployment, reconciliation, upgrades, and custom domain |
-| [`09-fixed-reader-and-serving.md`](./09-fixed-reader-and-serving.md) | Native reader UI, complete page schema, browser behavior, responses, caching, headers, and storage failures |
-| This document | Implementation order, repository layout, engineering gates, and Cursor operating procedure |
+| Document                                                                                         | Authority                                                                                                                      |
+| ------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------ |
+| [`00-product-brief.md`](./00-product-brief.md)                                                   | Product definition, actors, scope, fixed feature set, and non-goals                                                            |
+| [`01-user-journeys-and-lifecycle.md`](./01-user-journeys-and-lifecycle.md)                       | User-visible flows, state behavior, command outcomes, and lifecycle expectations                                               |
+| [`02-cli-configuration-and-credentials.md`](./02-cli-configuration-and-credentials.md)           | Exact command surface, configuration schema, navigation behavior, local stores, credential resolution, output, and errors      |
+| [`03-system-architecture.md`](./03-system-architecture.md)                                       | Component boundaries, Cloudflare model, administrative boundary, publication architecture, serving path, and failure isolation |
+| [`04-data-model-and-state-invariants.md`](./04-data-model-and-state-invariants.md)               | D1 entities, state invariants, concurrency, deletion ordering, token lifecycle, and R2 artifact states                         |
+| [`05-publication-api-and-artifact-lifecycle.md`](./05-publication-api-and-artifact-lifecycle.md) | HTTP contract, manifest and archive formats, server validation, atomic promotion, idempotency, and reader routes               |
+| [`07-security-and-resource-limits.md`](./07-security-and-resource-limits.md)                     | Token, password, session, CSRF, abuse, lock, redaction, and numeric resource-limit contract                                    |
+| [`08-cloudflare-deployment-and-operations.md`](./08-cloudflare-deployment-and-operations.md)     | Cloudflare authentication, permissions, resource identity, deployment, reconciliation, upgrades, and custom domain             |
+| [`09-fixed-reader-and-serving.md`](./09-fixed-reader-and-serving.md)                             | Native reader UI, complete page schema, browser behavior, responses, caching, headers, and storage failures                    |
+| This document                                                                                    | Implementation order, repository layout, engineering gates, and Cursor operating procedure                                     |
 
 ### Interpretation rules
 
@@ -93,24 +93,24 @@ The exact tag name is less important than creating an immutable remote reference
 
 The 2.0 branch must not contain parallel `v1/` and `v2/` implementations. The legacy tag is the archive.
 
-Old specifications should not remain beside current specifications under ambiguous names. Once the bootstrap is merged, the 2.0 specifications may be renamed from `nrdocs-specs-v2/` to `specs/` in one mechanical commit, with all internal links updated together.
+Old specifications should not remain beside current specifications under ambiguous names. Once the bootstrap is merged, the 2.0 specifications may be renamed from `nrdocs-specs/` to `specs/` in one mechanical commit, with all internal links updated together.
 
 ### Reuse policy
 
 Starting from scratch does not mean refusing all existing code. It means that reuse requires affirmative review against the 2.0 contracts.
 
-| Existing area | Default treatment | Reason |
-|---|---|---|
-| TypeScript, pnpm, Vitest, formatting, and build patterns | May be reused after dependency refresh | Infrastructure patterns do not carry product behavior |
-| Markdown parsing and renderer utilities | Candidate for isolated extraction only after contract tests | Some parsing work may remain valid, but configuration and output assumptions changed |
-| Mermaid and syntax-highlighting bundling | Candidate for reuse after fixed-interface review | The features remain, but publisher-controlled execution must remain impossible |
-| Generic MIME and safe-path utilities | Candidate for reuse after allowlist comparison and adversarial tests | Names may match while semantics differ |
-| Worker upload/build packaging | Candidate for reuse after deployment-contract review | Self-contained deployment remains useful, but bindings and administration changed |
-| GitHub OIDC, repository identity, repository routes, rules, approval, pending state, and workflow generation | Delete; do not adapt | These concepts do not exist in 2.0 |
-| Existing D1 migrations | Delete; do not migrate forward | The 2.0 database is a clean schema with different entities and invariants |
-| Operator application tokens and profiles | Delete | Cloudflare authority and the instance descriptor replace them |
-| Source export and site ZIP behavior | Delete | Source and archive downloads are explicit non-goals |
-| 1.x command parser and help output | Rebuild from the 2.0 command table | Removed commands must not survive as aliases or hidden options |
+| Existing area                                                                                                | Default treatment                                                    | Reason                                                                               |
+| ------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------- | ------------------------------------------------------------------------------------ |
+| TypeScript, pnpm, Vitest, formatting, and build patterns                                                     | May be reused after dependency refresh                               | Infrastructure patterns do not carry product behavior                                |
+| Markdown parsing and renderer utilities                                                                      | Candidate for isolated extraction only after contract tests          | Some parsing work may remain valid, but configuration and output assumptions changed |
+| Mermaid and syntax-highlighting bundling                                                                     | Candidate for reuse after fixed-interface review                     | The features remain, but publisher-controlled execution must remain impossible       |
+| Generic MIME and safe-path utilities                                                                         | Candidate for reuse after allowlist comparison and adversarial tests | Names may match while semantics differ                                               |
+| Worker upload/build packaging                                                                                | Candidate for reuse after deployment-contract review                 | Self-contained deployment remains useful, but bindings and administration changed    |
+| GitHub OIDC, repository identity, repository routes, rules, approval, pending state, and workflow generation | Delete; do not adapt                                                 | These concepts do not exist in 2.0                                                   |
+| Existing D1 migrations                                                                                       | Delete; do not migrate forward                                       | The 2.0 database is a clean schema with different entities and invariants            |
+| Operator application tokens and profiles                                                                     | Delete                                                               | Cloudflare authority and the instance descriptor replace them                        |
+| Source export and site ZIP behavior                                                                          | Delete                                                               | Source and archive downloads are explicit non-goals                                  |
+| 1.x command parser and help output                                                                           | Rebuild from the 2.0 command table                                   | Removed commands must not survive as aliases or hidden options                       |
 
 Every reused source file must have a review note in its pull request explaining which 2.0 requirement it satisfies and which new tests protect that behavior.
 
@@ -136,7 +136,7 @@ packages/
 tests/
   fixtures/        Cross-package publication and adversarial fixtures
   e2e/             CLI-to-Worker journeys using isolated local resources
-nrdocs-specs-v2/   Authoritative specification set during implementation
+nrdocs-specs/   Authoritative specification set during implementation
 ```
 
 ### Dependency direction
@@ -308,7 +308,7 @@ Recommended next phase
 ### Reusable Cursor prompt
 
 ```text
-Implement Phase <N> from @nrdocs-specs-v2/06-implementation-plan.md.
+Implement Phase <N> from @nrdocs-specs/06-implementation-plan.md.
 
 Read the phase's authoritative specifications completely before editing. Treat them
 as contracts. Inspect the current repository and preserve unrelated changes.
@@ -421,14 +421,14 @@ Create a clean, testable 2.0 workspace while preserving the final Git-coupled im
 10. Configure `packages/cli` as public package `nrdocs` with version `2.0.0`, one `nrdocs` binary entry, an explicit package-file allowlist, and private internal workspace packages.
 11. Add root commands:
 
-   ```text
-   pnpm build
-   pnpm typecheck
-   pnpm lint
-   pnpm test
-   pnpm test:e2e
-   pnpm verify
-   ```
+```text
+pnpm build
+pnpm typecheck
+pnpm lint
+pnpm test
+pnpm test:e2e
+pnpm verify
+```
 
 12. Add CI for install, format/lint, typecheck, unit tests, integration tests that need no external account, and package build.
 13. Replace the README with a concise 2.0 development statement and links to the specifications. Do not document unfinished commands as available.
@@ -1151,7 +1151,7 @@ Prove the complete product against the specifications and release an installable
 8. Perform dependency, license, secret, and bundle-content review.
 9. Perform the dedicated security review after functional behavior is locked.
 10. Replace development README content with truthful installation, administration, publishing, CI, reader-access, troubleshooting, and limitations documentation.
-11. Remove transitional names such as `nrdocs-specs-v2` if the specifications are now the only active version.
+11. Remove transitional names such as `nrdocs-specs` if the specifications are now the only active version.
 12. Produce a release candidate before `v2.0.0`.
 
 ### Required end-to-end journeys
@@ -1251,20 +1251,20 @@ No phase is complete when its relevant test command is skipped, silently allowed
 
 ## Acceptance Traceability
 
-| Specification | Primary implementation phases |
-|---|---|
-| Product purpose, scope, and non-goals | 0A, 0, and all phase reviews |
-| Administrator and publisher journeys | 2, 7, 8, and 10 |
-| Reader journeys and lifecycle | 8 and 11 |
-| Configuration, navigation, and credentials | 1 through 5 and 10 |
-| Component and authority boundaries | 0A, 0, 6 through 9, and 11 |
-| Cloudflare control-plane feasibility | 0A, then production policy in 7 and 8 |
-| D1 state invariants and concurrency | 6, 8, and 9 |
-| Artifact and API contract | 1, 4, 9, and 10 |
-| Security, limits, sessions, and abuse controls | 1, 4, 8, 9, and 11 |
-| Deployment, reconciliation, and custom domain | 0A, 7, 8, and 12 |
-| Fixed reader UI, page schema, and HTTP serving | 4, 5, 9, and 11 |
-| Full product acceptance criteria | 12 |
+| Specification                                  | Primary implementation phases         |
+| ---------------------------------------------- | ------------------------------------- |
+| Product purpose, scope, and non-goals          | 0A, 0, and all phase reviews          |
+| Administrator and publisher journeys           | 2, 7, 8, and 10                       |
+| Reader journeys and lifecycle                  | 8 and 11                              |
+| Configuration, navigation, and credentials     | 1 through 5 and 10                    |
+| Component and authority boundaries             | 0A, 0, 6 through 9, and 11            |
+| Cloudflare control-plane feasibility           | 0A, then production policy in 7 and 8 |
+| D1 state invariants and concurrency            | 6, 8, and 9                           |
+| Artifact and API contract                      | 1, 4, 9, and 10                       |
+| Security, limits, sessions, and abuse controls | 1, 4, 8, 9, and 11                    |
+| Deployment, reconciliation, and custom domain  | 0A, 7, 8, and 12                      |
+| Fixed reader UI, page schema, and HTTP serving | 4, 5, 9, and 11                       |
+| Full product acceptance criteria               | 12                                    |
 
 Each pull request must cite the exact specification sections and acceptance criteria it implements. Phase 12 converts those citations into one final matrix; it must not discover major untested requirements for the first time.
 

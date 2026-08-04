@@ -33,7 +33,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          if grep -RInE --exclude-dir=nrdocs-specs-v2 --exclude-dir=node_modules --exclude-dir=dist --exclude='*.md' \
+          if grep -RInE --exclude-dir=nrdocs-specs --exclude-dir=node_modules --exclude-dir=dist --exclude='*.md' \
             -e 'github-oidc' -e 'owner/repo' -e 'auto-approval' \
             -e 'source-export' -e 'pending.?approval' \
             packages tests package.json; then

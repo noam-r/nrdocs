@@ -103,15 +103,15 @@ HTML comments, processing instructions, foreign namespaces, `template`,
 Shell elements accept only the attributes shown in the skeleton and the exact
 `nr-*` classes required by the renderer. Content accepts only:
 
-| Element | Allowed attributes |
-| --- | --- |
-| Heading | `id="nr-h-<16 lowercase hex>"` |
-| `a` | validated `href`; optional escaped `title` |
-| `img` | validated `src`, required `alt`, optional `title`, exact `loading="lazy"`, `decoding="async"` |
-| `ol` | optional integer `start` from -100000 through 100000 |
-| `th`, `td` | optional class `nr-align-left`, `nr-align-center`, or `nr-align-right` |
-| Task `input` | exact `type="checkbox"`, `disabled`, optional `checked` |
-| `pre`, `code`, `span` | renderer-owned language, highlighting, or Mermaid classes defined below |
+| Element               | Allowed attributes                                                                            |
+| --------------------- | --------------------------------------------------------------------------------------------- |
+| Heading               | `id="nr-h-<16 lowercase hex>"`                                                                |
+| `a`                   | validated `href`; optional escaped `title`                                                    |
+| `img`                 | validated `src`, required `alt`, optional `title`, exact `loading="lazy"`, `decoding="async"` |
+| `ol`                  | optional integer `start` from -100000 through 100000                                          |
+| `th`, `td`            | optional class `nr-align-left`, `nr-align-center`, or `nr-align-right`                        |
+| Task `input`          | exact `type="checkbox"`, `disabled`, optional `checked`                                       |
+| `pre`, `code`, `span` | renderer-owned language, highlighting, or Mermaid classes defined below                       |
 
 All other attributes are rejected, including `style`, event handlers, `target`,
 `download`, arbitrary `id`, and arbitrary `data-*`. Text is valid UTF-8 and
@@ -129,11 +129,11 @@ current page route, then emit the remaining target segments. Page targets end
 with `/`; file targets retain their filename. A target at the same directory is
 `./`; a fragment may follow the computed reference. For example:
 
-| Current page | Target | Stored `href` |
-| --- | --- | --- |
-| `/` | `/` | `./` |
-| `/` | `/overview/` | `overview/` |
-| `/guides/install/` | `/` | `../../` |
+| Current page       | Target                   | Stored `href`       |
+| ------------------ | ------------------------ | ------------------- |
+| `/`                | `/`                      | `./`                |
+| `/`                | `/overview/`             | `overview/`         |
+| `/guides/install/` | `/`                      | `../../`            |
 | `/guides/install/` | `/guides/configuration/` | `../configuration/` |
 
 Here the routes are site-relative and deliberately omit `/<slug>`. The same
@@ -239,14 +239,14 @@ error. Logout returns to that same site root.
 Platform pages use the current site's language and direction where known, or
 `lang="und" dir="auto"` otherwise. Copy is exact:
 
-| Page | Heading | Body/action |
-| --- | --- | --- |
-| Instance root | `nrdocs` | `This nrdocs instance serves sites at their direct URLs.` |
-| Password form | `Password required` | `Enter the password to continue.`; label `Password`; button `Continue` |
-| Wrong password | `Password required` | `The password is incorrect. Try again.` |
-| Logout | `You have been signed out.` | Link `Return to site.` |
-| 404 | `Not found` | `The requested page is unavailable.` |
-| 500/503 | `Site temporarily unavailable` | `Try again later.` and a safe request ID |
+| Page           | Heading                        | Body/action                                                            |
+| -------------- | ------------------------------ | ---------------------------------------------------------------------- |
+| Instance root  | `nrdocs`                       | `This nrdocs instance serves sites at their direct URLs.`              |
+| Password form  | `Password required`            | `Enter the password to continue.`; label `Password`; button `Continue` |
+| Wrong password | `Password required`            | `The password is incorrect. Try again.`                                |
+| Logout         | `You have been signed out.`    | Link `Return to site.`                                                 |
+| 404            | `Not found`                    | `The requested page is unavailable.`                                   |
+| 500/503        | `Site temporarily unavailable` | `Try again later.` and a safe request ID                               |
 
 Access pages contain the signed hidden CSRF and safe-return fields described in
 the security specification. No platform error discloses whether an unknown
@@ -255,23 +255,23 @@ the documented status/error contract.
 
 ## MIME and Attachment Rules
 
-| Extension | Content-Type |
-| --- | --- |
-| `.png` | `image/png` |
-| `.jpg`, `.jpeg` | `image/jpeg` |
-| `.gif` | `image/gif` |
-| `.webp` | `image/webp` |
-| `.avif` | `image/avif` |
-| `.ico` | `image/vnd.microsoft.icon` |
-| `.pdf` | `application/pdf` |
-| `.txt` | `text/plain; charset=utf-8` |
-| `.csv` | `text/csv; charset=utf-8` |
-| `.json` | `application/json` |
-| `.yaml`, `.yml` | `application/yaml` |
-| `.toml` | `application/toml` |
-| `.xml` | `application/xml` |
-| `.ndjson` | `application/x-ndjson` |
-| `.zip` | `application/zip` |
+| Extension       | Content-Type                |
+| --------------- | --------------------------- |
+| `.png`          | `image/png`                 |
+| `.jpg`, `.jpeg` | `image/jpeg`                |
+| `.gif`          | `image/gif`                 |
+| `.webp`         | `image/webp`                |
+| `.avif`         | `image/avif`                |
+| `.ico`          | `image/vnd.microsoft.icon`  |
+| `.pdf`          | `application/pdf`           |
+| `.txt`          | `text/plain; charset=utf-8` |
+| `.csv`          | `text/csv; charset=utf-8`   |
+| `.json`         | `application/json`          |
+| `.yaml`, `.yml` | `application/yaml`          |
+| `.toml`         | `application/toml`          |
+| `.xml`          | `application/xml`           |
+| `.ndjson`       | `application/x-ndjson`      |
+| `.zip`          | `application/zip`           |
 
 HTML is `text/html; charset=utf-8`; platform CSS and JavaScript use their
 standard UTF-8 MIME types. Unknown extensions are not publishable.

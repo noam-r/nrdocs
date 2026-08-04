@@ -14,13 +14,16 @@
   },
   "files": [
     "dist",
+    "packaged",
     "README.md"
   ],
   "engines": {
     "node": ">=24.0.0"
   },
   "scripts": {
-    "build": "tsc -p tsconfig.build.json",
+    "bundle:release": "node scripts/bundle-release.mjs",
+    "build": "pnpm run bundle:release",
+    "pack:check": "node scripts/pack-check.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "eslint src",
     "test": "vitest run --dir src"

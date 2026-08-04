@@ -122,6 +122,11 @@ export async function runDeployCommand(
   if (ctx.json) throw usageError('deploy does not support --json.');
   requireInteractiveTerminal(ctx.runtime, 'deploy');
 
+  if (!options.cloudflare) {
+    const { createDefaultDeployOptions } = await import('./deploy/production.js');
+    options = { ...(await createDefaultDeployOptions(ctx.runtime)), ...options };
+  }
+
   const { flags, positionals } = parseFlags(args, {
     string: ['--domain', '--instance'],
   });

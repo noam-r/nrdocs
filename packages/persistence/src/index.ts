@@ -20,6 +20,6 @@ export * from './decode.js';
 export * from './r2-keys.js';
 export * from './r2.js';
 export * from './ops.js';
-export * from './sqlite-adapter.js';
 export * from './d1-adapter.js';
 export * from './time.js';
+// sqlite-adapter is Node-only — import from '@nrdocs/persistence/sqlite'.

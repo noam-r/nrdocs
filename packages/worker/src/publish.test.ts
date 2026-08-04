@@ -22,10 +22,10 @@ import {
   createSiteWithInitialToken,
   insertInstanceMetadata,
   MemoryArtifactStore,
-  openMemorySqlite,
   sqliteAsD1Database,
   getSiteById,
 } from '@nrdocs/persistence';
+import { openMemorySqlite } from '@nrdocs/persistence/sqlite';
 import { buildArtifactFromConfig } from '@nrdocs/renderer';
 import { parseNrdocsConfig } from '@nrdocs/contracts';
 import {

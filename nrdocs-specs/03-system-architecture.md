@@ -63,14 +63,14 @@ The architecture contains no persistent application server, user-account service
 
 The initial 2.0 deployment uses Cloudflare-managed serverless components.
 
-| Component | Responsibility |
-|---|---|
-| nrdocs CLI | Deployment, administration, directory connection, validation, rendering, preview, packaging, and publication |
-| Cloudflare control plane | Administrator authentication and resource administration |
-| Cloudflare Worker | Publish-token validation, artifact ingestion, reader authentication, routing, and serving |
-| Cloudflare D1 | Authoritative site, token, access, lock, and current-artifact metadata |
-| Cloudflare R2 | Private storage for the current artifact and temporary publication prefixes |
-| Reader browser | Rendering the fixed site interface and holding a site-scoped reader session |
+| Component                | Responsibility                                                                                               |
+| ------------------------ | ------------------------------------------------------------------------------------------------------------ |
+| nrdocs CLI               | Deployment, administration, directory connection, validation, rendering, preview, packaging, and publication |
+| Cloudflare control plane | Administrator authentication and resource administration                                                     |
+| Cloudflare Worker        | Publish-token validation, artifact ingestion, reader authentication, routing, and serving                    |
+| Cloudflare D1            | Authoritative site, token, access, lock, and current-artifact metadata                                       |
+| Cloudflare R2            | Private storage for the current artifact and temporary publication prefixes                                  |
+| Reader browser           | Rendering the fixed site interface and holding a site-scoped reader session                                  |
 
 The implementation shares two runtime-neutral TypeScript boundaries between the CLI and Worker:
 

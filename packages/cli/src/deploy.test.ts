@@ -3,7 +3,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { ExitCode, createProcessRuntime, main, type Runtime } from './index.js';
-import { openMemorySqlite } from '@nrdocs/persistence';
+import { openMemorySqlite } from '@nrdocs/persistence/sqlite';
 import { createFakeCloudflare, encodeMarker } from './deploy/fake-cloudflare.js';
 import { extractWranglerToken } from './deploy/auth.js';
 import {

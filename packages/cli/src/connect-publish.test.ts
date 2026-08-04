@@ -15,9 +15,9 @@ import {
   createSiteWithInitialToken,
   insertInstanceMetadata,
   MemoryArtifactStore,
-  openMemorySqlite,
   sqliteAsD1Database,
 } from '@nrdocs/persistence';
+import { openMemorySqlite } from '@nrdocs/persistence/sqlite';
 import { handleRequest, type WorkerEnv } from '@nrdocs/worker';
 import { ExitCode, createProcessRuntime, main, type Runtime } from './index.js';
 import { createRejectingTerminal, type Terminal } from './terminal.js';

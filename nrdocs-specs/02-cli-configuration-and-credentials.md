@@ -1050,12 +1050,12 @@ The grammar is:
 ^[1-9][0-9]*(m|h|d|w)$
 ```
 
-| Unit | Exact duration |
-|---|---:|
-| `m` | 60 seconds |
-| `h` | 3,600 seconds |
-| `d` | 86,400 seconds |
-| `w` | 604,800 seconds |
+| Unit |  Exact duration |
+| ---- | --------------: |
+| `m`  |      60 seconds |
+| `h`  |   3,600 seconds |
+| `d`  |  86,400 seconds |
+| `w`  | 604,800 seconds |
 
 Whitespace, zero, signs, decimals, compound durations, uppercase units, months, and years are invalid. Numeric overflow and durations outside the limits defined by the security contract are rejected before mutation.
 
@@ -1097,17 +1097,17 @@ Administrative mutating commands do not support `--json`. A newly issued publish
 
 Every released command uses this stable process-exit taxonomy:
 
-| Code | Category | Required use |
-|---:|---|---|
-| `0` | Success | Completed work, `unchanged`, valid dry run, already-satisfied idempotent operation, or an administrator intentionally declining confirmation |
-| `2` | Usage | Unknown command or option, missing or malformed argument, or invalid option combination |
-| `10` | Local validation | Invalid or missing `nrdocs.yml`, Markdown, navigation, local reference, title, route, artifact size precheck, or other publisher-controlled input |
-| `20` | Credential or authority | Missing or unsafe credential, failed authentication, insufficient authority, deleted credential target, descriptor identity mismatch, or publishing site mismatch |
-| `30` | Retryable external condition | Publication conflict, rate limit, network failure, timeout, or temporary Cloudflare or nrdocs service failure |
-| `40` | Compatibility or protocol | Unsupported API or artifact version, non-retryable API contract rejection, invalid server response, or a server rejection showing that the installed CLI and instance cannot interoperate correctly |
-| `50` | Local I/O or state | Filesystem read/write failure, atomic local-state replacement failure, or inability to establish the required local permissions |
-| `70` | Internal software | Unexpected invariant violation or uncategorized nrdocs defect |
-| `130` | Interrupted | User interruption handled by the CLI |
+|  Code | Category                     | Required use                                                                                                                                                                                        |
+| ----: | ---------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+|   `0` | Success                      | Completed work, `unchanged`, valid dry run, already-satisfied idempotent operation, or an administrator intentionally declining confirmation                                                        |
+|   `2` | Usage                        | Unknown command or option, missing or malformed argument, or invalid option combination                                                                                                             |
+|  `10` | Local validation             | Invalid or missing `nrdocs.yml`, Markdown, navigation, local reference, title, route, artifact size precheck, or other publisher-controlled input                                                   |
+|  `20` | Credential or authority      | Missing or unsafe credential, failed authentication, insufficient authority, deleted credential target, descriptor identity mismatch, or publishing site mismatch                                   |
+|  `30` | Retryable external condition | Publication conflict, rate limit, network failure, timeout, or temporary Cloudflare or nrdocs service failure                                                                                       |
+|  `40` | Compatibility or protocol    | Unsupported API or artifact version, non-retryable API contract rejection, invalid server response, or a server rejection showing that the installed CLI and instance cannot interoperate correctly |
+|  `50` | Local I/O or state           | Filesystem read/write failure, atomic local-state replacement failure, or inability to establish the required local permissions                                                                     |
+|  `70` | Internal software            | Unexpected invariant violation or uncategorized nrdocs defect                                                                                                                                       |
+| `130` | Interrupted                  | User interruption handled by the CLI                                                                                                                                                                |
 
 `--help` and `--version` return `0`. A command never returns `0` after a partial or uncertain mutation unless the command has positively established the documented successful or unchanged state.
 
@@ -1117,12 +1117,12 @@ When more than one problem could apply, the command reports the first failure en
 
 The publisher CLI maps the API contract as follows:
 
-| API or transport result | Exit code |
-|---|---:|
-| `invalid_token`, `site_mismatch`, or equivalent target-authority failure | `20` |
-| `publish_in_progress`, HTTP `429`, `publication_failed`, `temporarily_unavailable`, network error, or timeout | `30` |
-| `artifact_too_large` | `10` |
-| `invalid_request`, `unsupported_artifact_format`, `invalid_artifact`, `digest_mismatch`, unsupported version, or malformed success response | `40` |
+| API or transport result                                                                                                                     | Exit code |
+| ------------------------------------------------------------------------------------------------------------------------------------------- | --------: |
+| `invalid_token`, `site_mismatch`, or equivalent target-authority failure                                                                    |      `20` |
+| `publish_in_progress`, HTTP `429`, `publication_failed`, `temporarily_unavailable`, network error, or timeout                               |      `30` |
+| `artifact_too_large`                                                                                                                        |      `10` |
+| `invalid_request`, `unsupported_artifact_format`, `invalid_artifact`, `digest_mismatch`, unsupported version, or malformed success response |      `40` |
 
 An unrecognized HTTP `4xx` response maps to `40`; an unrecognized HTTP `5xx` response maps to `30`. Administrative Cloudflare failures use the same semantic categories: authority failures map to `20`, retryable platform failures to `30`, and local descriptor or filesystem failures to their local categories.
 

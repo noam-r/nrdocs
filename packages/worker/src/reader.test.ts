@@ -20,13 +20,13 @@ import {
   getSiteById,
   insertInstanceMetadata,
   MemoryArtifactStore,
-  openMemorySqlite,
   renameSite,
   setSiteAccessPassword,
   setSiteAccessPublic,
   setSiteEnabled,
   sqliteAsD1Database,
 } from '@nrdocs/persistence';
+import { openMemorySqlite } from '@nrdocs/persistence/sqlite';
 import { buildArtifactFromConfig } from '@nrdocs/renderer';
 import { handleRequest, type WorkerEnv } from './index.js';
 import { MemoryRateLimiter } from './rate-limit.js';

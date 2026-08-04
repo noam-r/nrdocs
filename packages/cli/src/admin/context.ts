@@ -15,7 +15,9 @@ import { usageError } from '../errors.js';
 export type AdminOptions = {
   /** Open a SqlExecutor for the selected instance (tests inject sqlite). */
   openDb?: (descriptor: InstanceDescriptor) => Promise<SqlExecutor>;
-  /** R2 object store for site deletion (tests inject MemoryArtifactStore). */
+  /** Optional store factory; defaults to MemoryArtifactStore for tests. */
+  openStore?: (descriptor: InstanceDescriptor) => Promise<ArtifactObjectStore>;
+  /** Fixed store override (tests). */
   artifactStore?: ArtifactObjectStore;
 };
 
@@ -41,12 +43,26 @@ export async function beginAdminSession(
   const descriptor = await readInstanceDescriptor(ctx.runtime, instanceId);
 
   if (!options.openDb) {
+    const { createDefaultAdminOptions } = await import('../deploy/production.js');
+    options = { ...(await createDefaultAdminOptions(ctx.runtime)), ...options };
+  }
+
+  if (!options.openDb) {
     throw usageError(
       'Administrative D1 backend is not wired in this build path.\nUse a control-plane-enabled CLI build.',
     );
   }
   const db = await options.openDb(descriptor);
   await assertDescriptorConsistency(db, descriptor);
+
+  let store: ArtifactObjectStore;
+  if (options.artifactStore) {
+    store = options.artifactStore;
+  } else if (options.openStore) {
+    store = await options.openStore(descriptor);
+  } else {
+    store = new MemoryArtifactStore();
+  }
 
   if (opts.mutating) {
     presentHumanSuccess(
@@ -59,7 +75,7 @@ export async function beginAdminSession(
     descriptor,
     instanceId,
     db,
-    store: options.artifactStore ?? new MemoryArtifactStore(),
+    store,
   };
 }
 

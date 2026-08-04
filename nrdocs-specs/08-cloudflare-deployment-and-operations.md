@@ -44,13 +44,13 @@ changes accounts.
 
 The preflight verifies the exact capabilities before mutation:
 
-| Capability | Required for |
-| --- | --- |
-| Account membership/read | Account discovery and identity verification |
-| Workers Scripts Write | Worker versions, bindings, static assets, and secrets |
-| D1 Read and D1 Write | Database discovery, migrations, administration, and metadata |
-| Workers R2 Storage Read and Write | Bucket creation, marker verification, object listing, and deletion |
-| Zone Read and Workers Routes Write | A requested custom domain only |
+| Capability                         | Required for                                                       |
+| ---------------------------------- | ------------------------------------------------------------------ |
+| Account membership/read            | Account discovery and identity verification                        |
+| Workers Scripts Write              | Worker versions, bindings, static assets, and secrets              |
+| D1 Read and D1 Write               | Database discovery, migrations, administration, and metadata       |
+| Workers R2 Storage Read and Write  | Bucket creation, marker verification, object listing, and deletion |
+| Zone Read and Workers Routes Write | A requested custom domain only                                     |
 
 An API token may be narrower than the table when an operation demonstrably does
 not need a capability, but preflight must prove every capability required for
@@ -66,11 +66,11 @@ The first deployment generates an opaque instance ID and a 20-character
 lowercase base32 resource suffix derived from independent random bytes. Names
 are deterministic from that suffix:
 
-| Resource | Name |
-| --- | --- |
-| Worker | `nrdocs-<suffix>` |
-| D1 database | `nrdocs-<suffix>-d1` |
-| R2 bucket | `nrdocs-<first-8-account-id>-<suffix>-r2` |
+| Resource    | Name                                      |
+| ----------- | ----------------------------------------- |
+| Worker      | `nrdocs-<suffix>`                         |
+| D1 database | `nrdocs-<suffix>-d1`                      |
+| R2 bucket   | `nrdocs-<first-8-account-id>-<suffix>-r2` |
 
 The instance display name is metadata and never changes a resource name or
 identifier.

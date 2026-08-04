@@ -21,7 +21,6 @@ import {
   createD1Executor,
   createD1HttpExecutor,
   createSiteWithInitialToken,
-  createSqliteExecutor,
   deleteSitePrefix,
   finalizeSiteDeletion,
   getInstanceMetadata,
@@ -31,7 +30,6 @@ import {
   issueToken,
   listTokensForSite,
   MemoryArtifactStore,
-  openMemorySqlite,
   promoteArtifact,
   releasePublishLock,
   renewPublishLock,
@@ -45,6 +43,7 @@ import {
   writeStagingArtifact,
   type SqlExecutor,
 } from './index.js';
+import { createSqliteExecutor, openMemorySqlite } from './sqlite-adapter.js';
 
 function id16(seed: number): Uint8Array {
   const bytes = new Uint8Array(16);

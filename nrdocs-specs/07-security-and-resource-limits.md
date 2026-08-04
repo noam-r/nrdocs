@@ -160,14 +160,14 @@ Worker Rate Limiting bindings are an abuse-control layer, not an accounting or
 authorization mechanism. Keys use a one-way digest of the relevant source
 value; plaintext IP addresses and tokens are not stored in keys or logs.
 
-| Operation | Limit |
-| --- | ---: |
-| Password attempts per site and source IP | 10 per 60 seconds |
-| Password attempts per site, all sources | 100 per 60 seconds |
-| Requests with invalid publishing credentials per source IP | 30 per 60 seconds |
-| Resolve-target requests per valid token | 120 per 60 seconds |
-| Publish requests per site and valid token | 10 per 60 seconds |
-| Publication API requests per instance | 300 per 60 seconds |
+| Operation                                                  |              Limit |
+| ---------------------------------------------------------- | -----------------: |
+| Password attempts per site and source IP                   |  10 per 60 seconds |
+| Password attempts per site, all sources                    | 100 per 60 seconds |
+| Requests with invalid publishing credentials per source IP |  30 per 60 seconds |
+| Resolve-target requests per valid token                    | 120 per 60 seconds |
+| Publish requests per site and valid token                  |  10 per 60 seconds |
+| Publication API requests per instance                      | 300 per 60 seconds |
 
 Exceeding any applicable limit returns HTTP 429, code `rate_limited`, and
 `Retry-After: 60`. Cloudflare's rate-limiting counters may be locally scoped and
@@ -198,25 +198,25 @@ ownership. A request can never renew or release another request's lock.
 The CLI prechecks these values; the Worker independently enforces them. Crossing
 any limit fails the publication before promotion.
 
-| Resource | Maximum |
-| --- | ---: |
-| Compressed publication request | 25 MiB |
-| Total uncompressed artifact bytes | 100 MiB |
-| Uncompressed-to-compressed ratio | 20:1 |
-| Manifest document | 1 MiB |
-| Files declared by the manifest | 1,000 |
-| Published pages | 500 |
-| Published assets | 500 |
-| Published attachments | 200 |
-| One source Markdown file | 1 MiB |
-| One complete page HTML document | 2 MiB |
-| One raster image | 10 MiB |
-| One attachment | 25 MiB |
-| Mermaid blocks per page | 50 |
-| Mermaid source per block | 64 KiB |
-| Archive path in UTF-8 | 512 bytes |
-| One archive path segment in UTF-8 | 128 bytes |
-| Attachment display filename | 160 scalar values and 255 UTF-8 bytes |
+| Resource                          |                               Maximum |
+| --------------------------------- | ------------------------------------: |
+| Compressed publication request    |                                25 MiB |
+| Total uncompressed artifact bytes |                               100 MiB |
+| Uncompressed-to-compressed ratio  |                                  20:1 |
+| Manifest document                 |                                 1 MiB |
+| Files declared by the manifest    |                                 1,000 |
+| Published pages                   |                                   500 |
+| Published assets                  |                                   500 |
+| Published attachments             |                                   200 |
+| One source Markdown file          |                                 1 MiB |
+| One complete page HTML document   |                                 2 MiB |
+| One raster image                  |                                10 MiB |
+| One attachment                    |                                25 MiB |
+| Mermaid blocks per page           |                                    50 |
+| Mermaid source per block          |                                64 KiB |
+| Archive path in UTF-8             |                             512 bytes |
+| One archive path segment in UTF-8 |                             128 bytes |
+| Attachment display filename       | 160 scalar values and 255 UTF-8 bytes |
 
 The archive contains only regular files. Directories are implicit. Symlinks,
 hard links, devices, FIFOs, sparse entries, absolute paths, backslashes, empty

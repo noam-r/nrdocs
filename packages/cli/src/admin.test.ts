@@ -6,10 +6,10 @@ import {
   applyMigrations,
   insertInstanceMetadata,
   MemoryArtifactStore,
-  openMemorySqlite,
   getSiteBySlug,
   listTokensForSite,
 } from '@nrdocs/persistence';
+import { openMemorySqlite } from '@nrdocs/persistence/sqlite';
 import type { InstanceDescriptor, InstanceId } from '@nrdocs/contracts';
 import { ExitCode, createProcessRuntime, main, type Runtime } from './index.js';
 import { writeActiveInstanceId, writeInstanceDescriptor } from './instance-store.js';

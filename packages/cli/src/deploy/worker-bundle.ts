@@ -1,32 +1,38 @@
 /**
- * Minimal Phase 7+ Worker module bundled into the CLI package for deploy smoke.
- * Full publisher API lives in @nrdocs/worker; deploy packaging of the complete
- * Worker module is refined as the Worker surface stabilizes.
+ * Loads the release-unit Worker module and fixed platform assets from
+ * packages/cli/packaged/. Generated/populated by scripts/bundle-release.mjs.
  */
-export const BUNDLED_WORKER_MODULE = `export default {
-  async fetch(request, env) {
-    const url = new URL(request.url);
-    if (url.pathname === '/_nrdocs/api/version') {
-      return Response.json({
-        product: 'nrdocs',
-        package_version: env.NRDOCS_PACKAGE_VERSION,
-        api_versions: [1],
-        artifact_schema_versions: [1],
-      }, { headers: { 'cache-control': 'no-store' } });
-    }
-    if (url.pathname === '/' || url.pathname === '') {
-      return new Response('nrdocs', {
-        status: 200,
-        headers: { 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'no-store' },
-      });
-    }
-    return new Response('Not found', {
-      status: 404,
-      headers: { 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'no-store' },
-    });
-  }
-};
-`;
+import { existsSync, readFileSync } from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
-export const BUNDLED_PLATFORM_CSS = `/* nrdocs platform reader.css v1 */\n`;
-export const BUNDLED_PLATFORM_JS = `/* nrdocs platform reader.js v1 */\n`;
+function packagedDir(): string {
+  const here = path.dirname(fileURLToPath(import.meta.url));
+  const candidates = [
+    path.resolve(here, '../packaged'), // dist/bin.bundle.js → packaged/
+    path.resolve(here, '../../packaged'), // dist/deploy/*.js or src/deploy/*.ts
+    path.resolve(here, 'packaged'),
+  ];
+  for (const dir of candidates) {
+    if (existsSync(path.join(dir, 'worker.mjs'))) return dir;
+  }
+  throw new Error(
+    `Missing packaged/worker.mjs (searched from ${here}). Run: pnpm --filter nrdocs run bundle:release`,
+  );
+}
+
+function loadPackaged(name: string): string {
+  const file = path.join(packagedDir(), name);
+  try {
+    return readFileSync(file, 'utf8');
+  } catch {
+    throw new Error(
+      `Missing packaged release asset '${name}'. Run: pnpm --filter nrdocs run bundle:release`,
+    );
+  }
+}
+
+export const BUNDLED_WORKER_MODULE = loadPackaged('worker.mjs');
+export const BUNDLED_PLATFORM_CSS = loadPackaged('reader.css');
+export const BUNDLED_PLATFORM_JS = loadPackaged('reader.js');
+export const BUNDLED_PLATFORM_MERMAID = loadPackaged('mermaid.js');

@@ -80,13 +80,13 @@ Identifiers encode at least 128 cryptographically random bits using lowercase
 base32 without padding and carry a type prefix for diagnostics. Implementations
 do not derive them from names, timestamps, accounts, repositories, or content.
 
-| Entity | Example | Mutability | User-visible role |
-|---|---|---|---|
-| Instance | `inst_...` | Immutable | Local instance selection and diagnostics |
-| Site | `site_...` | Immutable | Credential binding and publisher destination identity |
-| Publishing token record | `tok_...` | Immutable | Administrative token listing and revocation |
-| Publication lock | `lock_...` | Temporary | Internal concurrency ownership |
-| Artifact | `artifact_...` | Temporary/internal | Private R2 namespace and atomic promotion |
+| Entity                  | Example        | Mutability         | User-visible role                                     |
+| ----------------------- | -------------- | ------------------ | ----------------------------------------------------- |
+| Instance                | `inst_...`     | Immutable          | Local instance selection and diagnostics              |
+| Site                    | `site_...`     | Immutable          | Credential binding and publisher destination identity |
+| Publishing token record | `tok_...`      | Immutable          | Administrative token listing and revocation           |
+| Publication lock        | `lock_...`     | Temporary          | Internal concurrency ownership                        |
+| Artifact                | `artifact_...` | Temporary/internal | Private R2 namespace and atomic promotion             |
 
 Identifiers are not authorization credentials. Knowledge of an instance, site, token-record, lock, or artifact ID grants no access.
 
@@ -104,16 +104,16 @@ The model below is normative in shape and constraints. Exact migration syntax ma
 
 Exactly one row identifies a deployed nrdocs instance.
 
-| Column | Type | Null | Meaning |
-|---|---|---:|---|
-| `id` | TEXT | No | Immutable opaque instance ID; primary key |
-| `display_name` | TEXT | No | Human-readable instance label for administrative output |
-| `account_id` | TEXT | No | Selected Cloudflare account ID |
-| `resource_suffix` | TEXT | No | Immutable random Cloudflare resource-name suffix |
-| `canonical_origin` | TEXT | No | Single canonical HTTPS origin |
-| `deployed_version` | TEXT | No | Installed nrdocs package version |
-| `schema_version` | INTEGER | No | Current 2.x database-schema version |
-| `created_at` | TEXT | No | Instance creation time |
+| Column             | Type    | Null | Meaning                                                 |
+| ------------------ | ------- | ---: | ------------------------------------------------------- |
+| `id`               | TEXT    |   No | Immutable opaque instance ID; primary key               |
+| `display_name`     | TEXT    |   No | Human-readable instance label for administrative output |
+| `account_id`       | TEXT    |   No | Selected Cloudflare account ID                          |
+| `resource_suffix`  | TEXT    |   No | Immutable random Cloudflare resource-name suffix        |
+| `canonical_origin` | TEXT    |   No | Single canonical HTTPS origin                           |
+| `deployed_version` | TEXT    |   No | Installed nrdocs package version                        |
+| `schema_version`   | INTEGER |   No | Current 2.x database-schema version                     |
+| `created_at`       | TEXT    |   No | Instance creation time                                  |
 
 Constraints:
 
@@ -127,28 +127,28 @@ Constraints:
 
 One row represents one publishing and serving target.
 
-| Column | Type | Null | Meaning |
-|---|---|---:|---|
-| `id` | TEXT | No | Immutable opaque site ID; primary key |
-| `slug` | TEXT | No | Mutable root-level URL slug; unique |
-| `enabled` | INTEGER | No | `1` when serving is enabled, otherwise `0` |
-| `access_mode` | TEXT | No | `public` or `password` |
-| `password_verifier` | TEXT | Yes | Encoded reader-password verifier |
-| `session_generation` | INTEGER | No | Monotonic reader-session invalidation counter |
-| `current_artifact_id` | TEXT | Yes | Current private R2 artifact prefix ID |
-| `current_artifact_digest` | TEXT | Yes | Digest of the current normalized artifact |
-| `current_root_route` | TEXT | Yes | Root page route or first-page redirect target |
-| `current_language` | TEXT | Yes | Current manifest's canonical BCP 47 language tag |
-| `current_direction` | TEXT | Yes | Current manifest's `ltr`, `rtl`, or `auto` text direction |
-| `current_page_count` | INTEGER | Yes | Current manifest page count |
-| `current_asset_count` | INTEGER | Yes | Current inline-asset count |
-| `current_attachment_count` | INTEGER | Yes | Current linked-download count |
-| `last_published_at` | TEXT | Yes | Last successful promotion time |
-| `publish_lock_id` | TEXT | Yes | Current publication lock owner |
-| `publish_lock_acquired_at` | TEXT | Yes | Original acquisition time for the current lock |
-| `publish_lock_expires_at` | TEXT | Yes | Time after which a stale lock may be reclaimed |
-| `created_at` | TEXT | No | Site creation time |
-| `updated_at` | TEXT | No | Last successful site-state mutation time |
+| Column                     | Type    | Null | Meaning                                                   |
+| -------------------------- | ------- | ---: | --------------------------------------------------------- |
+| `id`                       | TEXT    |   No | Immutable opaque site ID; primary key                     |
+| `slug`                     | TEXT    |   No | Mutable root-level URL slug; unique                       |
+| `enabled`                  | INTEGER |   No | `1` when serving is enabled, otherwise `0`                |
+| `access_mode`              | TEXT    |   No | `public` or `password`                                    |
+| `password_verifier`        | TEXT    |  Yes | Encoded reader-password verifier                          |
+| `session_generation`       | INTEGER |   No | Monotonic reader-session invalidation counter             |
+| `current_artifact_id`      | TEXT    |  Yes | Current private R2 artifact prefix ID                     |
+| `current_artifact_digest`  | TEXT    |  Yes | Digest of the current normalized artifact                 |
+| `current_root_route`       | TEXT    |  Yes | Root page route or first-page redirect target             |
+| `current_language`         | TEXT    |  Yes | Current manifest's canonical BCP 47 language tag          |
+| `current_direction`        | TEXT    |  Yes | Current manifest's `ltr`, `rtl`, or `auto` text direction |
+| `current_page_count`       | INTEGER |  Yes | Current manifest page count                               |
+| `current_asset_count`      | INTEGER |  Yes | Current inline-asset count                                |
+| `current_attachment_count` | INTEGER |  Yes | Current linked-download count                             |
+| `last_published_at`        | TEXT    |  Yes | Last successful promotion time                            |
+| `publish_lock_id`          | TEXT    |  Yes | Current publication lock owner                            |
+| `publish_lock_acquired_at` | TEXT    |  Yes | Original acquisition time for the current lock            |
+| `publish_lock_expires_at`  | TEXT    |  Yes | Time after which a stale lock may be reclaimed            |
+| `created_at`               | TEXT    |   No | Site creation time                                        |
+| `updated_at`               | TEXT    |   No | Last successful site-state mutation time                  |
 
 #### Slug constraints
 
@@ -172,10 +172,10 @@ The one-character case is valid. Slug normalization is never guessed: invalid in
 
 The following relationship must always hold:
 
-| `access_mode` | `password_verifier` |
-|---|---|
-| `public` | `NULL` |
-| `password` | Non-`NULL` valid encoded verifier |
+| `access_mode` | `password_verifier`               |
+| ------------- | --------------------------------- |
+| `public`      | `NULL`                            |
+| `password`    | Non-`NULL` valid encoded verifier |
 
 Changing a password, removing password access, or restoring password access increments `session_generation` in the same transaction as the access change.
 
@@ -216,16 +216,16 @@ An expired lock may be atomically replaced. Expiration is recovery from an inter
 
 One row represents one named site-scoped publishing credential.
 
-| Column | Type | Null | Meaning |
-|---|---|---:|---|
-| `id` | TEXT | No | Immutable token-record ID; primary key |
-| `site_id` | TEXT | No | Owning immutable site ID; foreign key |
-| `name` | TEXT | No | Administrator-chosen name unique within the site |
-| `token_verifier` | TEXT | No | Indexed encoded verifier or one-way token digest |
-| `expires_at` | TEXT | Yes | Optional expiration instant; `NULL` means no scheduled expiration |
-| `revoked_at` | TEXT | Yes | Revocation time; `NULL` means not revoked |
-| `last_used_at` | TEXT | Yes | Best-effort last successful authentication time |
-| `created_at` | TEXT | No | Issuance time |
+| Column           | Type | Null | Meaning                                                           |
+| ---------------- | ---- | ---: | ----------------------------------------------------------------- |
+| `id`             | TEXT |   No | Immutable token-record ID; primary key                            |
+| `site_id`        | TEXT |   No | Owning immutable site ID; foreign key                             |
+| `name`           | TEXT |   No | Administrator-chosen name unique within the site                  |
+| `token_verifier` | TEXT |   No | Indexed encoded verifier or one-way token digest                  |
+| `expires_at`     | TEXT |  Yes | Optional expiration instant; `NULL` means no scheduled expiration |
+| `revoked_at`     | TEXT |  Yes | Revocation time; `NULL` means not revoked                         |
+| `last_used_at`   | TEXT |  Yes | Best-effort last successful authentication time                   |
+| `created_at`     | TEXT |   No | Issuance time                                                     |
 
 Required constraints and indexes:
 
@@ -253,20 +253,20 @@ This table does not permit importing a 1.x deployment and does not represent con
 
 Serving behavior is the result of three independent dimensions:
 
-| Dimension | Values |
-|---|---|
-| Lifecycle | Enabled / disabled / deleted |
-| Content | Empty / published |
-| Reader access | Public / password |
+| Dimension     | Values                       |
+| ------------- | ---------------------------- |
+| Lifecycle     | Enabled / disabled / deleted |
+| Content       | Empty / published            |
+| Reader access | Public / password            |
 
 Deleted is terminal and means the row no longer exists. All other combinations are valid.
 
-| Enabled | Content | Result to unauthenticated reader |
-|---:|---|---|
-| Yes | Empty | 404 |
-| Yes | Published, public | Serve current publication |
-| Yes | Published, password | Request password, then serve |
-| No | Empty or published | 404 |
+| Enabled | Content             | Result to unauthenticated reader |
+| ------: | ------------------- | -------------------------------- |
+|     Yes | Empty               | 404                              |
+|     Yes | Published, public   | Serve current publication        |
+|     Yes | Published, password | Request password, then serve     |
+|      No | Empty or published  | 404                              |
 
 Publishing is allowed while a site is disabled. A successful publish changes only the current-publication tuple.
 
@@ -443,11 +443,11 @@ D1 is the authority for which R2 prefix is current.
 
 An R2 prefix is in one of three implementation states:
 
-| State | D1 relationship | Required behavior |
-|---|---|---|
-| Staging | Referenced only by the active request | Never served |
-| Current | Matches `sites.current_artifact_id` | May be served after access checks |
-| Obsolete/orphaned | Not current and not active staging | Delete best-effort |
+| State             | D1 relationship                       | Required behavior                 |
+| ----------------- | ------------------------------------- | --------------------------------- |
+| Staging           | Referenced only by the active request | Never served                      |
+| Current           | Matches `sites.current_artifact_id`   | May be served after access checks |
+| Obsolete/orphaned | Not current and not active staging    | Delete best-effort                |
 
 Only the current pointer confers serving eligibility. Object existence alone never makes content public.
 

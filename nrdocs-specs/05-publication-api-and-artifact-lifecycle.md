@@ -268,18 +268,18 @@ If the site is disabled, publication still succeeds and `enabled` is `false`. Th
 
 ## Error Contract
 
-| HTTP | Code | Meaning | Retry guidance |
-|---:|---|---|---|
-| 400 | `invalid_request` | Required header, media type, or request shape is invalid | Fix request |
-| 401 | `invalid_token` | Token is absent, malformed, unknown, expired, revoked, or belongs to a deleted site | Replace credential |
-| 403 | `site_mismatch` | Token site differs from the explicitly expected site | Correct configuration or credential |
-| 409 | `publish_in_progress` | Another request holds the site's publication lock | Retry after advertised delay |
-| 413 | `artifact_too_large` | Compressed, expanded, file-count, or individual-file limit exceeded | Reduce publication |
-| 415 | `unsupported_artifact_format` | Media type or artifact format version is unsupported | Upgrade or correct CLI |
-| 422 | `invalid_artifact` | Archive or manifest fails semantic validation | Fix local/tool error |
-| 422 | `digest_mismatch` | Header, manifest, archive, or file digest is inconsistent | Rebuild package |
-| 500 | `publication_failed` | Storage or metadata operation failed before promotion | Retry safely |
-| 503 | `temporarily_unavailable` | Required platform service is unavailable | Retry with backoff |
+| HTTP | Code                          | Meaning                                                                             | Retry guidance                      |
+| ---: | ----------------------------- | ----------------------------------------------------------------------------------- | ----------------------------------- |
+|  400 | `invalid_request`             | Required header, media type, or request shape is invalid                            | Fix request                         |
+|  401 | `invalid_token`               | Token is absent, malformed, unknown, expired, revoked, or belongs to a deleted site | Replace credential                  |
+|  403 | `site_mismatch`               | Token site differs from the explicitly expected site                                | Correct configuration or credential |
+|  409 | `publish_in_progress`         | Another request holds the site's publication lock                                   | Retry after advertised delay        |
+|  413 | `artifact_too_large`          | Compressed, expanded, file-count, or individual-file limit exceeded                 | Reduce publication                  |
+|  415 | `unsupported_artifact_format` | Media type or artifact format version is unsupported                                | Upgrade or correct CLI              |
+|  422 | `invalid_artifact`            | Archive or manifest fails semantic validation                                       | Fix local/tool error                |
+|  422 | `digest_mismatch`             | Header, manifest, archive, or file digest is inconsistent                           | Rebuild package                     |
+|  500 | `publication_failed`          | Storage or metadata operation failed before promotion                               | Retry safely                        |
+|  503 | `temporarily_unavailable`     | Required platform service is unavailable                                            | Retry with backoff                  |
 
 `Retry-After` is included for `publish_in_progress` and may be included for temporary service failures.
 
@@ -682,14 +682,14 @@ Request IDs are not idempotency keys. A retry after an ambiguous transport failu
 
 ## Failure Semantics
 
-| Failure point | Current artifact | Staged prefix | Lock |
-|---|---|---|---|
-| Before lock | Unchanged | None | Unchanged |
-| During upload | Unchanged | Delete best-effort | Release or expire |
-| During validation | Unchanged | Delete best-effort | Release or expire |
-| Before promotion commit | Unchanged | Delete best-effort | Release or expire |
-| After promotion commit | New artifact | New prefix is current | Cleared |
-| Old-prefix cleanup | New artifact | Old prefix may leak temporarily | Cleared |
+| Failure point           | Current artifact | Staged prefix                   | Lock              |
+| ----------------------- | ---------------- | ------------------------------- | ----------------- |
+| Before lock             | Unchanged        | None                            | Unchanged         |
+| During upload           | Unchanged        | Delete best-effort              | Release or expire |
+| During validation       | Unchanged        | Delete best-effort              | Release or expire |
+| Before promotion commit | Unchanged        | Delete best-effort              | Release or expire |
+| After promotion commit  | New artifact     | New prefix is current           | Cleared           |
+| Old-prefix cleanup      | New artifact     | Old prefix may leak temporarily | Cleared           |
 
 There is no state in which a partially uploaded artifact is current.
 
