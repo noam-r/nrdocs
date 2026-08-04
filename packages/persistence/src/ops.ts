@@ -369,6 +369,25 @@ export async function listTokensForSite(
   return rows.map(decodePublishingToken);
 }
 
+export async function findTokenByNameOrId(
+  db: SqlExecutor,
+  siteId: SiteId,
+  nameOrId: string,
+): Promise<PublishingTokenRow | null> {
+  const byId = parseTokenRecordId(nameOrId);
+  if (byId) {
+    const row = await getTokenById(db, byId);
+    if (row && row.site_id === siteId) return row;
+  }
+  const name = normalizeDisplayName(nameOrId);
+  if (!name) return null;
+  const row = await db.one(`SELECT * FROM publishing_tokens WHERE site_id = ? AND name = ?`, [
+    siteId,
+    name,
+  ]);
+  return row ? decodePublishingToken(row) : null;
+}
+
 export async function revokeToken(
   db: SqlExecutor,
   tokenId: TokenRecordId,

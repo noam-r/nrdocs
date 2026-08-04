@@ -5,7 +5,7 @@ import { CONTRACTS_PACKAGE, ExitCode } from '@nrdocs/contracts';
 import { PERSISTENCE_PACKAGE } from '@nrdocs/persistence';
 import { RENDERER_PACKAGE } from '@nrdocs/renderer';
 import { peelGlobals, REMOVED_TOP_LEVEL } from './argv.js';
-import { CLI_PACKAGE, CLI_VERSION, ROOT_HELP } from './help.js';
+import { CLI_PACKAGE, CLI_VERSION } from './help.js';
 import {
   rootHelp,
   runCredentialsCommand,
@@ -16,6 +16,7 @@ import {
 import { runGenerateNavCommand } from './generate-nav.js';
 import { runPreviewCommand } from './preview.js';
 import { runDeployCommand, type DeployOptions } from './deploy.js';
+import { runAdminSiteCommand, runAdminTokenCommand, type AdminOptions } from './admin.js';
 import { presentError, presentHumanSuccess } from './present.js';
 import { assertSupportedPlatform, createProcessRuntime, type Runtime } from './runtime.js';
 import { createRejectingTerminal, type Terminal } from './terminal.js';
@@ -41,12 +42,13 @@ export type RunOptions = {
   runtime?: Runtime;
   terminal?: Terminal;
   deploy?: DeployOptions;
+  admin?: AdminOptions;
 };
 
 async function dispatch(
   ctx: CommandContext,
   rest: string[],
-  deployOptions?: DeployOptions,
+  options: { deploy?: DeployOptions; admin?: AdminOptions } = {},
 ): Promise<void> {
   if (rest.length === 0) {
     if (ctx.help) {
@@ -85,40 +87,15 @@ async function dispatch(
       throw usageError('Unknown generate command.', 'Run: nrdocs generate nav --help');
     }
     case 'deploy':
-      await runDeployCommand(ctx, tail, deployOptions ?? {});
+      await runDeployCommand(ctx, tail, options.deploy ?? {});
       return;
     case 'site': {
-      const sub = tail[0];
-      if (!sub && ctx.help) {
-        presentHumanSuccess(ctx.runtime, ROOT_HELP);
-        return;
-      }
-      if (sub === 'password' && tail[1] === 'change') {
-        await runStubCommand('site password change', ctx);
-        return;
-      }
-      if (
-        sub === 'create' ||
-        sub === 'list' ||
-        sub === 'show' ||
-        sub === 'access' ||
-        sub === 'enable' ||
-        sub === 'disable' ||
-        sub === 'rename' ||
-        sub === 'delete'
-      ) {
-        await runStubCommand(`site ${sub}`, ctx);
-        return;
-      }
-      throw usageError(`Unknown site command: ${sub ?? '(missing)'}`, 'Run: nrdocs --help');
+      await runAdminSiteCommand(ctx, tail, options.admin ?? {});
+      return;
     }
     case 'token': {
-      const sub = tail[0];
-      if (sub === 'issue' || sub === 'list' || sub === 'revoke') {
-        await runStubCommand(`token ${sub}`, ctx);
-        return;
-      }
-      throw usageError(`Unknown token command: ${sub ?? '(missing)'}`, 'Run: nrdocs --help');
+      await runAdminTokenCommand(ctx, tail, options.admin ?? {});
+      return;
     }
     default:
       throw usageError(`Unknown command: ${head}`, 'Run: nrdocs --help');
@@ -171,7 +148,10 @@ export async function runCli(
       return ExitCode.Success;
     }
 
-    await dispatch(ctx, rest, options.deploy);
+    await dispatch(ctx, rest, {
+      ...(options.deploy !== undefined ? { deploy: options.deploy } : {}),
+      ...(options.admin !== undefined ? { admin: options.admin } : {}),
+    });
     return ExitCode.Success;
   } catch (error) {
     return presentError(runtime, error, { json });
@@ -238,3 +218,12 @@ export type { DeployOptions } from './deploy.js';
 export { extractWranglerToken } from './deploy/auth.js';
 export { parseAccountsResult, classifyCfError } from './deploy/parsers.js';
 export { generateResourceSuffix, plannedResourceNames } from './deploy/names.js';
+export {
+  runAdminSiteCommand,
+  runAdminTokenCommand,
+  parseTtlDuration,
+  MAX_TTL_SECONDS,
+  derivePasswordVerifier,
+  generatePublishingToken,
+} from './admin.js';
+export type { AdminOptions } from './admin.js';

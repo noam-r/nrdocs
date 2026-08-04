@@ -22,3 +22,4 @@ export * from './r2.js';
 export * from './ops.js';
 export * from './sqlite-adapter.js';
 export * from './d1-adapter.js';
+export * from './time.js';
