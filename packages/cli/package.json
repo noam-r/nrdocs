@@ -1,36 +1,33 @@
 {
   "name": "nrdocs",
-  "version": "0.2.15",
-  "description": "CLI for nrdocs - serverless docs publishing for private GitHub repos",
+  "version": "2.0.0",
+  "description": "Publish a Markdown directory as a protected Cloudflare minisite",
   "type": "module",
   "bin": {
-    "nrdocs": "./dist/bin.mjs"
+    "nrdocs": "./dist/bin.js"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
   },
   "files": [
-    "dist/bin.mjs",
-    "dist/runtime/mermaid.min.js",
-    "dist/deploy-worker"
+    "dist",
+    "README.md"
   ],
-  "scripts": {
-    "build": "tsc",
-    "bundle": "node build.mjs && node scripts/bundle-mermaid.mjs && node scripts/bundle-worker.mjs",
-    "prepublishOnly": "node build.mjs && node scripts/bundle-mermaid.mjs && node scripts/bundle-worker.mjs",
-    "typecheck": "tsc --noEmit",
-    "test": "vitest run",
-    "lint": "echo 'no lint configured yet'"
+  "engines": {
+    "node": ">=24.0.0"
   },
-  "devDependencies": {
-    "@nrdocs/shared": "workspace:*",
-    "@types/markdown-it": "^14.1.2",
-    "@types/node": "^20.14.0",
-    "esbuild": "^0.28.0",
-    "fast-check": "^4.8.0",
-    "markdown-it": "^14.1.1",
-    "mermaid": "^11.6.0",
-    "typescript": "^5.5.0",
-    "vitest": "^2.0.0"
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "eslint src",
+    "test": "vitest run --dir src"
   },
   "dependencies": {
-    "yaml": "^2.9.0"
+    "@nrdocs/contracts": "workspace:*",
+    "@nrdocs/persistence": "workspace:*",
+    "@nrdocs/renderer": "workspace:*"
   }
 }

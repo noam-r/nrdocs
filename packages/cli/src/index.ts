@@ -1,20 +1,33 @@
-export { NRDOCS_VERSION } from '@nrdocs/shared';
-export * from './config/index.js';
-export { authLogin } from './commands/auth/login.js';
-export { authStatus } from './commands/auth/status.js';
-export { authLogout } from './commands/auth/logout.js';
-export { runCommand } from './commands/index.js';
-export { ApiClient } from './api-client.js';
-export { handleInit } from './commands/init.js';
-export { handlePublish } from './commands/publish.js';
-export { handleDoctor } from './commands/doctor.js';
-export { handleDeploy } from './commands/deploy.js';
-export { handleRepos } from './commands/repos.js';
-export { handleApprove } from './commands/approve.js';
-export { handleDisable } from './commands/disable.js';
-export { handleAccessSet } from './commands/access.js';
-export { handlePasswordSet } from './commands/password.js';
-export { handleRulesList, handleRulesAdd, handleRulesRemove } from './commands/rules.js';
-export { handleStatus } from './commands/status.js';
-export { handleConfigShow } from './commands/config-show.js';
-export { handleProfilesList, handleProfilesUse } from './commands/profiles.js';
+/**
+ * Published `nrdocs` CLI package.
+ * Phase 0 placeholder — command surface arrives in Phase 2+.
+ */
+import { CONTRACTS_PACKAGE } from '@nrdocs/contracts';
+import { PERSISTENCE_PACKAGE } from '@nrdocs/persistence';
+import { RENDERER_PACKAGE } from '@nrdocs/renderer';
+
+export const CLI_PACKAGE = 'nrdocs' as const;
+export const CLI_VERSION = '2.0.0' as const;
+
+export function cliDependencies(): {
+  contracts: string;
+  persistence: string;
+  renderer: string;
+} {
+  return {
+    contracts: CONTRACTS_PACKAGE,
+    persistence: PERSISTENCE_PACKAGE,
+    renderer: RENDERER_PACKAGE,
+  };
+}
+
+export function main(argv: readonly string[] = process.argv.slice(2)): number {
+  if (argv.includes('--version') || argv.includes('-V')) {
+    process.stdout.write(`${CLI_PACKAGE} ${CLI_VERSION}\n`);
+    return 0;
+  }
+  process.stderr.write(
+    'nrdocs 2.0 scaffold is installed. Product commands are not implemented yet.\n',
+  );
+  return 2;
+}

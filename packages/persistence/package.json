@@ -1,5 +1,5 @@
 {
-  "name": "@nrdocs/worker",
+  "name": "@nrdocs/persistence",
   "version": "2.0.0",
   "private": true,
   "type": "module",
@@ -19,7 +19,6 @@
     "test": "vitest run --dir src"
   },
   "dependencies": {
-    "@nrdocs/contracts": "workspace:*",
-    "@nrdocs/persistence": "workspace:*"
+    "@nrdocs/contracts": "workspace:*"
   }
 }
