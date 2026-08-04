@@ -1,19 +1,17 @@
 /**
- * Minimal Phase 7 Worker module bundled into the CLI package.
- * Full publish/serve arrives in later phases; smoke tests require version + root.
+ * Minimal Phase 7+ Worker module bundled into the CLI package for deploy smoke.
+ * Full publisher API lives in @nrdocs/worker; deploy packaging of the complete
+ * Worker module is refined as the Worker surface stabilizes.
  */
 export const BUNDLED_WORKER_MODULE = `export default {
   async fetch(request, env) {
     const url = new URL(request.url);
     if (url.pathname === '/_nrdocs/api/version') {
       return Response.json({
-        ok: true,
-        data: {
-          package_version: env.NRDOCS_PACKAGE_VERSION,
-          instance_id: env.NRDOCS_INSTANCE_ID,
-          api_versions: [1],
-          artifact_schema_versions: [1],
-        },
+        product: 'nrdocs',
+        package_version: env.NRDOCS_PACKAGE_VERSION,
+        api_versions: [1],
+        artifact_schema_versions: [1],
       }, { headers: { 'cache-control': 'no-store' } });
     }
     if (url.pathname === '/' || url.pathname === '') {

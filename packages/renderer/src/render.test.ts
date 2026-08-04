@@ -42,8 +42,8 @@ describe('routeRelativeHref', () => {
 });
 
 describe('Phase 4 render + pack', () => {
-  it('tracks the fixed-page validator gap', () => {
-    expect(FIXED_PAGE_VALIDATOR_GAP).toMatch(/Phase 9/);
+  it('tracks the fixed-page validator ownership', () => {
+    expect(FIXED_PAGE_VALIDATOR_GAP).toMatch(/@nrdocs\/worker/);
     expect(RENDERER_PACKAGE).toBe('@nrdocs/renderer');
   });
 

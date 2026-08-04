@@ -20,6 +20,10 @@
   },
   "dependencies": {
     "@nrdocs/contracts": "workspace:*",
-    "@nrdocs/persistence": "workspace:*"
+    "@nrdocs/persistence": "workspace:*",
+    "linkedom": "0.18.11"
+  },
+  "devDependencies": {
+    "@nrdocs/renderer": "workspace:*"
   }
 }

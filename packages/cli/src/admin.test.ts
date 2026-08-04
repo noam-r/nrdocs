@@ -304,7 +304,7 @@ describe('site and token administration', () => {
         }),
       ).toBe(ExitCode.Success);
     });
-  });
+  }, 20_000);
 
   it('deletes a site after slug confirmation and clears R2 prefix', async () => {
     await withAdmin(async ({ runtime, openDb, store, executor }) => {

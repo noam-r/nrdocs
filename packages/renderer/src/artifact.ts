@@ -4,9 +4,9 @@ import type { NrdocsConfig } from '@nrdocs/contracts';
 import { renderPublication, type InMemoryArtifact } from './render-publication.js';
 import { packArtifact } from './pack-artifact.js';
 
-/** Tracked gap: Worker fixed-page allowlist validator is Phase 9, not claimed complete here. */
+/** Fixed-page Worker validator lives in @nrdocs/worker (Phase 9). */
 export const FIXED_PAGE_VALIDATOR_GAP =
-  'Fixed-page Worker validator is not implemented in Phase 4; production publication remains blocked until Phase 9.';
+  'Fixed-page Worker validator is implemented in @nrdocs/worker; renderer output must remain schema-conformant.';
 
 export async function buildArtifactFromGraph(
   graph: Awaited<ReturnType<typeof buildPublicationGraph>>,
