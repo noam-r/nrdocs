@@ -14,6 +14,7 @@ import {
   type CommandContext,
 } from './dispatch.js';
 import { runGenerateNavCommand } from './generate-nav.js';
+import { runPreviewCommand } from './preview.js';
 import { presentError, presentHumanSuccess } from './present.js';
 import { assertSupportedPlatform, createProcessRuntime, type Runtime } from './runtime.js';
 import { createRejectingTerminal, type Terminal } from './terminal.js';
@@ -68,7 +69,7 @@ async function dispatch(ctx: CommandContext, rest: string[]): Promise<void> {
       await runStubCommand('publish', ctx);
       return;
     case 'preview':
-      await runStubCommand('preview', ctx);
+      await runPreviewCommand(ctx, tail);
       return;
     case 'generate': {
       if (tail[0] === 'nav' || ctx.help) {
@@ -206,3 +207,16 @@ export { CliError } from './errors.js';
 export { REMOVED_1X_COMMANDS } from './help.js';
 export { atomicWriteFile, assertRealDirectory, modeBits } from './fs-safe.js';
 export { ExitCode } from '@nrdocs/contracts';
+export {
+  runPreviewCommand,
+  PREVIEW_PLACEHOLDER_SITE_ID,
+  listenPreviewServer,
+  summarizeManifest,
+} from './preview.js';
+export type { PreviewServer, PreviewCommandOptions } from './preview.js';
+export {
+  PREVIEW_PORT_START,
+  PREVIEW_PORT_END,
+  normalizeRequestPath,
+  attachmentContentDisposition,
+} from './preview-server.js';
