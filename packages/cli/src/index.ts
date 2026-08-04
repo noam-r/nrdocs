@@ -13,6 +13,7 @@ import {
   runStubCommand,
   type CommandContext,
 } from './dispatch.js';
+import { runGenerateNavCommand } from './generate-nav.js';
 import { presentError, presentHumanSuccess } from './present.js';
 import { assertSupportedPlatform, createProcessRuntime, type Runtime } from './runtime.js';
 import { createRejectingTerminal, type Terminal } from './terminal.js';
@@ -71,7 +72,7 @@ async function dispatch(ctx: CommandContext, rest: string[]): Promise<void> {
       return;
     case 'generate': {
       if (tail[0] === 'nav' || ctx.help) {
-        await runStubCommand('generate nav', ctx);
+        await runGenerateNavCommand(ctx, tail[0] === 'nav' ? tail.slice(1) : tail);
         return;
       }
       throw usageError('Unknown generate command.', 'Run: nrdocs generate nav --help');

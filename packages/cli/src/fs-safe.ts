@@ -121,6 +121,52 @@ export async function atomicWriteFile(
   }
 }
 
+/** Atomically replace a project file without changing parent directory modes. */
+export async function atomicWriteProjectFile(
+  runtime: Runtime,
+  targetPath: string,
+  contents: string,
+  mode: number = 0o644,
+): Promise<void> {
+  const dir = path.dirname(targetPath);
+  const tmp = path.join(
+    dir,
+    `.nrdocs-tmp-${process.pid}-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+  );
+  try {
+    try {
+      const existing = await runtime.fs.lstat(targetPath);
+      if (existing.isSymbolicLink()) {
+        throw ioError(`Refusing to overwrite symbolic-link file:\n  ${targetPath}`);
+      }
+    } catch (error) {
+      if (error instanceof Error && /symbolic-link|Refusing/.test(error.message)) throw error;
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+        // continue and attempt write
+      }
+    }
+
+    const handle = await runtime.fs.open(tmp, 'w', mode);
+    try {
+      await handle.writeFile(contents, 'utf8');
+      await handle.sync();
+    } finally {
+      await handle.close();
+    }
+    await runtime.fs.chmod(tmp, mode);
+    await runtime.fs.rename(tmp, targetPath);
+    await runtime.fs.chmod(targetPath, mode);
+  } catch (error) {
+    try {
+      await runtime.fs.unlink(tmp);
+    } catch {
+      // ignore
+    }
+    if (error instanceof Error && /symbolic-link|Refusing/.test(error.message)) throw error;
+    throw ioError(`Failed to write file atomically:\n  ${targetPath}`);
+  }
+}
+
 export async function removeFileIfExists(runtime: Runtime, filePath: string): Promise<boolean> {
   try {
     await assertRegularNonSymlinkFile(runtime, filePath, 'file');

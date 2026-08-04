@@ -1,5 +1,5 @@
+import type { CommandContext } from './command-context.js';
 import type { Runtime } from './runtime.js';
-import type { Terminal } from './terminal.js';
 import { requireInteractiveTerminal } from './terminal.js';
 import { parseFlags } from './argv.js';
 import { usageError, unavailableCommand } from './errors.js';
@@ -15,13 +15,7 @@ import {
 import { parseInstanceId } from '@nrdocs/contracts';
 import { ROOT_HELP } from './help.js';
 
-export type CommandContext = {
-  runtime: Runtime;
-  terminal: Terminal;
-  json: boolean;
-  instance?: string;
-  help: boolean;
-};
+export type { CommandContext } from './command-context.js';
 
 export async function runCredentialsCommand(
   ctx: CommandContext,

@@ -89,5 +89,15 @@ export function unavailableCommand(command: string): CliError {
 
 export function mapUnknownError(error: unknown): CliError {
   if (error instanceof CliError) return error;
+  const msg = error instanceof Error ? error.message : 'An unexpected nrdocs error occurred.';
+  // Keep diagnostics safe: never echo secrets; short system messages are OK for I/O.
+  if (error instanceof Error && !/nrd_pub_|Bearer\s/i.test(msg) && msg.length < 500) {
+    return new CliError({
+      code: 'internal',
+      phase: 'internal',
+      exit_code: ExitCode.InternalSoftware,
+      safe_message: msg,
+    });
+  }
   return internalError('An unexpected nrdocs error occurred.');
 }
