@@ -220,3 +220,10 @@ export {
   normalizeRequestPath,
   attachmentContentDisposition,
 } from './preview-server.js';
+export {
+  applyMigrations,
+  createD1HttpExecutor,
+  createSqliteExecutor,
+  openMemorySqlite,
+} from './persistence-adapter.js';
+export type { D1HttpQueryClient, SqlExecutor } from './persistence-adapter.js';
