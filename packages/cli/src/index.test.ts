@@ -84,6 +84,7 @@ function descriptor(id: string, name: string): InstanceDescriptor {
     instance_id: id as InstanceDescriptor['instance_id'],
     display_name: name,
     canonical_origin: 'https://docs.example.com',
+    custom_hostname: null,
     account_id: 'acct',
     resource_suffix: '3f6m8p0q2r4s6t8v0w2x',
     database_id: 'db',

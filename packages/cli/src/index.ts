@@ -15,6 +15,7 @@ import {
 } from './dispatch.js';
 import { runGenerateNavCommand } from './generate-nav.js';
 import { runPreviewCommand } from './preview.js';
+import { runDeployCommand, type DeployOptions } from './deploy.js';
 import { presentError, presentHumanSuccess } from './present.js';
 import { assertSupportedPlatform, createProcessRuntime, type Runtime } from './runtime.js';
 import { createRejectingTerminal, type Terminal } from './terminal.js';
@@ -39,9 +40,14 @@ export function cliDependencies(): {
 export type RunOptions = {
   runtime?: Runtime;
   terminal?: Terminal;
+  deploy?: DeployOptions;
 };
 
-async function dispatch(ctx: CommandContext, rest: string[]): Promise<void> {
+async function dispatch(
+  ctx: CommandContext,
+  rest: string[],
+  deployOptions?: DeployOptions,
+): Promise<void> {
   if (rest.length === 0) {
     if (ctx.help) {
       rootHelp(ctx.runtime);
@@ -79,7 +85,7 @@ async function dispatch(ctx: CommandContext, rest: string[]): Promise<void> {
       throw usageError('Unknown generate command.', 'Run: nrdocs generate nav --help');
     }
     case 'deploy':
-      await runStubCommand('deploy', ctx);
+      await runDeployCommand(ctx, tail, deployOptions ?? {});
       return;
     case 'site': {
       const sub = tail[0];
@@ -165,7 +171,7 @@ export async function runCli(
       return ExitCode.Success;
     }
 
-    await dispatch(ctx, rest);
+    await dispatch(ctx, rest, options.deploy);
     return ExitCode.Success;
   } catch (error) {
     return presentError(runtime, error, { json });
@@ -227,3 +233,8 @@ export {
   openMemorySqlite,
 } from './persistence-adapter.js';
 export type { D1HttpQueryClient, SqlExecutor } from './persistence-adapter.js';
+export { runDeployCommand, createFakeCloudflare } from './deploy.js';
+export type { DeployOptions } from './deploy.js';
+export { extractWranglerToken } from './deploy/auth.js';
+export { parseAccountsResult, classifyCfError } from './deploy/parsers.js';
+export { generateResourceSuffix, plannedResourceNames } from './deploy/names.js';
