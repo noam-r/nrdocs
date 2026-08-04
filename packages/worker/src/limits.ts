@@ -26,6 +26,8 @@ export const RATE_LIMITS = {
   resolveTargetPerToken: { limit: 120, windowMs: 60_000 },
   publishPerSiteToken: { limit: 10, windowMs: 60_000 },
   apiPerInstance: { limit: 300, windowMs: 60_000 },
+  passwordPerSiteIp: { limit: 10, windowMs: 60_000 },
+  passwordPerSite: { limit: 100, windowMs: 60_000 },
   retryAfterSeconds: 60,
 } as const;
 

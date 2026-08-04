@@ -234,7 +234,9 @@ function walkContent(
       if (attrs.has('aria-current') && attrs.get('aria-current') !== 'page') {
         fail('Invalid aria-current.');
       }
-      validateHref(href, ctx.pageRoute, ctx.pageTargets, { allowExternal: true });
+      validateHref(href, ctx.pageRoute, new Set([...ctx.pageTargets, ...ctx.assetTargets]), {
+        allowExternal: true,
+      });
       break;
     }
     case 'img': {
