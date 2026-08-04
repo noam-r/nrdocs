@@ -28,6 +28,10 @@
   "dependencies": {
     "@nrdocs/contracts": "workspace:*",
     "@nrdocs/persistence": "workspace:*",
-    "@nrdocs/renderer": "workspace:*"
+    "@nrdocs/renderer": "workspace:*",
+    "yaml": "2.8.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.13.3"
   }
 }
