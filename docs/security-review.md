@@ -22,12 +22,10 @@
 3. **Attachment disposition sanitization** — implemented (`headers.ts` / reader tests).
 4. **Packed release unit** — Worker and platform assets ship with the CLI; no runtime
    download of alternate versions (`pack:check`).
-5. **R2 list/delete via admin HTTP adapter** — best-effort in RC; site deletion clears
-   D1 authority so orphan objects are unreachable to readers. Track full R2 purge
-   completeness before declaring production-hardened ops.
+5. **R2 list/delete via admin HTTP adapter** — implemented on the control-plane
+   client and wired through `createR2ArtifactStoreFromControlPlane`.
 
 ## Residual risk / follow-ups
 
-- Complete R2 prefix listing/deletion against live Cloudflare APIs.
-- Run the disposable Cloudflare journey suite before `v2.0.0`.
-- Confirm Worker secrets + rate-limit bindings match `08` once live deploy is exercised.
+- Run `pnpm test:e2e:cloudflare` with a valid API token before tagging `v2.0.0`.
+- Confirm workers.dev (or custom domain) reachability from the tagging environment.

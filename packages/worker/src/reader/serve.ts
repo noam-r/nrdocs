@@ -31,6 +31,7 @@ import { passwordInputLooksPlausible, verifyReaderPassword } from './password.js
 import {
   headOf,
   htmlResponse,
+  logoutFormPage,
   logoutPage,
   notFoundPage,
   passwordFormPage,
@@ -413,6 +414,24 @@ export async function handleAccessPost(request: Request, ctx: ReaderContext): Pr
       location: returnPath,
       'set-cookie': sessionSetCookie(site.id, token),
     },
+  });
+}
+
+export async function handleLogoutGet(request: Request, ctx: ReaderContext): Promise<Response> {
+  const url = new URL(request.url);
+  const slug = parseSlug(url.searchParams.get('site') ?? '');
+  if (!slug) return htmlResponse(notFoundPage(), 404, { hsts: ctx.hsts });
+  const site = await getSiteBySlug(ctx.db, slug);
+  if (!site) return htmlResponse(notFoundPage(), 404, { hsts: ctx.hsts });
+  const returnPath = `/${slug}/`;
+  const csrf = await mintCsrfToken(ctx.sessionKey, {
+    action: 'logout',
+    siteId: site.id,
+    returnPath,
+    now: ctx.now(),
+  });
+  return htmlResponse(logoutFormPage({ lang: siteLang(site), slug, csrf }), 200, {
+    hsts: ctx.hsts,
   });
 }
 

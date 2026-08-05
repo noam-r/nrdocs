@@ -37,6 +37,7 @@ import {
 import {
   BUNDLED_PLATFORM_CSS,
   BUNDLED_PLATFORM_JS,
+  BUNDLED_PLATFORM_MERMAID,
   BUNDLED_WORKER_MODULE,
 } from './deploy/worker-bundle.js';
 
@@ -522,6 +523,7 @@ async function reconcileInstance(
       script: BUNDLED_WORKER_MODULE,
       platformCss: BUNDLED_PLATFORM_CSS,
       platformJs: BUNDLED_PLATFORM_JS,
+      platformMermaid: BUNDLED_PLATFORM_MERMAID,
       createSessionKey: true,
       sessionKeyBytes: options.randomBytes(32),
       workersDev: desc.custom_hostname === null,

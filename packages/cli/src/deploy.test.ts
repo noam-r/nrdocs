@@ -5,6 +5,10 @@ import path from 'node:path';
 import { ExitCode, createProcessRuntime, main, type Runtime } from './index.js';
 import { openMemorySqlite } from '@nrdocs/persistence/sqlite';
 import { createFakeCloudflare, encodeMarker } from './deploy/fake-cloudflare.js';
+import {
+  createR2ArtifactStoreFromControlPlane,
+  rateLimitNamespaceId,
+} from './deploy/live-cloudflare.js';
 import { extractWranglerToken } from './deploy/auth.js';
 import {
   classifyCfError,
@@ -21,6 +25,7 @@ import {
   readActiveInstanceId,
 } from './instance-store.js';
 import { runDeployCommand } from './deploy.js';
+import { encodeR2ObjectKeyPath, parseR2ObjectsList } from './deploy/cloudflare.js';
 
 function captureIo() {
   let stdout = '';
@@ -111,6 +116,20 @@ describe('cloudflare parsers', () => {
     ).toBe('already_exists');
   });
 
+  it('parses R2 object lists flexibly and encodes object key paths', () => {
+    expect(parseR2ObjectsList([{ key: 'a/b' }, { name: 'c' }])).toEqual({ keys: ['a/b', 'c'] });
+    expect(parseR2ObjectsList({ objects: [{ key: 'x' }] }, { cursor: 'next' })).toEqual({
+      keys: ['x'],
+      cursor: 'next',
+    });
+    expect(encodeR2ObjectKeyPath('sites/s1/file.txt')).toBe('sites/s1/file.txt');
+    expect(encodeR2ObjectKeyPath('a b/c')).toBe('a%20b/c');
+    expect(rateLimitNamespaceId('inst_1', 'PASSWORD_IP_LIMIT')).toMatch(/^[1-9][0-9]*$/);
+    expect(rateLimitNamespaceId('inst_1', 'PASSWORD_IP_LIMIT')).not.toBe(
+      rateLimitNamespaceId('inst_1', 'PASSWORD_SITE_LIMIT'),
+    );
+  });
+
   it('derives deterministic resource names', () => {
     const suffix = generateResourceSuffix(new Uint8Array(16).fill(7));
     expect(suffix).toHaveLength(20);
@@ -142,6 +161,7 @@ describe('nrdocs deploy', () => {
       expect(cap.stdout).toMatch(/Instance:\s+inst_/);
       expect(await fs.readdir(cwd)).toEqual(before);
       expect(state.deployedWorkers).toHaveLength(1);
+      expect(state.deployedWorkers[0]!.platformMermaid.length).toBeGreaterThan(0);
       expect(state.workers.size).toBe(1);
 
       const active = await readActiveInstanceId(runtime);
@@ -278,4 +298,46 @@ describe('runDeployCommand helpers', () => {
     ).toBeGreaterThan(10);
   });
   void runDeployCommand;
+});
+
+describe('createR2ArtifactStoreFromControlPlane', () => {
+  it('lists and deletes objects through the fake control plane', async () => {
+    const { client, state } = createFakeCloudflare({ r2: ['bucket-a'] });
+    const store = createR2ArtifactStoreFromControlPlane(client, 'acct', 'bucket-a');
+    const enc = new TextEncoder();
+    await store.put({ key: 'sites/s1/a.txt', body: enc.encode('a') });
+    await store.put({ key: 'sites/s1/b.txt', body: enc.encode('b') });
+    await store.put({ key: 'sites/s2/c.txt', body: enc.encode('c') });
+
+    const listed = await store.list('sites/s1/');
+    expect(listed.keys.sort()).toEqual(['sites/s1/a.txt', 'sites/s1/b.txt']);
+    expect(listed.cursor).toBeUndefined();
+
+    await store.delete('sites/s1/a.txt');
+    expect(state.objects.has('bucket-a/sites/s1/a.txt')).toBe(false);
+    expect((await store.list('sites/s1/')).keys).toEqual(['sites/s1/b.txt']);
+
+    const page = await store.list('sites/', { limit: 1 });
+    expect(page.keys).toHaveLength(1);
+    expect(page.cursor).toBeTruthy();
+  });
+});
+
+describe('fake cloudflare cleanup APIs', () => {
+  it('deletes workers, d1, buckets, and objects', async () => {
+    const { client, state } = createFakeCloudflare({
+      r2: ['b1'],
+      d1: [{ uuid: 'd1-1', name: 'n' }],
+      workers: new Set(['w1']),
+    });
+    await client.putR2Object('a', 'b1', 'k/x', new Uint8Array([1]));
+    await client.deleteR2Object('a', 'b1', 'k/x');
+    expect(state.objects.size).toBe(0);
+    await client.deleteR2Bucket('a', 'b1');
+    expect(state.r2).toEqual([]);
+    await client.deleteD1('a', 'd1-1');
+    expect(state.d1).toEqual([]);
+    await client.deleteWorker('a', 'w1');
+    expect(state.workers.size).toBe(0);
+  });
 });

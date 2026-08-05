@@ -60,6 +60,9 @@ export function createFakeCloudflare(initial: Partial<FakeCloudflareState> = {})
       state.d1.push(row);
       return row;
     },
+    async deleteD1(_accountId, databaseId) {
+      state.d1 = state.d1.filter((d) => d.uuid !== databaseId);
+    },
     async d1Batch() {
       // no-op success for migrations in fake
     },
@@ -79,11 +82,36 @@ export function createFakeCloudflare(initial: Partial<FakeCloudflareState> = {})
         throw new CloudflareApiError('already_exists', 409, 'already exists');
       state.r2.push(name);
     },
+    async deleteR2Bucket(_accountId, bucket) {
+      state.r2 = state.r2.filter((name) => name !== bucket);
+      for (const key of [...state.objects.keys()]) {
+        if (key.startsWith(`${bucket}/`)) state.objects.delete(key);
+      }
+    },
     async putR2Object(_a, bucket, key, body) {
       state.objects.set(`${bucket}/${key}`, body);
     },
     async getR2Object(_a, bucket, key) {
       return state.objects.get(`${bucket}/${key}`) ?? null;
+    },
+    async listR2Objects(_a, bucket, prefix, opts = {}) {
+      const fullPrefix = `${bucket}/${prefix}`;
+      const all = [...state.objects.keys()]
+        .filter((k) => k.startsWith(fullPrefix))
+        .map((k) => k.slice(bucket.length + 1))
+        .sort();
+      const limit = opts.limit ?? 1000;
+      let start = 0;
+      if (opts.cursor) {
+        const idx = all.indexOf(opts.cursor);
+        start = idx >= 0 ? idx + 1 : 0;
+      }
+      const slice = all.slice(start, start + limit);
+      const next = start + limit < all.length ? slice[slice.length - 1] : undefined;
+      return next !== undefined ? { keys: slice, cursor: next } : { keys: slice };
+    },
+    async deleteR2Object(_a, bucket, key) {
+      state.objects.delete(`${bucket}/${key}`);
     },
     async listZones(_accountId, name) {
       return state.zones.filter((z) => z.name === name);
@@ -98,6 +126,10 @@ export function createFakeCloudflare(initial: Partial<FakeCloudflareState> = {})
       return {
         workersDevUrl: input.workersDev ? `https://${state.workersDevHost}` : null,
       };
+    },
+    async deleteWorker(_accountId, workerName) {
+      state.workers.delete(workerName);
+      state.sessionKeys.delete(workerName);
     },
     async smokeGet(url) {
       if (state.failStep === 'smoke' || state.smokeOk === false) {

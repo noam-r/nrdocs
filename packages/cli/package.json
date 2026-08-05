@@ -36,6 +36,7 @@
   },
   "devDependencies": {
     "@nrdocs/worker": "workspace:*",
-    "@types/node": "^24.13.3"
+    "@types/node": "^24.13.3",
+    "mermaid": "11.16.0"
   }
 }

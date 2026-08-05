@@ -94,6 +94,24 @@ export function passwordFormPage(input: {
   });
 }
 
+export function logoutFormPage(input: { lang: PlatformLang; slug: string; csrf: string }): string {
+  return shell({
+    lang: input.lang,
+    title: 'Sign out',
+    body: [
+      '  <main class="nr-platform-main">',
+      '    <h1>Sign out</h1>',
+      '    <p>End your session for this site.</p>',
+      '    <form method="post" action="/_nrdocs/logout">',
+      `      <input type="hidden" name="site" value="${escapeHtml(input.slug)}">`,
+      `      <input type="hidden" name="csrf" value="${escapeHtml(input.csrf)}">`,
+      '      <button type="submit">Sign out</button>',
+      '    </form>',
+      '  </main>',
+    ].join('\n'),
+  });
+}
+
 export function logoutPage(input: { lang: PlatformLang; slug: string }): string {
   return shell({
     lang: input.lang,

@@ -12,13 +12,18 @@ import {
 import { createD1Executor, type D1DatabaseLike } from './persistence-adapter.js';
 import { ApiError, errorResponse, requestIdFromHeaders, versionResponse } from './http.js';
 import { handlePublish, handlePublishTarget } from './publish.js';
-import { MemoryRateLimiter, type RateLimiter } from './rate-limit.js';
+import {
+  createCompositeRateLimiter,
+  type CfRateLimitBinding,
+  type RateLimiter,
+} from './rate-limit.js';
 import { r2AsArtifactStore, type R2BucketLike } from './r2-adapter.js';
 import { base64UrlToBytes } from './reader/crypto.js';
 import { servePlatformAsset } from './reader/platform-assets.js';
 import {
   handleAccessGet,
   handleAccessPost,
+  handleLogoutGet,
   handleLogoutPost,
   handleSiteContent,
   type ReaderContext,
@@ -40,6 +45,13 @@ export type WorkerEnv = {
   NRDOCS_PACKAGE_VERSION: string;
   /** Base64url-encoded 32-byte HMAC key for reader sessions and CSRF. */
   NRDOCS_SESSION_KEY?: string;
+  /** Cloudflare Rate Limit bindings (optional; memory fallback when absent). */
+  PASSWORD_IP_LIMIT?: CfRateLimitBinding;
+  PASSWORD_SITE_LIMIT?: CfRateLimitBinding;
+  INVALID_TOKEN_LIMIT?: CfRateLimitBinding;
+  TOKEN_RESOLVE_LIMIT?: CfRateLimitBinding;
+  TOKEN_PUBLISH_LIMIT?: CfRateLimitBinding;
+  INSTANCE_API_LIMIT?: CfRateLimitBinding;
   /** Test injectables */
   __artifactStore?: ArtifactObjectStore;
   __rateLimiter?: RateLimiter;
@@ -64,7 +76,13 @@ export { createD1Executor } from './persistence-adapter.js';
 export type { D1DatabaseLike, SqlExecutor } from './persistence-adapter.js';
 export { validateStoredPage } from './validate-page.js';
 export { expandArtifactArchive } from './archive.js';
-export { MemoryRateLimiter } from './rate-limit.js';
+export {
+  MemoryRateLimiter,
+  CloudflareBindingRateLimiter,
+  CompositeRateLimiter,
+  createCompositeRateLimiter,
+} from './rate-limit.js';
+export type { RateLimiter, CfRateLimitBinding } from './rate-limit.js';
 
 function resolveStore(env: WorkerEnv): ArtifactObjectStore {
   if (env.__artifactStore) return env.__artifactStore;
@@ -74,6 +92,12 @@ function resolveStore(env: WorkerEnv): ArtifactObjectStore {
     return r2AsArtifactStore(artifacts as R2BucketLike);
   }
   return new MemoryArtifactStore();
+}
+
+function resolveRateLimiter(env: WorkerEnv): RateLimiter {
+  // Test inject still wins over CF bindings and memory fallback.
+  if (env.__rateLimiter) return env.__rateLimiter;
+  return createCompositeRateLimiter(env);
 }
 
 function clientIp(request: Request, env: WorkerEnv): string {
@@ -105,7 +129,7 @@ function buildReaderContext(
     db: createD1Executor(env.DB),
     store: resolveStore(env),
     sessionKey,
-    rateLimiter: env.__rateLimiter ?? new MemoryRateLimiter(),
+    rateLimiter: resolveRateLimiter(env),
     clientIp: clientIp(request, env),
     requestId: requestIdFromHeaders(request.headers),
     now: env.__now ?? (() => new Date()),
@@ -148,6 +172,10 @@ export async function handleRequest(request: Request, env: WorkerEnv): Promise<R
       const key = resolveSessionKey(env);
       if (!key) return htmlResponse(unavailablePage(requestId), 503, { hsts });
       const ctx = buildReaderContext(request, env, key);
+      if (method === 'GET' || method === 'HEAD') {
+        const res = await handleLogoutGet(request, ctx);
+        return method === 'HEAD' ? headOf(res) : res;
+      }
       if (method === 'POST') return handleLogoutPost(request, ctx);
       return htmlResponse(notFoundPage(), 405, { hsts });
     }
@@ -161,7 +189,7 @@ export async function handleRequest(request: Request, env: WorkerEnv): Promise<R
     }
 
     const db = createD1Executor(env.DB);
-    const rateLimiter = env.__rateLimiter ?? new MemoryRateLimiter();
+    const rateLimiter = resolveRateLimiter(env);
     const store = resolveStore(env);
     const ip = clientIp(request, env);
 

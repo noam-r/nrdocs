@@ -2,6 +2,7 @@
 /**
  * Release packaging for the published `nrdocs` CLI.
  *
+ * - Bundle Mermaid into packaged/mermaid.js and regenerate the Worker embed
  * - Bundle the Cloudflare Worker into packaged/worker.mjs
  * - Write fixed platform assets into packaged/
  * - Typecheck/compile the CLI with tsc
@@ -19,6 +20,42 @@ const cliRoot = path.resolve(__dirname, '..');
 const repoRoot = path.resolve(cliRoot, '../..');
 const packagedDir = path.join(cliRoot, 'packaged');
 const distDir = path.join(cliRoot, 'dist');
+const mermaidGeneratedPath = path.join(
+  repoRoot,
+  'packages/worker/src/reader/mermaid-bundle.generated.ts',
+);
+const MERMAID_STUB = `/** Stub Mermaid ESM; overwritten with the real bundle during \`bundle:release\`. */
+export const MERMAID_BUNDLE = 'export default {};\\n';
+`;
+
+async function writeMermaidBundle() {
+  await fs.mkdir(packagedDir, { recursive: true });
+  const outfile = path.join(packagedDir, 'mermaid.js');
+  await esbuild.build({
+    absWorkingDir: repoRoot,
+    entryPoints: [path.join(cliRoot, 'scripts/mermaid-entry.mjs')],
+    bundle: true,
+    format: 'esm',
+    platform: 'browser',
+    outfile,
+    logLevel: 'warning',
+    mainFields: ['module', 'browser', 'main'],
+    conditions: ['import', 'module', 'browser', 'default'],
+  });
+  const js = await fs.readFile(outfile, 'utf8');
+  if (!js.includes('initialize') && js.length < 1000) {
+    throw new Error('Mermaid bundle looks empty or incomplete');
+  }
+  await fs.writeFile(
+    mermaidGeneratedPath,
+    `export const MERMAID_BUNDLE = ${JSON.stringify(js)};\n`,
+    'utf8',
+  );
+}
+
+async function restoreMermaidStub() {
+  await fs.writeFile(mermaidGeneratedPath, MERMAID_STUB, 'utf8');
+}
 
 async function bundleWorker() {
   await fs.mkdir(packagedDir, { recursive: true });
@@ -38,13 +75,16 @@ async function bundleWorker() {
   const assetsSource = await fs.readFile(assetsPath, 'utf8');
   const cssMatch = assetsSource.match(/export const PLATFORM_CSS = `([\s\S]*?)`;/);
   const jsMatch = assetsSource.match(/export const PLATFORM_JS = `([\s\S]*?)`;/);
-  const mermaidMatch = assetsSource.match(/export const PLATFORM_MERMAID = `([\s\S]*?)`;/);
-  if (!cssMatch || !jsMatch || !mermaidMatch) {
-    throw new Error('Failed to extract PLATFORM_* assets from platform-assets.ts');
+  if (!cssMatch || !jsMatch) {
+    throw new Error('Failed to extract PLATFORM_CSS/PLATFORM_JS from platform-assets.ts');
   }
   await fs.writeFile(path.join(packagedDir, 'reader.css'), cssMatch[1], 'utf8');
   await fs.writeFile(path.join(packagedDir, 'reader.js'), jsMatch[1], 'utf8');
-  await fs.writeFile(path.join(packagedDir, 'mermaid.js'), mermaidMatch[1], 'utf8');
+  // mermaid.js already written by writeMermaidBundle (prefer esbuild output over TS stub)
+  const mermaidStat = await fs.stat(path.join(packagedDir, 'mermaid.js')).catch(() => null);
+  if (!mermaidStat) {
+    throw new Error('Missing packaged/mermaid.js from Mermaid esbuild step');
+  }
   await fs.writeFile(
     path.join(packagedDir, 'MANIFEST.txt'),
     ['nrdocs release unit assets', 'worker.mjs', 'reader.css', 'reader.js', 'mermaid.js', ''].join(
@@ -118,8 +158,14 @@ function runTsc() {
 }
 
 async function main() {
-  console.log('Bundling Worker + platform assets…');
-  await bundleWorker();
+  console.log('Bundling Mermaid platform asset…');
+  await writeMermaidBundle();
+  try {
+    console.log('Bundling Worker + platform assets…');
+    await bundleWorker();
+  } finally {
+    await restoreMermaidStub();
+  }
   console.log('Compiling CLI TypeScript…');
   runTsc();
   console.log('Bundling self-contained CLI…');

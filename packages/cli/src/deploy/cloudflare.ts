@@ -38,6 +38,7 @@ export type DeployWorkerInput = {
   script: string;
   platformCss: string;
   platformJs: string;
+  platformMermaid: string;
   /** Existing session secret preservation — omit to create. */
   createSessionKey: boolean;
   sessionKeyBytes?: Uint8Array;
@@ -53,6 +54,7 @@ export type CloudflareControlPlane = {
   ): Promise<{ ok: true } | { ok: false; missing: string }>;
   listD1(accountId: string): Promise<CfD1Database[]>;
   createD1(accountId: string, name: string): Promise<CfD1Database>;
+  deleteD1(accountId: string, databaseId: string): Promise<void>;
   d1Batch(
     accountId: string,
     databaseId: string,
@@ -66,12 +68,60 @@ export type CloudflareControlPlane = {
   ): Promise<unknown[]>;
   listR2(accountId: string): Promise<Array<{ name: string }>>;
   createR2(accountId: string, name: string): Promise<void>;
+  deleteR2Bucket(accountId: string, bucket: string): Promise<void>;
   putR2Object(accountId: string, bucket: string, key: string, body: Uint8Array): Promise<void>;
   getR2Object(accountId: string, bucket: string, key: string): Promise<Uint8Array | null>;
+  listR2Objects(
+    accountId: string,
+    bucket: string,
+    prefix: string,
+    opts?: { cursor?: string; limit?: number },
+  ): Promise<{ keys: string[]; cursor?: string }>;
+  deleteR2Object(accountId: string, bucket: string, key: string): Promise<void>;
   listZones(accountId: string, name: string): Promise<CfZone[]>;
   deployWorker(input: DeployWorkerInput): Promise<{ workersDevUrl: string | null }>;
+  deleteWorker(accountId: string, workerName: string): Promise<void>;
   smokeGet(url: string): Promise<{ status: number; body: string }>;
 };
+
+/** Encode an R2 object key for use in a URL path (keys may contain `/`). */
+export function encodeR2ObjectKeyPath(key: string): string {
+  return key
+    .split('/')
+    .map((segment) => encodeURIComponent(segment))
+    .join('/');
+}
+
+function isObject(v: unknown): v is Record<string, unknown> {
+  return typeof v === 'object' && v !== null && !Array.isArray(v);
+}
+
+/** Flexible parser for Cloudflare R2 object list payloads. */
+export function parseR2ObjectsList(
+  result: unknown,
+  resultInfo?: unknown,
+): { keys: string[]; cursor?: string } {
+  const rows = Array.isArray(result)
+    ? result
+    : isObject(result) && Array.isArray(result.objects)
+      ? result.objects
+      : null;
+  if (!rows) throw new Error('malformed R2 objects result');
+  const keys: string[] = [];
+  for (const row of rows) {
+    if (!isObject(row)) continue;
+    const key =
+      typeof row.key === 'string' ? row.key : typeof row.name === 'string' ? row.name : null;
+    if (key !== null) keys.push(key);
+  }
+  let cursor: string | undefined;
+  if (isObject(resultInfo) && typeof resultInfo.cursor === 'string' && resultInfo.cursor) {
+    cursor = resultInfo.cursor;
+  } else if (isObject(result) && typeof result.cursor === 'string' && result.cursor) {
+    cursor = result.cursor;
+  }
+  return cursor !== undefined ? { keys, cursor } : { keys };
+}
 
 export class CloudflareApiError extends Error {
   readonly kind: string;
@@ -146,6 +196,9 @@ export function createHttpCloudflareControlPlane(
       api('POST', `/accounts/${accountId}/d1/database`, parseD1CreateResult, {
         body: { name },
       }),
+    async deleteD1(accountId, databaseId) {
+      await api('DELETE', `/accounts/${accountId}/d1/database/${databaseId}`, () => null);
+    },
     async d1Batch(accountId, databaseId, statements) {
       await api('POST', `/accounts/${accountId}/d1/database/${databaseId}/query`, () => null, {
         body: { batch: statements.map((s) => ({ sql: s.sql, params: [...s.params] })) },
@@ -171,16 +224,21 @@ export function createHttpCloudflareControlPlane(
     async createR2(accountId, name) {
       await api('POST', `/accounts/${accountId}/r2/buckets`, () => null, { body: { name } });
     },
+    async deleteR2Bucket(accountId, bucket) {
+      await api('DELETE', `/accounts/${accountId}/r2/buckets/${bucket}`, () => null);
+    },
     async putR2Object(accountId, bucket, key, body) {
       // Object API uses binary responses; http adapter must support raw put via special path.
-      await http.request('PUT', `/accounts/${accountId}/r2/buckets/${bucket}/objects/${key}`, {
+      const encoded = encodeR2ObjectKeyPath(key);
+      await http.request('PUT', `/accounts/${accountId}/r2/buckets/${bucket}/objects/${encoded}`, {
         body: { __raw: body },
       });
     },
     async getR2Object(accountId, bucket, key) {
+      const encoded = encodeR2ObjectKeyPath(key);
       const res = await http.request(
         'GET',
-        `/accounts/${accountId}/r2/buckets/${bucket}/objects/${key}`,
+        `/accounts/${accountId}/r2/buckets/${bucket}/objects/${encoded}`,
       );
       if (res.status === 404) return null;
       if (res.status >= 400) {
@@ -192,11 +250,54 @@ export function createHttpCloudflareControlPlane(
       if (typeof res.json === 'string') return new TextEncoder().encode(res.json);
       return new TextEncoder().encode(JSON.stringify(res.json));
     },
+    async listR2Objects(accountId, bucket, prefix, opts = {}) {
+      const query: Record<string, string> = { prefix };
+      if (opts.cursor) query.cursor = opts.cursor;
+      if (opts.limit !== undefined) query.per_page = String(opts.limit);
+      const res = await http.request('GET', `/accounts/${accountId}/r2/buckets/${bucket}/objects`, {
+        query,
+      });
+      let envelope;
+      try {
+        envelope = parseCfEnvelope(res.json, (r) => r);
+      } catch {
+        throw new CloudflareApiError('malformed', res.status, 'Malformed Cloudflare response.');
+      }
+      const kind = classifyCfError(res.status, envelope);
+      if (kind !== 'ok' || !envelope.success) {
+        const msg = envelope.errors[0]?.message ?? `Cloudflare API error (${res.status})`;
+        throw new CloudflareApiError(kind, res.status, msg);
+      }
+      const resultInfo =
+        typeof res.json === 'object' && res.json !== null && 'result_info' in res.json
+          ? (res.json as { result_info: unknown }).result_info
+          : undefined;
+      try {
+        return parseR2ObjectsList(envelope.result, resultInfo);
+      } catch {
+        throw new CloudflareApiError(
+          'malformed',
+          res.status,
+          'Malformed Cloudflare result payload.',
+        );
+      }
+    },
+    async deleteR2Object(accountId, bucket, key) {
+      const encoded = encodeR2ObjectKeyPath(key);
+      await api(
+        'DELETE',
+        `/accounts/${accountId}/r2/buckets/${bucket}/objects/${encoded}`,
+        () => null,
+      );
+    },
     listZones: (accountId, name) =>
       api('GET', `/zones`, parseZonesResult, {
         query: { name, 'account.id': accountId },
       }),
     deployWorker: deployWorkerImpl,
+    async deleteWorker(accountId, workerName) {
+      await api('DELETE', `/accounts/${accountId}/workers/scripts/${workerName}`, () => null);
+    },
     smokeGet: smokeGetImpl,
   };
 }

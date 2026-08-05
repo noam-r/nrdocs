@@ -2,30 +2,31 @@
 
 Maps numbered acceptance criteria from the normative specifications to automated
 tests. A criterion is covered when at least one automated test exercises the
-behavior; recorded results are the latest green `pnpm verify` / CI run.
+behavior. Recorded results: latest green `pnpm verify` on this branch.
 
-| Spec                                                        | Criterion                                                                                  | Automated coverage |
-| ----------------------------------------------------------- | ------------------------------------------------------------------------------------------ | ------------------ |
-| `00` Product AC 1–3 (Markdown → minisite, no Git identity)  | `packages/cli/src/connect-publish.test.ts`, `packages/renderer/src/*`                      |
-| `00` Product AC 4–5 (preview / connect)                     | `packages/cli/src/preview.test.ts`, `connect-publish.test.ts`                              |
-| `00` Product AC 6–8 (admin / tokens / access)               | `packages/cli/src/admin.test.ts`                                                           |
-| `00` Product AC 9–10 (reader public/password)               | `packages/worker/src/reader.test.ts`                                                       |
-| `04` Data-model AC (access/password/session_generation)     | `packages/persistence/src/index.test.ts`, `admin.test.ts`, `reader.test.ts`                |
-| `04` Promotion / lock / deletion invariants                 | `packages/persistence/src/index.test.ts`, `packages/worker/src/publish.test.ts`            |
-| `05` Publisher API AC (target, publish, idempotent, errors) | `packages/worker/src/publish.test.ts`                                                      |
-| `05` Reader route AC (root, slug, 404 matrix, attachments)  | `packages/worker/src/reader.test.ts`                                                       |
-| `05` Artifact / manifest contract                           | `packages/contracts/src/index.test.ts`, `packages/renderer/src/*`, `validate-page.test.ts` |
-| `07` Token / password / session / CSRF / rate limits        | `admin.test.ts` (verifiers), `reader.test.ts` (session/CSRF/rate limit)                    |
-| `07` Windows rejection / credential modes                   | `packages/cli/src/index.test.ts`                                                           |
-| `08` Deploy / reconcile / empty-directory                   | `packages/cli/src/deploy.test.ts`                                                          |
-| `08` Packaged release unit (Worker + migrations + assets)   | `packages/cli/scripts/pack-check.mjs` via `pnpm verify`                                    |
-| `09` Stored-page schema                                     | `packages/worker/src/validate-page.test.ts`                                                |
-| `09` Platform pages / headers / password UX                 | `packages/worker/src/reader.test.ts`                                                       |
-| Journeys 12/13/21 (reader access)                           | `reader.test.ts`                                                                           |
-| CI / non-Git publication                                    | `connect-publish.test.ts` (env credential paths)                                           |
+| Spec |    # | Criterion (summary)                                    | Automated coverage                                                |
+| ---- | ---: | ------------------------------------------------------ | ----------------------------------------------------------------- |
+| `00` |    1 | Directory Markdown → protected minisite                | `connect-publish.test.ts`, renderer tests                         |
+| `00` |    2 | No Git identity / provider coupling                    | `connect-publish.test.ts`, CLI argv/runtime                       |
+| `00` |    3 | One current artifact                                   | `publish.test.ts`, persistence promote                            |
+| `00` |    4 | Local preview without Cloudflare                       | `preview.test.ts`                                                 |
+| `00` |    5 | Connect + credential store                             | `connect-publish.test.ts`, `index.test.ts`                        |
+| `00` |  6–8 | Site/token/access administration                       | `admin.test.ts`                                                   |
+| `00` | 9–10 | Public and password reader access                      | `reader.test.ts`                                                  |
+| `04` | 1–10 | Access/password/session/promotion/deletion invariants  | `persistence/index.test.ts`, `admin.test.ts`, `reader.test.ts`    |
+| `05` | 1–13 | Publisher API, artifact, reader routes                 | `publish.test.ts`, `reader.test.ts`, contracts/renderer           |
+| `07` |  1–8 | Tokens, PBKDF2, sessions, CSRF, rate limits, redaction | `admin.test.ts`, `reader.test.ts`, `rate-limit.test.ts`           |
+| `07` |    — | Windows rejection; credential modes                    | `index.test.ts`, `tests/e2e/smoke.test.ts`                        |
+| `08` |  1–9 | Deploy, reconcile, ownership, packaged unit            | `deploy.test.ts`, `pack:check`, `tests/e2e/smoke.test.ts`         |
+| `08` |    — | Live disposable provision/smoke/cleanup                | `tests/e2e/cloudflare.test.ts` (`pnpm test:e2e:cloudflare`)       |
+| `09` |  1–4 | Page schema, highlight, Mermaid, shell                 | `validate-page.test.ts`, renderer, `reader.test.ts`               |
+| `09` |  5–7 | Routes, headers, storage inconsistency                 | `reader.test.ts`                                                  |
+| `09` |    — | Logout GET form + Sign out control                     | `reader.test.ts`, platform `reader.js`                            |
 
-Gaps intentionally deferred to the disposable Cloudflare suite (`RELEASE.md`):
+## Release gate
 
-- Live multi-instance selection against real Cloudflare resources
-- Live custom-domain attachment and smoke against workers.dev
-- Cross-machine packed-CLI runs beyond CI Linux/macOS matrices
+| Gate                  | Command / artifact                                           |
+| --------------------- | ------------------------------------------------------------ |
+| Local RC              | `pnpm verify`                                                |
+| Disposable Cloudflare | `pnpm test:e2e:cloudflare` with valid `CLOUDFLARE_API_TOKEN` |
+| Tag                   | `v2.0.0` only after both green (`RELEASE.md`)                |

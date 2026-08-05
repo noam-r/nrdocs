@@ -13,6 +13,35 @@ import {
 
 const API = 'https://api.cloudflare.com/client/v4';
 
+const RATE_LIMIT_SPECS = [
+  { name: 'PASSWORD_IP_LIMIT', limit: 10, period: 60 },
+  { name: 'PASSWORD_SITE_LIMIT', limit: 100, period: 60 },
+  { name: 'INVALID_TOKEN_LIMIT', limit: 30, period: 60 },
+  { name: 'TOKEN_RESOLVE_LIMIT', limit: 120, period: 60 },
+  { name: 'TOKEN_PUBLISH_LIMIT', limit: 10, period: 60 },
+  { name: 'INSTANCE_API_LIMIT', limit: 300, period: 60 },
+] as const;
+
+/** Derive a positive integer namespace_id unique per instance + binding name. */
+export function rateLimitNamespaceId(instanceId: string, name: string): string {
+  const input = `${instanceId}\0${name}`;
+  let hash = 2166136261;
+  for (let i = 0; i < input.length; i++) {
+    hash ^= input.charCodeAt(i);
+    hash = Math.imul(hash, 16777619);
+  }
+  return String(((hash >>> 0) % 2147483646) + 1);
+}
+
+function rateLimitBindings(instanceId: string): Array<Record<string, unknown>> {
+  return RATE_LIMIT_SPECS.map((spec) => ({
+    type: 'ratelimit',
+    name: spec.name,
+    namespace_id: rateLimitNamespaceId(instanceId, spec.name),
+    simple: { limit: spec.limit, period: spec.period },
+  }));
+}
+
 export type LiveCloudflareOptions = {
   token: string;
   fetchImpl?: typeof fetch;
@@ -82,6 +111,7 @@ async function deployWorkerScript(
       { type: 'r2_bucket', name: 'ARTIFACTS', bucket_name: input.bucketName },
       { type: 'plain_text', name: 'NRDOCS_INSTANCE_ID', text: input.instanceId },
       { type: 'plain_text', name: 'NRDOCS_PACKAGE_VERSION', text: input.packageVersion },
+      ...rateLimitBindings(input.instanceId),
     ],
   };
 
@@ -94,6 +124,11 @@ async function deployWorkerScript(
   );
   form.set('reader.css', new Blob([input.platformCss], { type: 'text/css' }), 'reader.css');
   form.set('reader.js', new Blob([input.platformJs], { type: 'text/javascript' }), 'reader.js');
+  form.set(
+    'mermaid.js',
+    new Blob([input.platformMermaid], { type: 'text/javascript' }),
+    'mermaid.js',
+  );
 
   const res = await fetchImpl(
     `${API}/accounts/${input.accountId}/workers/scripts/${input.workerName}`,
@@ -204,12 +239,28 @@ export function createR2ArtifactStoreFromControlPlane(
     async get(key) {
       return cf.getR2Object(accountId, bucketName, key);
     },
-    async delete(_key) {
-      // R2 object delete via this control-plane adapter is not yet exposed;
-      // site deletion clears D1 authority first. Remaining objects are unreachable.
+    async delete(key) {
+      await cf.deleteR2Object(accountId, bucketName, key);
     },
-    async list(_prefix) {
-      return { keys: [] };
+    async list(prefix, options = {}) {
+      // One page when the caller manages pagination; otherwise gather all pages.
+      if (options.cursor !== undefined || options.limit !== undefined) {
+        return cf.listR2Objects(accountId, bucketName, prefix, {
+          ...(options.cursor !== undefined ? { cursor: options.cursor } : {}),
+          ...(options.limit !== undefined ? { limit: options.limit } : {}),
+        });
+      }
+      const keys: string[] = [];
+      let cursor: string | undefined;
+      do {
+        const page = await cf.listR2Objects(accountId, bucketName, prefix, {
+          ...(cursor !== undefined ? { cursor } : {}),
+          limit: 1000,
+        });
+        keys.push(...page.keys);
+        cursor = page.cursor;
+      } while (cursor);
+      return { keys };
     },
   };
 }

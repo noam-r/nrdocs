@@ -31,7 +31,6 @@ import { buildArtifactFromConfig } from '@nrdocs/renderer';
 import { handleRequest, type WorkerEnv } from './index.js';
 import { MemoryRateLimiter } from './rate-limit.js';
 import { bytesToBase64Url } from './reader/crypto.js';
-import { mintCsrfToken } from './reader/csrf.js';
 import { validateSafeReturnPath } from './reader/return-path.js';
 import { sessionCookieName } from './reader/session.js';
 
@@ -122,6 +121,7 @@ async function withReader(
     enabled?: boolean;
     publish?: boolean;
     withAttachment?: boolean;
+    pages?: Array<{ file: string; body: string }>;
     rateLimiter?: MemoryRateLimiter;
   } = {},
 ): Promise<void> {
@@ -166,6 +166,7 @@ async function withReader(
   if (opts.publish !== false) {
     const { gzip, digest } = await buildGzip(SITE, {
       ...(opts.withAttachment ? { withAttachment: true } : {}),
+      ...(opts.pages ? { pages: opts.pages } : {}),
     });
     const published = await fetch('/_nrdocs/api/v1/publish', {
       method: 'POST',
@@ -421,18 +422,21 @@ describe('reader serving', () => {
         expect(cross.status).toBe(302);
         expect(cross.headers.get('location')).toContain('site=other');
 
-        const logoutCsrf = await mintCsrfToken(SESSION_KEY, {
-          action: 'logout',
-          siteId: SITE,
-          returnPath: '/handbook/',
-        });
+        const logoutForm = await fetch('/_nrdocs/logout?site=handbook');
+        expect(logoutForm.status).toBe(200);
+        const logoutFormHtml = await logoutForm.text();
+        expect(logoutFormHtml).toContain('<h1>Sign out</h1>');
+        expect(logoutFormHtml).toContain('action="/_nrdocs/logout"');
+        expect(logoutFormHtml).toContain('name="site" value="handbook"');
+        const logoutFormCsrf = extractCsrf(logoutFormHtml);
+
         const loggedOut = await fetch('/_nrdocs/logout', {
           method: 'POST',
           headers: {
             origin: 'https://docs.example.com',
             'content-type': 'application/x-www-form-urlencoded',
           },
-          body: `site=handbook&csrf=${encodeURIComponent(logoutCsrf)}`,
+          body: `site=handbook&csrf=${encodeURIComponent(logoutFormCsrf)}`,
         });
         expect(loggedOut.status).toBe(200);
         expect(await loggedOut.text()).toContain('You have been signed out.');
@@ -441,6 +445,33 @@ describe('reader serving', () => {
       { access: 'password' },
     );
   }, 120_000);
+
+  it('serves mermaid fences and platform mermaid.js', async () => {
+    await withReader(
+      async ({ fetch }) => {
+        const page = await fetch('/handbook/');
+        expect(page.status).toBe(200);
+        const html = await page.text();
+        expect(html).toContain('class="nr-mermaid"');
+        expect(html).toContain('data-nr-mermaid');
+        expect(html).toContain('flowchart LR');
+
+        const mermaid = await fetch('/_nrdocs/v1/mermaid.js');
+        expect(mermaid.status).toBe(200);
+        expect(mermaid.headers.get('content-type')).toMatch(/javascript/);
+        const body = await mermaid.text();
+        expect(body).toContain('export default');
+      },
+      {
+        pages: [
+          {
+            file: 'index.md',
+            body: '# Diagrams\n\n```mermaid\nflowchart LR\n  A-->B\n```\n',
+          },
+        ],
+      },
+    );
+  });
 
   it('password change invalidates existing sessions', async () => {
     await withReader(
