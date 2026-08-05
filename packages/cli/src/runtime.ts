@@ -106,6 +106,11 @@ export function credentialPath(runtime: Runtime, siteId: string): string {
   return path.join(sitesDir(runtime), `${siteId}.json`);
 }
 
+/** Operator-managed Cloudflare API token file (nrdocs never writes this). */
+export function cloudflareEnvPath(runtime: Runtime): string {
+  return path.join(nrdocsHome(runtime), 'cloudflare.env');
+}
+
 export function instancePath(runtime: Runtime, instanceId: string): string {
   return path.join(instancesDir(runtime), `${instanceId}.json`);
 }

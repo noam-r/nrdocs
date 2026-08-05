@@ -1,7 +1,7 @@
 /**
  * Disposable Cloudflare end-to-end suite (opt-in).
  *
- * Requires a valid CLOUDFLARE_API_TOKEN (and preferably CLOUDFLARE_ACCOUNT_ID).
+ * Credentials: process env, or operator file `~/.nrdocs/cloudflare.env` (mode 0600).
  * Creates uniquely scoped resources, exercises deploy bindings + smoke, then cleans up.
  * Never targets an existing user instance.
  *
@@ -9,6 +9,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import fs from 'node:fs/promises';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { formatId, type InstanceId } from '@nrdocs/contracts';
@@ -22,20 +23,38 @@ import {
   plannedResourceNames,
 } from '../../packages/cli/src/deploy/names.js';
 import type { CloudflareControlPlane } from '../../packages/cli/src/deploy/cloudflare.js';
+import {
+  waitForOriginSmoke,
+  workersDevOrigin,
+} from '../../packages/cli/src/deploy/cloudflare.js';
+import { createProcessRuntime } from '../../packages/cli/src/runtime.js';
+import {
+  readCloudflareEnvFile,
+  resolveCloudflareAccountId,
+} from '../../packages/cli/src/deploy/auth.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const packagedDir = path.resolve(__dirname, '../../packages/cli/packaged');
 
-async function verifyApiToken(token: string): Promise<boolean> {
-  try {
-    const res = await fetch('https://api.cloudflare.com/client/v4/user/tokens/verify', {
-      headers: { authorization: `Bearer ${token}` },
-    });
-    const json = (await res.json()) as { success?: boolean };
-    return json.success === true;
-  } catch {
-    return false;
+async function verifyApiToken(token: string, accountId?: string): Promise<boolean> {
+  const urls: string[] = [];
+  if (accountId) {
+    urls.push(`https://api.cloudflare.com/client/v4/accounts/${accountId}/tokens/verify`);
   }
+  // User-owned tokens verify here; account-owned (cfat_*) return Invalid API Token.
+  urls.push('https://api.cloudflare.com/client/v4/user/tokens/verify');
+  for (const url of urls) {
+    try {
+      const res = await fetch(url, {
+        headers: { authorization: `Bearer ${token}` },
+      });
+      const json = (await res.json()) as { success?: boolean };
+      if (json.success === true) return true;
+    } catch {
+      /* try next */
+    }
+  }
+  return false;
 }
 
 async function loadPackaged(name: string): Promise<string> {
@@ -52,15 +71,28 @@ async function ensurePackaged(): Promise<void> {
   }
 }
 
+async function resolveSuiteCredentials(): Promise<{
+  token: string | undefined;
+  accountId: string | undefined;
+}> {
+  const runtime = createProcessRuntime({ homeDir: os.homedir() });
+  const file = await readCloudflareEnvFile(runtime).catch(() => null);
+  const token = runtime.env.CLOUDFLARE_API_TOKEN?.trim() || file?.apiToken;
+  const accountId = (await resolveCloudflareAccountId(runtime)) || undefined;
+  return { token, accountId };
+}
+
 describe('disposable Cloudflare e2e', () => {
   it('provisions Worker+D1+R2, applies migrations, smokes, and cleans up', async () => {
-    const token = process.env.CLOUDFLARE_API_TOKEN?.trim();
+    const { token, accountId: pinnedAccount } = await resolveSuiteCredentials();
     if (!token) {
-      console.warn('Skipping: CLOUDFLARE_API_TOKEN not set');
+      console.warn(
+        'Skipping: set CLOUDFLARE_API_TOKEN or create ~/.nrdocs/cloudflare.env (mode 0600)',
+      );
       return;
     }
-    if (!(await verifyApiToken(token))) {
-      console.warn('Skipping: CLOUDFLARE_API_TOKEN is not a valid Cloudflare API token');
+    if (!(await verifyApiToken(token, pinnedAccount))) {
+      console.warn('Skipping: Cloudflare API token is not valid');
       return;
     }
     await ensurePackaged();
@@ -71,7 +103,7 @@ describe('disposable Cloudflare e2e', () => {
 
     const accounts = await cf.listAccounts();
     expect(accounts.length).toBeGreaterThan(0);
-    const pinned = process.env.CLOUDFLARE_ACCOUNT_ID?.trim();
+    const pinned = pinnedAccount;
     const accountId = pinned || accounts[0]!.id;
     if (pinned) {
       expect(accounts.some((a) => a.id === pinned)).toBe(true);
@@ -80,8 +112,12 @@ describe('disposable Cloudflare e2e', () => {
     const pre = await cf.preflight(accountId, false);
     expect(pre.ok).toBe(true);
 
+    const accountSubdomain = await cf.getWorkersDevSubdomain(accountId);
+    expect(accountSubdomain.length).toBeGreaterThan(0);
+
     const suffix = generateResourceSuffix(globalThis.crypto.getRandomValues(new Uint8Array(16)));
     const names = plannedResourceNames(accountId, suffix);
+    const origin = workersDevOrigin(names.worker_name, accountSubdomain);
     const instanceId = formatId(
       'inst',
       globalThis.crypto.getRandomValues(new Uint8Array(16)),
@@ -125,7 +161,7 @@ describe('disposable Cloudflare e2e', () => {
             'e2e-disposable',
             accountId,
             suffix,
-            `https://${names.worker_name}.workers.dev`,
+            origin,
             '2.0.0',
             new Date().toISOString().replace(/\.\d{3}Z$/, 'Z'),
           ],
@@ -157,16 +193,38 @@ describe('disposable Cloudflare e2e', () => {
       });
       created.worker = true;
       workersDevUrl = deployed.workersDevUrl;
-      expect(workersDevUrl).toBeTruthy();
+      expect(workersDevUrl).toBe(origin);
 
-      const version = await cf.smokeGet(`${workersDevUrl}/_nrdocs/api/version`);
-      const root = await cf.smokeGet(`${workersDevUrl}/`);
-      // Some developer networks cannot reach workers.dev; treat as soft failure with clear signal.
+      const { version, root, attempts } = await waitForOriginSmoke(
+        cf.smokeGet.bind(cf),
+        workersDevUrl!,
+        {
+          // Edge routing for brand-new workers.dev names often lags 30–90s after
+          // subdomain enable; budget ~3 minutes before failing.
+          attempts: 60,
+          delayMs: 3000,
+          onRetry: async (attempt) => {
+            if (attempt === 0 || attempt % 5 !== 0) return;
+            try {
+              await cf.enableWorkersDev(accountId, names.worker_name);
+            } catch (error) {
+              console.warn('re-enable workers.dev failed', error);
+            }
+          },
+        },
+      );
+      // Genuine network failure only — wrong URL shape must not soft-pass.
       if (version.status === 0 || root.status === 0) {
-        console.warn('workers.dev unreachable from this host; control-plane steps still passed');
+        console.warn(
+          `Origin unreachable from this host (${workersDevUrl}); control-plane steps still passed`,
+        );
+      } else if (version.status !== 200 || root.status !== 200) {
+        console.error('smoke attempts', JSON.stringify(attempts));
+        console.error('final version body', version.body.slice(0, 200).replace(/\s+/g, ' '));
+        console.error('final root body', root.body.slice(0, 200).replace(/\s+/g, ' '));
+        expect(version.status, `version at ${workersDevUrl}`).toBe(200);
+        expect(root.status, `root at ${workersDevUrl}`).toBe(200);
       } else {
-        expect(version.status).toBe(200);
-        expect(root.status).toBe(200);
         expect(root.body).toContain('nrdocs');
       }
 

@@ -23,9 +23,15 @@ import {
   writeInstanceDescriptor,
 } from './instance-store.js';
 import { CLI_VERSION } from './help.js';
-import { resolveCloudflareCredential, type RunCommand } from './deploy/auth.js';
+import {
+  resolveCloudflareAccountId,
+  resolveCloudflareCredential,
+  type RunCommand,
+} from './deploy/auth.js';
 import {
   CloudflareApiError,
+  waitForOriginSmoke,
+  workersDevOrigin,
   type CloudflareControlPlane,
   type R2InstanceMarker,
 } from './deploy/cloudflare.js';
@@ -201,7 +207,7 @@ export async function runDeployCommand(
 
     const accounts = await cf.listAccounts().catch(mapCfError);
     let account_id: string;
-    const pinned = ctx.runtime.env.CLOUDFLARE_ACCOUNT_ID?.trim();
+    const pinned = await resolveCloudflareAccountId(ctx.runtime);
     if (pinned) {
       if (!accounts.some((a) => a.id === pinned)) {
         throw authorityError('CLOUDFLARE_ACCOUNT_ID is not accessible to this credential.');
@@ -536,21 +542,37 @@ async function reconcileInstance(
 
   // Origin
   if (!done.has('origin') || !desc.canonical_origin) {
-    const origin =
-      desc.custom_hostname !== null
-        ? `https://${desc.custom_hostname}`
-        : (workersDevUrl ?? `https://${names.worker_name}.workers.dev`);
+    let origin: string;
+    if (desc.custom_hostname !== null) {
+      origin = `https://${desc.custom_hostname}`;
+    } else if (workersDevUrl) {
+      origin = workersDevUrl;
+    } else {
+      const subdomain = await cf.getWorkersDevSubdomain(desc.account_id);
+      origin = workersDevOrigin(names.worker_name, subdomain);
+    }
     desc = { ...desc, canonical_origin: origin };
     desc = withStep(desc, 'origin');
     await writeInstanceDescriptor(ctx.runtime, desc);
   }
 
-  // Smoke
+  // Smoke — workers.dev routing can lag 30–90s+ after subdomain enable.
   if (!done.has('smoke')) {
-    const version = await cf.smokeGet(`${desc.canonical_origin}/_nrdocs/api/version`);
-    const root = await cf.smokeGet(`${desc.canonical_origin}/`);
+    const { version, root } = await waitForOriginSmoke(cf.smokeGet.bind(cf), desc.canonical_origin, {
+      attempts: 60,
+      delayMs: 3000,
+      onRetry: async (attempt) => {
+        if (desc.custom_hostname !== null) return;
+        if (attempt === 0 || attempt % 5 !== 0) return;
+        await cf.enableWorkersDev(desc.account_id, names.worker_name);
+      },
+    });
     if (version.status !== 200 || root.status !== 200) {
-      throw new CloudflareApiError('api_error', 500, 'Smoke test failed against canonical origin.');
+      throw new CloudflareApiError(
+        'api_error',
+        500,
+        `Smoke test failed against canonical origin (version=${version.status}, root=${root.status}).`,
+      );
     }
     desc = withStep(desc, 'smoke');
     await writeInstanceDescriptor(ctx.runtime, desc);
@@ -588,5 +610,5 @@ async function createNeutralTemp(): Promise<string> {
   return fs.mkdtemp(path.join(os.tmpdir(), 'nrdocs-deploy-'));
 }
 
-export { resolveCloudflareCredential } from './deploy/auth.js';
+export { resolveCloudflareAccountId, resolveCloudflareCredential } from './deploy/auth.js';
 export { createFakeCloudflare } from './deploy/fake-cloudflare.js';

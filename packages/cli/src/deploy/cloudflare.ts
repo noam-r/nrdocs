@@ -79,10 +79,72 @@ export type CloudflareControlPlane = {
   ): Promise<{ keys: string[]; cursor?: string }>;
   deleteR2Object(accountId: string, bucket: string, key: string): Promise<void>;
   listZones(accountId: string, name: string): Promise<CfZone[]>;
+  /** Account workers.dev label (the middle label in worker.account.workers.dev). */
+  getWorkersDevSubdomain(accountId: string): Promise<string>;
+  enableWorkersDev(accountId: string, workerName: string): Promise<void>;
   deployWorker(input: DeployWorkerInput): Promise<{ workersDevUrl: string | null }>;
   deleteWorker(accountId: string, workerName: string): Promise<void>;
   smokeGet(url: string): Promise<{ status: number; body: string }>;
 };
+
+/** Canonical workers.dev origin: https://<worker>.<account-subdomain>.workers.dev */
+export function workersDevOrigin(workerName: string, accountSubdomain: string): string {
+  return `https://${workerName}.${accountSubdomain}.workers.dev`;
+}
+
+export type OriginSmokeProbe = { status: number; body: string };
+
+export type OriginSmokeResult = {
+  version: OriginSmokeProbe;
+  root: OriginSmokeProbe;
+  attempts: Array<{ attempt: number; version: number; root: number }>;
+};
+
+/**
+ * Poll version + root until both return 200.
+ *
+ * New workers.dev hostnames commonly return Cloudflare HTML 404 / error 1042 for
+ * 30–90+ seconds after the subdomain API reports `enabled: true`. Callers should
+ * budget minutes, not seconds.
+ */
+export async function waitForOriginSmoke(
+  smokeGet: (url: string) => Promise<OriginSmokeProbe>,
+  origin: string,
+  opts: {
+    attempts?: number;
+    delayMs?: number;
+    /** Invoked before sleeping when the origin is not ready yet. */
+    onRetry?: (attempt: number) => Promise<void>;
+  } = {},
+): Promise<OriginSmokeResult> {
+  const attemptsLimit = opts.attempts ?? 60;
+  const delayMs = opts.delayMs ?? 3000;
+  let version: OriginSmokeProbe = { status: 0, body: '' };
+  let root: OriginSmokeProbe = { status: 0, body: '' };
+  const attempts: OriginSmokeResult['attempts'] = [];
+
+  for (let attempt = 0; attempt < attemptsLimit; attempt++) {
+    version = await smokeGet(`${origin}/_nrdocs/api/version`);
+    root = await smokeGet(`${origin}/`);
+    attempts.push({ attempt, version: version.status, root: root.status });
+    if (version.status === 200 && root.status === 200) {
+      return { version, root, attempts };
+    }
+    // DNS / hard network failure — do not spin the full budget.
+    if (version.status === 0 && root.status === 0) break;
+    if (opts.onRetry) {
+      try {
+        await opts.onRetry(attempt);
+      } catch {
+        /* best-effort */
+      }
+    }
+    if (attempt + 1 < attemptsLimit) {
+      await new Promise((r) => setTimeout(r, delayMs));
+    }
+  }
+  return { version, root, attempts };
+}
 
 /** Encode an R2 object key for use in a URL path (keys may contain `/`). */
 export function encodeR2ObjectKeyPath(key: string): string {
@@ -294,6 +356,23 @@ export function createHttpCloudflareControlPlane(
       api('GET', `/zones`, parseZonesResult, {
         query: { name, 'account.id': accountId },
       }),
+    getWorkersDevSubdomain: (accountId) =>
+      api('GET', `/accounts/${accountId}/workers/subdomain`, (result) => {
+        if (!isObject(result) || typeof result.subdomain !== 'string' || !result.subdomain) {
+          throw new Error('malformed workers.dev subdomain');
+        }
+        return result.subdomain;
+      }),
+    async enableWorkersDev(accountId, workerName) {
+      await api(
+        'POST',
+        `/accounts/${accountId}/workers/scripts/${workerName}/subdomain`,
+        () => null,
+        {
+          body: { enabled: true },
+        },
+      );
+    },
     deployWorker: deployWorkerImpl,
     async deleteWorker(accountId, workerName) {
       await api('DELETE', `/accounts/${accountId}/workers/scripts/${workerName}`, () => null);

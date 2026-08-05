@@ -27,5 +27,6 @@
 
 ## Residual risk / follow-ups
 
-- Run `pnpm test:e2e:cloudflare` with a valid API token before tagging `v2.0.0`.
-- Confirm workers.dev (or custom domain) reachability from the tagging environment.
+- Run `pnpm test:e2e:cloudflare` with credentials in `~/.nrdocs/cloudflare.env`
+  (see `RELEASE.md`) before tagging `v2.0.0`.
+- Confirm workers.dev reachability from the tagging environment.

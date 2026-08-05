@@ -116,6 +116,18 @@ export function createFakeCloudflare(initial: Partial<FakeCloudflareState> = {})
     async listZones(_accountId, name) {
       return state.zones.filter((z) => z.name === name);
     },
+    async getWorkersDevSubdomain() {
+      const host = state.workersDevHost ?? 'nrdocs-test.example.workers.dev';
+      const parts = host.split('.');
+      // <worker>.<account-subdomain>.workers.dev
+      if (parts.length >= 4 && parts.at(-2) === 'workers' && parts.at(-1) === 'dev') {
+        return parts[parts.length - 3]!;
+      }
+      return 'example';
+    },
+    async enableWorkersDev() {
+      /* no-op for fake */
+    },
     async deployWorker(input) {
       if (state.failStep === 'worker') {
         throw new CloudflareApiError('api_error', 500, 'worker deploy failed');
@@ -123,8 +135,16 @@ export function createFakeCloudflare(initial: Partial<FakeCloudflareState> = {})
       state.deployedWorkers.push(input);
       state.workers.add(input.workerName);
       if (input.createSessionKey) state.sessionKeys.add(input.workerName);
+      const host = state.workersDevHost ?? 'nrdocs-test.example.workers.dev';
+      const parts = host.split('.');
+      const subdomain =
+        parts.length >= 4 && parts.at(-2) === 'workers' && parts.at(-1) === 'dev'
+          ? parts[parts.length - 3]!
+          : 'example';
       return {
-        workersDevUrl: input.workersDev ? `https://${state.workersDevHost}` : null,
+        workersDevUrl: input.workersDev
+          ? `https://${input.workerName}.${subdomain}.workers.dev`
+          : null,
       };
     },
     async deleteWorker(_accountId, workerName) {

@@ -24,17 +24,23 @@ components are never downloaded independently.
 
 The administrator CLI resolves authority in this order:
 
-1. If non-empty `CLOUDFLARE_API_TOKEN` exists, use it and do not fall back.
-2. Otherwise, ask the bundled Wrangler installation for the current OAuth token
+1. If non-empty `CLOUDFLARE_API_TOKEN` exists in the process environment, use it
+   and do not fall back.
+2. Otherwise, if `~/.nrdocs/cloudflare.env` exists as a regular file with mode
+   `0600` and contains a non-empty `CLOUDFLARE_API_TOKEN=` line, use that token.
+   The operator creates and maintains this file; nrdocs never writes Cloudflare
+   secrets into it or into instance descriptors.
+3. Otherwise, ask the bundled Wrangler installation for the current OAuth token
    using `wrangler auth token --json` from a neutral temporary directory.
-3. If neither succeeds, stop with instructions to set an API token or run
-   `wrangler login`.
+4. If none succeeds, stop with instructions to create `~/.nrdocs/cloudflare.env`,
+   set an API token in the environment, or run `wrangler login`.
 
 Legacy global API key and email authentication are rejected. The CLI never
 prints, copies to arguments, stores, or forwards the resolved credential except
 to Cloudflare APIs.
 
-If `CLOUDFLARE_ACCOUNT_ID` is set, it must be accessible to the credential. If
+`CLOUDFLARE_ACCOUNT_ID` is taken from the process environment, or else from the
+same `cloudflare.env` file. If set, it must be accessible to the credential. If
 it is absent, the CLI lists accessible accounts and selects automatically only
 when exactly one exists; multiple accounts require an interactive choice. The
 chosen account ID is pinned in the instance descriptor. Deploy never silently
@@ -42,15 +48,26 @@ changes accounts.
 
 ## Required Cloudflare Authority
 
-The preflight verifies the exact capabilities before mutation:
+The preflight verifies the exact capabilities before mutation. Cloudflare API
+token permissions are configured in the dashboard as **Account** / **Zone** /
+**User** rows with access **Read** or **Edit** (Edit is full CRUDL for that
+permission). Create a custom token with these exact rows:
 
-| Capability                         | Required for                                                       |
-| ---------------------------------- | ------------------------------------------------------------------ |
-| Account membership/read            | Account discovery and identity verification                        |
-| Workers Scripts Write              | Worker versions, bindings, static assets, and secrets              |
-| D1 Read and D1 Write               | Database discovery, migrations, administration, and metadata       |
-| Workers R2 Storage Read and Write  | Bucket creation, marker verification, object listing, and deletion |
-| Zone Read and Workers Routes Write | A requested custom domain only                                     |
+| Type    | Permission         | Access | Required for                                                       |
+| ------- | ------------------ | ------ | ------------------------------------------------------------------ |
+| Account | Account Settings   | Read   | Account discovery and identity verification                        |
+| Account | Workers Scripts    | Edit   | Worker versions, bindings, static assets, and secrets              |
+| Account | D1                 | Edit   | Database discovery, migrations, administration, and metadata       |
+| Account | Workers R2 Storage | Edit   | Bucket creation, marker verification, object listing, and deletion |
+| Zone    | Zone               | Read   | A requested custom domain only                                     |
+| Zone    | Workers Routes     | Edit   | A requested custom domain only                                     |
+
+Omit the two Zone rows when no custom domain is requested. For account-level
+products (Workers, D1, R2), scope the token to the **entire account**. Domain
+pickers (**All domains** / **Specific domains**) apply only when Zone
+permissions are granted for `--domain`. `CLOUDFLARE_ACCOUNT_ID` is that
+account’s Account ID, not a domain. Do not grant Account Settings Edit, DNS
+Edit, Billing, or User API Tokens permissions for ordinary deploy.
 
 An API token may be narrower than the table when an operation demonstrably does
 not need a capability, but preflight must prove every capability required for

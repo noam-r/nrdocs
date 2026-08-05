@@ -913,10 +913,16 @@ It never exposes, retains, lists, or labels previous publications.
 ```text
 ~/.nrdocs/
 ├── active-instance
+├── cloudflare.env          # optional; operator-managed API token (mode 0600)
+├── sites/
+│   └── site_….json         # publisher credentials
 └── instances/
     ├── inst_01K4A7Q2M9.json
     └── inst_01K5B3R8T1.json
 ```
+
+`cloudflare.env` is created by the operator only. It is never written by deploy
+and must not appear in instance descriptors.
 
 ### Active pointer
 
@@ -965,9 +971,13 @@ Administrative commands:
 3. Verify access to the targeted Cloudflare account and resource.
 4. Perform the control-plane operation.
 
-nrdocs does not persist the Cloudflare credential.
+nrdocs does not write Cloudflare credentials into instance descriptors. The
+operator may place an API token in `~/.nrdocs/cloudflare.env` (mode `0600`); the
+CLI reads that file according to `08-cloudflare-deployment-and-operations.md`
+but never creates or updates it during deploy.
 
-If authentication is unavailable, the CLI directs the user to authenticate with Wrangler or provide `CLOUDFLARE_API_TOKEN`.
+If authentication is unavailable, the CLI directs the user to create
+`~/.nrdocs/cloudflare.env`, set `CLOUDFLARE_API_TOKEN`, or run `wrangler login`.
 
 Publisher credentials never authorize administrative commands, and the active administrative instance never selects a publisher destination.
 

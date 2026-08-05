@@ -1,10 +1,17 @@
 import { ExitCode } from '@nrdocs/contracts';
-import { CliError } from '../errors.js';
-import type { Runtime } from '../runtime.js';
+import { CliError, ioError } from '../errors.js';
+import { assertSecureCredentialFile, modeBits } from '../fs-safe.js';
+import { cloudflareEnvPath, type Runtime } from '../runtime.js';
 
 export type CloudflareCredential = {
-  source: 'api_token' | 'wrangler_oauth';
+  source: 'api_token' | 'env_file' | 'wrangler_oauth';
   token: string;
+};
+
+export type CloudflareEnvFile = {
+  apiToken?: string;
+  accountId?: string;
+  path: string;
 };
 
 export type RunCommandResult = {
@@ -20,8 +27,73 @@ export type RunCommand = (
 ) => Promise<RunCommandResult>;
 
 /**
- * Resolve Cloudflare authority without storing it.
- * Non-empty CLOUDFLARE_API_TOKEN wins exclusively; otherwise Wrangler OAuth.
+ * Parse operator-managed `~/.nrdocs/cloudflare.env` (KEY=VALUE lines).
+ * Returns null when the file is absent. Rejects insecure modes and symlinks.
+ */
+export async function readCloudflareEnvFile(runtime: Runtime): Promise<CloudflareEnvFile | null> {
+  const filePath = cloudflareEnvPath(runtime);
+  try {
+    await assertSecureCredentialFile(runtime, filePath);
+  } catch (error) {
+    if (error instanceof Error && /was not found/.test(error.message)) {
+      return null;
+    }
+    throw error;
+  }
+  let text: string;
+  try {
+    text = await runtime.fs.readFile(filePath, 'utf8');
+  } catch {
+    throw ioError(`Unable to read Cloudflare env file:\n  ${filePath}`);
+  }
+  const values = parseCloudflareEnvText(text);
+  return {
+    path: filePath,
+    ...(values.apiToken ? { apiToken: values.apiToken } : {}),
+    ...(values.accountId ? { accountId: values.accountId } : {}),
+  };
+}
+
+export function parseCloudflareEnvText(text: string): {
+  apiToken?: string;
+  accountId?: string;
+} {
+  let apiToken: string | undefined;
+  let accountId: string | undefined;
+  for (const rawLine of text.split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (!line || line.startsWith('#')) continue;
+    const cleaned = line.startsWith('export ') ? line.slice('export '.length).trim() : line;
+    const eq = cleaned.indexOf('=');
+    if (eq <= 0) continue;
+    const key = cleaned.slice(0, eq).trim();
+    let value = cleaned.slice(eq + 1).trim();
+    if (
+      (value.startsWith('"') && value.endsWith('"')) ||
+      (value.startsWith("'") && value.endsWith("'"))
+    ) {
+      value = value.slice(1, -1);
+    }
+    if (key === 'CLOUDFLARE_API_TOKEN' && value) apiToken = value;
+    if (key === 'CLOUDFLARE_ACCOUNT_ID' && value) accountId = value;
+  }
+  return {
+    ...(apiToken ? { apiToken } : {}),
+    ...(accountId ? { accountId } : {}),
+  };
+}
+
+/** Process env wins; otherwise values from `~/.nrdocs/cloudflare.env`. */
+export async function resolveCloudflareAccountId(runtime: Runtime): Promise<string | undefined> {
+  const pinned = runtime.env.CLOUDFLARE_ACCOUNT_ID?.trim();
+  if (pinned) return pinned;
+  const file = await readCloudflareEnvFile(runtime);
+  return file?.accountId;
+}
+
+/**
+ * Resolve Cloudflare authority without writing it.
+ * Order: process env → `~/.nrdocs/cloudflare.env` → Wrangler OAuth.
  */
 export async function resolveCloudflareCredential(
   runtime: Runtime,
@@ -31,6 +103,11 @@ export async function resolveCloudflareCredential(
   const envToken = runtime.env.CLOUDFLARE_API_TOKEN?.trim();
   if (envToken) {
     return { source: 'api_token', token: envToken };
+  }
+
+  const file = await readCloudflareEnvFile(runtime);
+  if (file?.apiToken) {
+    return { source: 'env_file', token: file.apiToken };
   }
 
   const result = await runCommand('npx', ['wrangler', 'auth', 'token', '--json'], {
@@ -43,7 +120,7 @@ export async function resolveCloudflareCredential(
       phase: 'credential',
       exit_code: ExitCode.CredentialOrAuthority,
       safe_message:
-        'Unable to resolve Cloudflare authentication.\nSet CLOUDFLARE_API_TOKEN or run `wrangler login`, then retry.',
+        'Unable to resolve Cloudflare authentication.\nCreate ~/.nrdocs/cloudflare.env (mode 0600), set CLOUDFLARE_API_TOKEN, or run `wrangler login`, then retry.',
     });
   }
   let parsed: unknown;
@@ -78,4 +155,9 @@ export function extractWranglerToken(raw: unknown): string | null {
     if (typeof value === 'string' && value.trim()) return value.trim();
   }
   return null;
+}
+
+/** Exported for tests — same permission bits as publisher credential files. */
+export function cloudflareEnvModeOk(mode: number): boolean {
+  return modeBits(mode) === 0o600;
 }

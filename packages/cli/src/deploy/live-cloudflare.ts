@@ -2,6 +2,7 @@
  * Live Cloudflare control-plane client for deploy and administration.
  * Uses the Cloudflare REST API with a bearer token. Never logs the token.
  */
+import dns from 'node:dns';
 import type { ArtifactObjectStore } from '@nrdocs/persistence';
 import {
   CloudflareApiError,
@@ -10,6 +11,14 @@ import {
   type CloudflareHttp,
   type DeployWorkerInput,
 } from './cloudflare.js';
+
+// Prefer IPv4 for workers.dev probes — this host's IPv6 path is unreachable and
+// Node's default order can add avoidable connect stalls during smoke waits.
+try {
+  dns.setDefaultResultOrder('ipv4first');
+} catch {
+  /* older Node */
+}
 
 const API = 'https://api.cloudflare.com/client/v4';
 
@@ -33,9 +42,8 @@ export function rateLimitNamespaceId(instanceId: string, name: string): string {
   return String(((hash >>> 0) % 2147483646) + 1);
 }
 
-function rateLimitBindings(instanceId: string): Array<Record<string, unknown>> {
+function rateLimitConfigs(instanceId: string): Array<Record<string, unknown>> {
   return RATE_LIMIT_SPECS.map((spec) => ({
-    type: 'ratelimit',
     name: spec.name,
     namespace_id: rateLimitNamespaceId(instanceId, spec.name),
     simple: { limit: spec.limit, period: spec.period },
@@ -103,17 +111,35 @@ async function deployWorkerScript(
   input: DeployWorkerInput,
   fetchImpl: typeof fetch,
 ): Promise<{ workersDevUrl: string | null }> {
-  const metadata = {
+  const bindings: Array<Record<string, unknown>> = [
+    { type: 'd1', name: 'DB', id: input.databaseId },
+    { type: 'r2_bucket', name: 'ARTIFACTS', bucket_name: input.bucketName },
+    { type: 'plain_text', name: 'NRDOCS_INSTANCE_ID', text: input.instanceId },
+    { type: 'plain_text', name: 'NRDOCS_PACKAGE_VERSION', text: input.packageVersion },
+  ];
+
+  // Include the session secret in the same script upload. A separate /secrets PUT
+  // redeploys the Worker and races workers.dev routing (flaky HTML 404s).
+  if (input.createSessionKey) {
+    const keyBytes = input.sessionKeyBytes ?? globalThis.crypto.getRandomValues(new Uint8Array(32));
+    bindings.push({
+      type: 'secret_text',
+      name: 'NRDOCS_SESSION_KEY',
+      text: toBase64Url(keyBytes),
+    });
+  }
+
+  const metadata: Record<string, unknown> = {
     main_module: 'worker.mjs',
     compatibility_date: '2025-01-01',
-    bindings: [
-      { type: 'd1', name: 'DB', id: input.databaseId },
-      { type: 'r2_bucket', name: 'ARTIFACTS', bucket_name: input.bucketName },
-      { type: 'plain_text', name: 'NRDOCS_INSTANCE_ID', text: input.instanceId },
-      { type: 'plain_text', name: 'NRDOCS_PACKAGE_VERSION', text: input.packageVersion },
-      ...rateLimitBindings(input.instanceId),
-    ],
+    bindings,
+    // Same shape Wrangler uses (top-level ratelimits), not bindings[].type=ratelimit.
+    ratelimits: rateLimitConfigs(input.instanceId),
   };
+  if (!input.createSessionKey) {
+    // Preserve an existing session secret across upgrades.
+    metadata.keep_bindings = ['secret_text'];
+  }
 
   const form = new FormData();
   form.set('metadata', new Blob([JSON.stringify(metadata)], { type: 'application/json' }));
@@ -122,13 +148,9 @@ async function deployWorkerScript(
     new Blob([input.script], { type: 'application/javascript+module' }),
     'worker.mjs',
   );
-  form.set('reader.css', new Blob([input.platformCss], { type: 'text/css' }), 'reader.css');
-  form.set('reader.js', new Blob([input.platformJs], { type: 'text/javascript' }), 'reader.js');
-  form.set(
-    'mermaid.js',
-    new Blob([input.platformMermaid], { type: 'text/javascript' }),
-    'mermaid.js',
-  );
+  // Platform CSS/JS/Mermaid are embedded inside worker.mjs by the release bundle.
+  // Do not upload them as Worker modules — Cloudflare rejects non-JS module types
+  // (e.g. text/css) on the scripts multipart API.
 
   const res = await fetchImpl(
     `${API}/accounts/${input.accountId}/workers/scripts/${input.workerName}`,
@@ -148,32 +170,6 @@ async function deployWorkerScript(
     );
   }
 
-  if (input.createSessionKey) {
-    const keyBytes = input.sessionKeyBytes ?? globalThis.crypto.getRandomValues(new Uint8Array(32));
-    const secretRes = await fetchImpl(
-      `${API}/accounts/${input.accountId}/workers/scripts/${input.workerName}/secrets`,
-      {
-        method: 'PUT',
-        headers: {
-          authorization: `Bearer ${token}`,
-          'content-type': 'application/json',
-        },
-        body: JSON.stringify({
-          name: 'NRDOCS_SESSION_KEY',
-          text: toBase64Url(keyBytes),
-          type: 'secret_text',
-        }),
-      },
-    );
-    if (!secretRes.ok) {
-      throw new CloudflareApiError(
-        'api_error',
-        secretRes.status,
-        'Failed to set NRDOCS_SESSION_KEY.',
-      );
-    }
-  }
-
   if (input.workersDev) {
     await fetchImpl(
       `${API}/accounts/${input.accountId}/workers/scripts/${input.workerName}/subdomain`,
@@ -185,8 +181,61 @@ async function deployWorkerScript(
         },
         body: JSON.stringify({ enabled: true }),
       },
-    );
-    return { workersDevUrl: `https://${input.workerName}.workers.dev` };
+    ).then(async (subRes) => {
+      if (!subRes.ok) {
+        const text = await subRes.text().catch(() => '');
+        throw new CloudflareApiError(
+          'api_error',
+          subRes.status,
+          `Failed to enable workers.dev subdomain (${subRes.status}): ${text.slice(0, 200)}`,
+        );
+      }
+    });
+
+    // Confirm the script reports enabled before we hand the URL to smoke tests.
+    for (let i = 0; i < 10; i++) {
+      const check = await fetchImpl(
+        `${API}/accounts/${input.accountId}/workers/scripts/${input.workerName}/subdomain`,
+        { headers: { authorization: `Bearer ${token}` } },
+      );
+      const checkJson = (await check.json()) as {
+        success?: boolean;
+        result?: { enabled?: boolean };
+      };
+      if (check.ok && checkJson.success && checkJson.result?.enabled === true) break;
+      await new Promise((r) => setTimeout(r, 1000));
+      await fetchImpl(
+        `${API}/accounts/${input.accountId}/workers/scripts/${input.workerName}/subdomain`,
+        {
+          method: 'POST',
+          headers: {
+            authorization: `Bearer ${token}`,
+            'content-type': 'application/json',
+          },
+          body: JSON.stringify({ enabled: true }),
+        },
+      );
+    }
+
+    // workers.dev host is <worker>.<account-subdomain>.workers.dev — not <worker>.workers.dev.
+    const accountSubRes = await fetchImpl(`${API}/accounts/${input.accountId}/workers/subdomain`, {
+      headers: { authorization: `Bearer ${token}` },
+    });
+    const accountSubJson = (await accountSubRes.json()) as {
+      success?: boolean;
+      result?: { subdomain?: string };
+    };
+    const accountSubdomain = accountSubJson.result?.subdomain?.trim();
+    if (!accountSubRes.ok || accountSubJson.success === false || !accountSubdomain) {
+      throw new CloudflareApiError(
+        'api_error',
+        accountSubRes.status,
+        'Failed to resolve account workers.dev subdomain.',
+      );
+    }
+    return {
+      workersDevUrl: `https://${input.workerName}.${accountSubdomain}.workers.dev`,
+    };
   }
 
   if (input.customDomain) {
@@ -211,8 +260,13 @@ async function smokeGet(
   url: string,
   fetchImpl: typeof fetch,
 ): Promise<{ status: number; body: string }> {
-  const res = await fetchImpl(url, { method: 'GET', redirect: 'manual' });
-  return { status: res.status, body: await res.text() };
+  try {
+    const res = await fetchImpl(url, { method: 'GET', redirect: 'manual' });
+    return { status: res.status, body: await res.text() };
+  } catch {
+    // DNS / network failures (common when workers.dev is unreachable from the host)
+    return { status: 0, body: '' };
+  }
 }
 
 export function createLiveCloudflareControlPlane(
