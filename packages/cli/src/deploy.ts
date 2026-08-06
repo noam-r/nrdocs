@@ -558,15 +558,19 @@ async function reconcileInstance(
 
   // Smoke — workers.dev routing can lag 30–90s+ after subdomain enable.
   if (!done.has('smoke')) {
-    const { version, root } = await waitForOriginSmoke(cf.smokeGet.bind(cf), desc.canonical_origin, {
-      attempts: 60,
-      delayMs: 3000,
-      onRetry: async (attempt) => {
-        if (desc.custom_hostname !== null) return;
-        if (attempt === 0 || attempt % 5 !== 0) return;
-        await cf.enableWorkersDev(desc.account_id, names.worker_name);
+    const { version, root } = await waitForOriginSmoke(
+      cf.smokeGet.bind(cf),
+      desc.canonical_origin,
+      {
+        attempts: 60,
+        delayMs: 3000,
+        onRetry: async (attempt) => {
+          if (desc.custom_hostname !== null) return;
+          if (attempt === 0 || attempt % 5 !== 0) return;
+          await cf.enableWorkersDev(desc.account_id, names.worker_name);
+        },
       },
-    });
+    );
     if (version.status !== 200 || root.status !== 200) {
       throw new CloudflareApiError(
         'api_error',

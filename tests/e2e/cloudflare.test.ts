@@ -23,10 +23,7 @@ import {
   plannedResourceNames,
 } from '../../packages/cli/src/deploy/names.js';
 import type { CloudflareControlPlane } from '../../packages/cli/src/deploy/cloudflare.js';
-import {
-  waitForOriginSmoke,
-  workersDevOrigin,
-} from '../../packages/cli/src/deploy/cloudflare.js';
+import { waitForOriginSmoke, workersDevOrigin } from '../../packages/cli/src/deploy/cloudflare.js';
 import { createProcessRuntime } from '../../packages/cli/src/runtime.js';
 import {
   readCloudflareEnvFile,
