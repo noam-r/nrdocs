@@ -246,15 +246,15 @@ Platform pages use the current site's language and direction where known, or
 same card chrome: the platform logo mark, the page heading/body below, and a
 footer link `nrdocs on GitHub` to `https://github.com/noam-r/nrdocs`.
 
-| Page           | Heading                        | Body/action                                                                 |
-| -------------- | ------------------------------ | --------------------------------------------------------------------------- |
-| Instance root  | `nrdocs`                       | `Publish a Markdown directory as a protected website.`                  |
-| Password form  | `Password required`            | `Enter the password to continue.`; label `Password`; button `Continue`      |
-| Wrong password | `Password required`            | `The password is incorrect. Try again.`                                     |
-| Sign-out form  | `Sign out`                     | `End your session for this site.`; button `Sign out`                        |
-| Logout         | `You have been signed out.`    | Link `Return to site.`                                                      |
-| 404            | `Not found`                    | `The requested page is unavailable.`; link `Instance home` to `/`           |
-| 500/503        | `Site temporarily unavailable` | `Try again later.` and a safe request ID                                    |
+| Page           | Heading                        | Body/action                                                            |
+| -------------- | ------------------------------ | ---------------------------------------------------------------------- |
+| Instance root  | `nrdocs`                       | `Publish a Markdown directory as a protected website.`                 |
+| Password form  | `Password required`            | `Enter the password to continue.`; label `Password`; button `Continue` |
+| Wrong password | `Password required`            | `The password is incorrect. Try again.`                                |
+| Sign-out form  | `Sign out`                     | `End your session for this site.`; button `Sign out`                   |
+| Logout         | `You have been signed out.`    | Link `Return to site.`                                                 |
+| 404            | `Not found`                    | `The requested page is unavailable.`; link `Instance home` to `/`      |
+| 500/503        | `Site temporarily unavailable` | `Try again later.` and a safe request ID                               |
 
 Access pages contain the signed hidden CSRF and safe-return fields described in
 the security specification. No platform error discloses whether an unknown

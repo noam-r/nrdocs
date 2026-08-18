@@ -1,10 +1,7 @@
 /**
  * Tear down a local instance and its owned Cloudflare resources.
  */
-import {
-  assertDescriptorConsistency,
-  type SqlExecutor,
-} from '@nrdocs/persistence';
+import { assertDescriptorConsistency, type SqlExecutor } from '@nrdocs/persistence';
 import { parseInstanceId, type InstanceDescriptor, type InstanceId } from '@nrdocs/contracts';
 import type { CommandContext } from '../command-context.js';
 import { parseFlags } from '../argv.js';

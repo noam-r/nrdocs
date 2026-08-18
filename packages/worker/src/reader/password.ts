@@ -27,13 +27,10 @@ export async function verifyReaderPassword(
   const expected = base64UrlToBytes(m[3]!);
   if (!salt || salt.byteLength !== 16 || !expected || expected.byteLength !== 32) return false;
 
-  const key = await subtle.importKey(
-    'raw',
-    new TextEncoder().encode(password),
-    'PBKDF2',
-    false,
-    ['deriveBits', 'deriveKey'],
-  );
+  const key = await subtle.importKey('raw', new TextEncoder().encode(password), 'PBKDF2', false, [
+    'deriveBits',
+    'deriveKey',
+  ]);
   const saltCopy = Uint8Array.from(salt);
   const candidates =
     labeled === LEGACY_PBKDF2_ITERATIONS

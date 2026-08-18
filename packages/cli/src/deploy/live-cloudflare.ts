@@ -295,10 +295,7 @@ async function resolveIpv4ViaPublicDns(hostname: string): Promise<string | null>
   }
 }
 
-async function httpsGetToIp(
-  url: URL,
-  address: string,
-): Promise<{ status: number; body: string }> {
+async function httpsGetToIp(url: URL, address: string): Promise<{ status: number; body: string }> {
   const https = await import('node:https');
   return new Promise((resolve) => {
     const req = https.request(

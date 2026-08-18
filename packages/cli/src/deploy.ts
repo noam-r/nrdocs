@@ -290,10 +290,7 @@ async function promptPublishOrigin(
       'Do not include https://, a path, or a port.',
     ].join('\n'),
   );
-  const entered = resolveHostnameUnderZone(
-    await ctx.terminal.promptLine('Hostname:'),
-    zone.name,
-  );
+  const entered = resolveHostnameUnderZone(await ctx.terminal.promptLine('Hostname:'), zone.name);
 
   const origin = `https://${entered}`;
   presentHumanSuccess(
@@ -509,8 +506,7 @@ export async function runDeployCommand(
     const failed = {
       ...progressed,
       status: (progressed.status === 'active' ? 'degraded' : 'provisioning') as
-        | 'degraded'
-        | 'provisioning',
+        'degraded' | 'provisioning',
       reconciliation: {
         completed_steps: [...stepsOf(progressed)],
         resume_hint: `nrdocs deploy --instance ${progressed.instance_id}`,
@@ -589,9 +585,7 @@ async function reconcileInstance(
   let desc = initial;
   const done = completedOrStableSteps(desc);
   const preserveSessionKey =
-    initial.status === 'active' ||
-    initial.status === 'degraded' ||
-    stepsOf(initial).has('worker');
+    initial.status === 'active' || initial.status === 'degraded' || stepsOf(initial).has('worker');
   const names = plannedResourceNames(desc.account_id, desc.resource_suffix);
 
   const preflight = await cf.preflight(desc.account_id, desc.custom_hostname !== null);

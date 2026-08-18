@@ -2,7 +2,12 @@
  * Cloudflare Worker for publish and serve.
  * Phase 9: publisher API. Phase 11: reader serving and password access.
  */
-import { CONTRACTS_PACKAGE, foldSlugInput, parseSlug, PublisherApiErrorCode } from '@nrdocs/contracts';
+import {
+  CONTRACTS_PACKAGE,
+  foldSlugInput,
+  parseSlug,
+  PublisherApiErrorCode,
+} from '@nrdocs/contracts';
 import {
   getSiteBySlug,
   MemoryArtifactStore,

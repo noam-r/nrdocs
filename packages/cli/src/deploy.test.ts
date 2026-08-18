@@ -242,9 +242,9 @@ describe('nrdocs deploy', () => {
       ).toBe(ExitCode.Success);
       expect(cap.stdout).toContain('nrdocs deployed.');
       expect(state.deployedWorkers.length).toBeGreaterThan(deployedBefore);
-      expect(state.deployedWorkers.slice(deployedBefore).every((w) => w.createSessionKey === false)).toBe(
-        true,
-      );
+      expect(
+        state.deployedWorkers.slice(deployedBefore).every((w) => w.createSessionKey === false),
+      ).toBe(true);
       expect(await readActiveInstanceId(runtime)).toBe(beforeActive);
     });
   });
@@ -334,7 +334,10 @@ describe('nrdocs deploy', () => {
 
       const active = (await readActiveInstanceId(runtime))!;
       const current = JSON.parse(
-        await fs.readFile(path.join(runtime.homeDir, '.nrdocs', 'instances', `${active}.json`), 'utf8'),
+        await fs.readFile(
+          path.join(runtime.homeDir, '.nrdocs', 'instances', `${active}.json`),
+          'utf8',
+        ),
       ) as InstanceDescriptor;
       const desc: InstanceDescriptor = {
         ...current,
