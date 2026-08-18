@@ -208,6 +208,26 @@ function runSuite(label: string, wrap: (exec: SqlExecutor) => SqlExecutor) {
       expect(site.session_generation).toBe(4);
     });
 
+    it('rejects duplicate site slugs without sqlite dialect text', async () => {
+      const db = await seededDb(wrap);
+      await expect(
+        createSiteWithInitialToken(db, {
+          id: SITE_B,
+          slug: 'handbook',
+          access_mode: 'public',
+          initialToken: {
+            id: formatId('tok', id16(22)) as TokenRecordId,
+            name: 'other',
+            token_verifier: TOKEN_VERIFIER_C,
+          },
+        }),
+      ).rejects.toMatchObject({
+        name: 'PersistenceError',
+        code: 'conflict',
+        message: 'A site with this slug already exists.',
+      });
+    });
+
     it('enforces token name uniqueness per site and cascades on delete', async () => {
       const db = await seededDb(wrap);
       await issueToken(db, {
@@ -262,6 +282,35 @@ function runSuite(label: string, wrap: (exec: SqlExecutor) => SqlExecutor) {
       });
       expect(reclaim.ok).toBe(true);
       if (reclaim.ok) expect(reclaim.lockId).toBe(LOCK_B);
+    });
+
+    it('treats a successful lock update as acquired when changes metadata is zero', async () => {
+      const base = await seededDb(wrap);
+      const db: SqlExecutor = {
+        ...base,
+        async run(sql, params) {
+          await base.run(sql, params);
+          return { changes: 0 };
+        },
+        transaction(fn) {
+          return base.transaction(async (tx) =>
+            fn({
+              ...tx,
+              async run(sql, params) {
+                await tx.run(sql, params);
+                return { changes: 0 };
+              },
+            }),
+          );
+        },
+      };
+      const acquired = await acquirePublishLock(db, {
+        siteId: SITE,
+        lockId: LOCK_A,
+        now: new Date('2026-01-04T00:00:00Z'),
+      });
+      expect(acquired.ok).toBe(true);
+      if (acquired.ok) expect(acquired.lockId).toBe(LOCK_A);
     });
 
     it('rejects wrong-owner release and promotion; closes revoke race', async () => {
@@ -373,6 +422,25 @@ function runSuite(label: string, wrap: (exec: SqlExecutor) => SqlExecutor) {
       expect(await finalizeSiteDeletion(db, SITE, new Date('2026-01-07T00:02:11Z'))).toBe(true);
     });
 
+    it('treats a deleted site as finalized even when changes metadata is zero', async () => {
+      const base = await seededDb(wrap);
+      await beginSiteDeletion(base, SITE, new Date('2026-01-09T00:00:00Z'));
+      const zeroChanges = (exec: SqlExecutor): SqlExecutor => ({
+        ...exec,
+        async run(sql, params) {
+          await exec.run(sql, params);
+          return { changes: 0 };
+        },
+        transaction(fn) {
+          return exec.transaction(async (tx) => fn(zeroChanges(tx)));
+        },
+      });
+      expect(
+        await finalizeSiteDeletion(zeroChanges(base), SITE, new Date('2026-01-09T00:00:01Z')),
+      ).toBe(true);
+      expect(await getSiteById(base, SITE)).toBeNull();
+    });
+
     it('renews near expiry and stops at hard lifetime', async () => {
       const db = await seededDb(wrap);
       const acquiredAt = new Date('2026-01-08T00:00:00Z');
@@ -412,6 +480,17 @@ function runSuite(label: string, wrap: (exec: SqlExecutor) => SqlExecutor) {
 runSuite('sqlite', (e) => e);
 runSuite('worker-d1-adapter', (sqlite) => createD1Executor(sqliteAsD1Database(sqlite)));
 runSuite('cli-d1-http-adapter', (sqlite) => createD1HttpExecutor(sqliteAsD1HttpClient(sqlite)));
+
+describe('D1 HTTP change counts', () => {
+  it('treats rows_written as a change when meta.changes is zero', async () => {
+    const db = createD1HttpExecutor({
+      async query() {
+        return { results: [], meta: { changes: 0, rows_written: 1, changed_db: true } };
+      },
+    });
+    expect(await db.run('DELETE FROM sites WHERE id = ?', ['site_x'])).toEqual({ changes: 1 });
+  });
+});
 
 describe('R2 key and orphan cleanup', () => {
   it('uses opaque site/artifact prefixes and never deletes the current prefix', async () => {

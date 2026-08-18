@@ -497,7 +497,7 @@ The Worker reserves:
 /_nrdocs/*
 ```
 
-All other first path segments are candidate site slugs.
+All other first path segments are candidate site slugs. A first segment that differs from a valid slug only by ASCII case is redirected (308) to the lowercase canonical path.
 
 Canonical site route:
 

@@ -166,7 +166,7 @@ The equivalent shape is:
 ^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$
 ```
 
-The one-character case is valid. Slug normalization is never guessed: invalid input is rejected rather than silently rewritten.
+The one-character case is valid. Stored slugs are lowercase. CLI input and the public URL's first path segment are ASCII-case-folded (trim + lowercase) before validation. Other invalid input is rejected rather than rewritten: the system does not insert hyphens, drop characters, or otherwise guess a slug.
 
 #### Access invariant
 

@@ -20,6 +20,7 @@ import {
   generatePublishingToken,
   derivePasswordVerifier,
 } from './admin/crypto.js';
+import { verifyReaderPassword } from '../../worker/src/reader/password.js';
 import { sitePrefix } from '@nrdocs/persistence';
 
 const INST = 'inst_01ARZ3NDEKTSV4RRFFQ69G5FAV' as InstanceId;
@@ -165,9 +166,13 @@ describe('ttl and crypto', () => {
 
   it('derives password and publishing token verifiers', async () => {
     assertReaderPassword(PASSWORD);
-    expect(() => assertReaderPassword('short')).toThrow();
+    assertReaderPassword('x');
+    expect(() => assertReaderPassword('')).toThrow(/1 through 256/);
+    expect(() => assertReaderPassword('a'.repeat(257))).toThrow(/1 through 256/);
     const verifier = await derivePasswordVerifier(PASSWORD, new Uint8Array(16).fill(1));
-    expect(verifier).toMatch(/^pbkdf2-sha256\$600000\$/);
+    expect(verifier).toMatch(/^pbkdf2-sha256\$100000\$/);
+    expect(await verifyReaderPassword(PASSWORD, verifier)).toBe(true);
+    expect(await verifyReaderPassword('wrong-password', verifier)).toBe(false);
     const token = await generatePublishingToken(new Uint8Array(32).fill(2));
     expect(token.plaintext).toMatch(/^nrd_pub_[A-Za-z0-9_-]{43}$/);
     expect(token.verifier).toMatch(/^sha256:[0-9a-f]{64}$/);
@@ -197,6 +202,67 @@ describe('site and token administration', () => {
       ).toBe(ExitCode.Success);
       expect(cap.stdout).toContain('"slug": "product-handbook"');
       expect(cap.stdout).not.toMatch(/nrd_pub_/);
+    });
+  });
+
+  it('folds mixed-case slugs and explains other invalid input', async () => {
+    await withAdmin(async ({ runtime, cap, openDb, store, executor }) => {
+      expect(
+        await main(['site', '--help'], {
+          runtime,
+          admin: { openDb, artifactStore: store },
+        }),
+      ).toBe(ExitCode.Success);
+      expect(cap.stdout).toContain('Uppercase letters are stored lowercase');
+
+      cap.reset();
+      expect(
+        await main(['site', 'create', 'has_underscore'], {
+          runtime,
+          terminal: scriptedTerminal({ lines: [] }),
+          admin: { openDb, artifactStore: store },
+        }),
+      ).toBe(ExitCode.Usage);
+      expect(cap.stderr).toContain('Uppercase letters are stored lowercase');
+      expect(cap.stderr).toContain('has_underscore');
+
+      cap.reset();
+      expect(
+        await main(['site', 'create', 'Product-Handbook'], {
+          runtime,
+          terminal: scriptedTerminal({ lines: ['public', 'handbook-publisher'] }),
+          admin: { openDb, artifactStore: store },
+        }),
+      ).toBe(ExitCode.Success);
+      expect(cap.stdout).toContain('product-handbook');
+      expect(await getSiteBySlug(executor, 'product-handbook')).toBeTruthy();
+      expect(await getSiteBySlug(executor, 'Product-Handbook')).toBeNull();
+    });
+  });
+
+  it('refuses a duplicate slug before access prompts', async () => {
+    await withAdmin(async ({ runtime, cap, openDb, store }) => {
+      expect(
+        await main(['site', 'create', 'product-handbook'], {
+          runtime,
+          terminal: scriptedTerminal({ lines: ['public', 'handbook-publisher'] }),
+          admin: { openDb, artifactStore: store },
+        }),
+      ).toBe(ExitCode.Success);
+
+      cap.reset();
+      expect(
+        await main(['site', 'create', 'product-handbook'], {
+          runtime,
+          terminal: scriptedTerminal({ lines: [] }),
+          admin: { openDb, artifactStore: store },
+        }),
+      ).toBe(ExitCode.LocalValidation);
+      expect(cap.stderr).toMatch(/already exists/);
+      expect(cap.stderr).toContain('https://docs.example.com/product-handbook/');
+      expect(cap.stderr).toContain('nrdocs site show product-handbook');
+      expect(cap.stderr).toContain('nrdocs publish');
+      expect(cap.stderr).not.toMatch(/UNIQUE|SQLITE_CONSTRAINT/);
     });
   });
 
@@ -307,7 +373,7 @@ describe('site and token administration', () => {
   }, 20_000);
 
   it('deletes a site after slug confirmation and clears R2 prefix', async () => {
-    await withAdmin(async ({ runtime, openDb, store, executor }) => {
+    await withAdmin(async ({ runtime, cap, openDb, store, executor }) => {
       expect(
         await main(['site', 'create', 'doomed'], {
           runtime,
@@ -321,6 +387,7 @@ describe('site and token administration', () => {
         body: new TextEncoder().encode('{}'),
       });
 
+      cap.reset();
       expect(
         await main(['site', 'delete', 'doomed'], {
           runtime,
@@ -328,6 +395,7 @@ describe('site and token administration', () => {
           admin: { openDb, artifactStore: store },
         }),
       ).toBe(ExitCode.Success);
+      expect(cap.stdout).toContain('Site deleted.');
       expect(await getSiteBySlug(executor, 'doomed')).toBeNull();
       expect(store.objects.size).toBe(0);
     });

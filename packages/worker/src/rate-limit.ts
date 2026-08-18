@@ -52,7 +52,15 @@ export class CompositeRateLimiter implements RateLimiter {
 
   async take(key: string, limit: number, windowMs: number, operation?: string): Promise<boolean> {
     const routed = operation ? this.byOperation[operation] : undefined;
-    if (routed) return routed.take(key, limit, windowMs);
+    if (routed) {
+      try {
+        return await routed.take(key, limit, windowMs);
+      } catch {
+        // Bindings may be absent/misconfigured at runtime; degrade to memory
+        // limiter so auth/publish paths do not fail closed with 503.
+        return this.fallback.take(key, limit, windowMs);
+      }
+    }
     return this.fallback.take(key, limit, windowMs);
   }
 }

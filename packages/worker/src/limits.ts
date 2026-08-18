@@ -35,4 +35,5 @@ export const PLATFORM_ASSETS = Object.freeze([
   '/_nrdocs/v1/reader.css',
   '/_nrdocs/v1/reader.js',
   '/_nrdocs/v1/mermaid.js',
+  '/_nrdocs/v1/logo.svg',
 ] as const);

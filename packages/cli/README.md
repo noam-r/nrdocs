@@ -22,25 +22,67 @@ separate Worker or migration version at runtime.
 
 ## Quick start
 
+From this monorepo (after `pnpm install` and a release build), put `nrdocs` on
+your PATH once:
+
 ```bash
-# 1. Deploy an instance (interactive; uses CLOUDFLARE_API_TOKEN or wrangler login)
+nvm use 24
+pnpm --filter nrdocs run bundle:release
+pnpm --dir packages/cli link --global
+nrdocs --help
+```
+
+Rebuild with `pnpm --filter nrdocs run bundle:release` when sources change; the
+global link keeps pointing at this workspace package.
+
+Clean install path (same as CI `pack:check`):
+
+```bash
+pnpm --filter nrdocs run pack:check   # builds + packs + verifies --help in a temp dir
+```
+
+Operator flow (interactive TTY required for deploy, first admin publish, site, and connect):
+
+```bash
+# Credentials: ~/.nrdocs/cloudflare.env (mode 0600) — see ../../RELEASE.md
+unset CLOUDFLARE_API_TOKEN CLOUDFLARE_ACCOUNT_ID
+
 nrdocs deploy
+# Explains that deploy only creates the instance, then asks:
+#   Instance name (label only)
+#   Publish location [1] workers.dev (shows exact origin) or [2] custom domain
+#   For [2]: lists Cloudflare zones → pick zone → enter hostname → confirm
+# Sites will be at: <origin>/<slug>/
 
-# 2. Create a site
-nrdocs site create handbook
+mkdir demo && cd demo && printf '# Hello\n\n' > index.md
+nrdocs publish
+# First run on this machine: pick or create a site, then publish.
+# No Server URL or publishing token prompt.
+```
 
-# 3. In a Markdown directory
+Remote publisher (token issued by an administrator):
+
+```bash
 nrdocs connect
 nrdocs publish
-nrdocs preview
 ```
+
+Public site URL: `https://<origin>/<slug>/`.
+
+Non-interactive custom domain (skips the location menu):
+
+```bash
+nrdocs deploy --domain docs.example.com
+```
+
+(`--domain` only for a new instance in 2.0; changing domain later is out of scope.)
 
 ## Commands
 
 Publisher:
 
-- `nrdocs connect [directory]` — bind a directory to a site and store a credential
-- `nrdocs publish [directory]` — render, upload, and promote the current artifact
+- `nrdocs connect [directory]` — bind a directory to a site with a publishing token (remote publishers)
+- `nrdocs publish [directory] [--force]` — render and promote; on the admin machine, first run also binds a site
 - `nrdocs preview [directory]` — local loopback preview without Cloudflare
 - `nrdocs generate nav [directory]` — write `nrdocs.yml` navigation
 - `nrdocs credentials list|remove` — manage local publisher credentials
@@ -48,12 +90,14 @@ Publisher:
 Administration:
 
 - `nrdocs deploy` — provision or reconcile a Cloudflare instance
-- `nrdocs instance list|show|use` — select among local instance descriptors
+- `nrdocs instance list|show|use|delete` — select or tear down local instance descriptors
+  (`delete` removes owned Worker + D1 + R2 after exact instance-ID confirmation)
 - `nrdocs site …` — create, list, access mode, password, enable/disable, rename, delete
+  (slugs are lowercase letters, digits, and hyphens; uppercase is stored lowercase)
 - `nrdocs token …` — issue, list, revoke publishing tokens
 
-CI publication uses environment credentials (`NRDOCS_SITE_ID` + `NRDOCS_PUBLISHING_TOKEN`
-or the documented pair). See the repository specifications for exact names.
+CI publication uses environment credentials (`NRDOCS_URL` + `NRDOCS_TOKEN`).
+See the repository specifications for exact names.
 
 ## Reader access
 

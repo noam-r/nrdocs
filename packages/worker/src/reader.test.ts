@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import {
   ARTIFACT_CONTENT_TYPE,
   formatId,
@@ -31,6 +32,8 @@ import { buildArtifactFromConfig } from '@nrdocs/renderer';
 import { handleRequest, type WorkerEnv } from './index.js';
 import { MemoryRateLimiter } from './rate-limit.js';
 import { bytesToBase64Url } from './reader/crypto.js';
+import { PLATFORM_CSS } from './reader/platform-assets.js';
+import { PLATFORM_LOGO_SVG } from './reader/logo.js';
 import { validateSafeReturnPath } from './reader/return-path.js';
 import { sessionCookieName } from './reader/session.js';
 
@@ -41,6 +44,7 @@ const TOK = formatId('tok', new Uint8Array(16).fill(3)) as TokenRecordId;
 const TOK_B = formatId('tok', new Uint8Array(16).fill(5)) as TokenRecordId;
 const SESSION_KEY = new Uint8Array(32).fill(7);
 const PASSWORD = 'correct-horse-battery-staple';
+const PASSWORD_ITERATIONS = 100_000;
 
 async function deriveVerifier(
   password: string,
@@ -54,11 +58,11 @@ async function deriveVerifier(
     ['deriveBits'],
   );
   const bits = await globalThis.crypto.subtle.deriveBits(
-    { name: 'PBKDF2', hash: 'SHA-256', salt, iterations: 600_000 },
+    { name: 'PBKDF2', hash: 'SHA-256', salt, iterations: PASSWORD_ITERATIONS },
     key,
     256,
   );
-  return `pbkdf2-sha256$600000$${bytesToBase64Url(salt)}$${bytesToBase64Url(new Uint8Array(bits))}`;
+  return `pbkdf2-sha256$${PASSWORD_ITERATIONS}$${bytesToBase64Url(salt)}$${bytesToBase64Url(new Uint8Array(bits))}`;
 }
 
 async function mintToken(secretFill = 9): Promise<{ plaintext: string; verifier: string }> {
@@ -123,16 +127,20 @@ async function withReader(
     withAttachment?: boolean;
     pages?: Array<{ file: string; body: string }>;
     rateLimiter?: MemoryRateLimiter;
+    canonicalOrigin?: string;
+    requestOrigin?: string;
   } = {},
 ): Promise<void> {
   const { executor } = openMemorySqlite();
   await applyMigrations(executor);
+  const canonicalOrigin = opts.canonicalOrigin ?? 'https://docs.example.com';
+  const requestOrigin = opts.requestOrigin ?? 'https://docs.example.com';
   await insertInstanceMetadata(executor, {
     id: INST,
     display_name: 'docs',
     account_id: 'acct',
     resource_suffix: '3f6m8p0q2r4s6t8v0w2x',
-    canonical_origin: 'https://docs.example.com',
+    canonical_origin: canonicalOrigin,
     deployed_version: '2.0.0',
   });
   const { plaintext, verifier } = await mintToken();
@@ -161,7 +169,7 @@ async function withReader(
   };
 
   const fetch = (p: string, init: RequestInit = {}) =>
-    handleRequest(new Request(`https://docs.example.com${p}`, init), env);
+    handleRequest(new Request(`${requestOrigin}${p}`, init), env);
 
   if (opts.publish !== false) {
     const { gzip, digest } = await buildGzip(SITE, {
@@ -218,6 +226,14 @@ describe('safe return path', () => {
 });
 
 describe('reader serving', () => {
+  it('embeds the repo-root nrdocs logo', async () => {
+    const disk = await fs.readFile(
+      path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../../assets/nrdocs-logo.svg'),
+      'utf8',
+    );
+    expect(PLATFORM_LOGO_SVG).toBe(disk);
+  });
+
   it('serves instance root HTML and platform assets', async () => {
     await withReader(
       async ({ fetch }) => {
@@ -228,12 +244,55 @@ describe('reader serving', () => {
         expect(root.headers.get('strict-transport-security')).toBe('max-age=31536000');
         const html = await root.text();
         expect(html).toContain('<h1>nrdocs</h1>');
-        expect(html).toContain('This nrdocs instance serves sites at their direct URLs.');
+        expect(html).toContain('Publish a Markdown directory as a protected website.');
+        expect(html).not.toContain('does not list');
+        expect(html).toContain('href="/_nrdocs/v1/logo.svg"');
+        expect(html).toContain('aria-label="nrdocs"');
+        expect(html).toContain('https://github.com/noam-r/nrdocs');
+        expect(html).toContain('nrdocs on GitHub');
         expect(html).not.toContain('handbook');
+
+        const logo = await fetch('/_nrdocs/v1/logo.svg');
+        expect(logo.status).toBe(200);
+        expect(logo.headers.get('content-type')).toMatch(/image\/svg\+xml/);
+        const logoText = await logo.text();
+        expect(logoText).toBe(PLATFORM_LOGO_SVG);
+        const favicon = await fetch('/favicon.ico');
+        expect(favicon.status).toBe(200);
+        expect(await favicon.text()).toBe(PLATFORM_LOGO_SVG);
 
         const css = await fetch('/_nrdocs/v1/reader.css');
         expect(css.status).toBe(200);
         expect(css.headers.get('cache-control')).toBe('public, max-age=300, must-revalidate');
+        const cssText = await css.text();
+        expect(cssText).toContain('.nr-layout');
+        expect(cssText).toContain('.nr-sidebar');
+        expect(cssText).toContain('.nr-nav-open');
+        expect(cssText).toContain('[data-nr-theme="dark"]');
+        expect(cssText).toContain('.nr-nav-toggle');
+        expect(cssText).toContain('.nr-platform-card');
+        expect(cssText).toContain('.nr-platform-brand');
+        expect(cssText).toContain('.nr-icon-btn');
+        expect(cssText).toContain('.nr-toc');
+        expect(cssText).toContain('.nr-top');
+        expect(cssText).toContain('font-size:18px');
+        expect(cssText).toContain('.nr-site-title::before');
+        expect(cssText).toContain('url("/_nrdocs/v1/logo.svg")');
+        for (const selector of [
+          '.nr-layout',
+          '.nr-sidebar',
+          '.nr-nav-open',
+          '[data-nr-theme="dark"]',
+          '.nr-nav-toggle',
+          '.nr-platform-card',
+          '.nr-platform-brand',
+          '.nr-icon-btn',
+          '.nr-toc',
+          '.nr-top',
+          'font-size:18px',
+        ]) {
+          expect(PLATFORM_CSS).toContain(selector);
+        }
         const etag = css.headers.get('etag');
         expect(etag).toBeTruthy();
         const notModified = await fetch('/_nrdocs/v1/reader.css', {
@@ -265,11 +324,77 @@ describe('reader serving', () => {
 
       const missing = await fetch('/handbook/nope/');
       expect(missing.status).toBe(404);
-      expect(await missing.text()).toContain('Not found');
+      const missingHtml = await missing.text();
+      expect(missingHtml).toContain('Not found');
+      expect(missingHtml).toContain('The requested page is unavailable.');
+
+      const mixed = await fetch('/Handbook/');
+      expect(mixed.status).toBe(308);
+      expect(mixed.headers.get('location')).toBe('/handbook/');
+      expect(missingHtml).toContain('href="/"');
+      expect(missingHtml).toContain('Instance home');
+      expect(missingHtml).toContain('https://github.com/noam-r/nrdocs');
 
       const unknown = await fetch('/missing-site/');
       expect(unknown.status).toBe(404);
     });
+  });
+
+  it('serves nested trailing-slash pages and canonicalizes the unsashed route', async () => {
+    await withReader(
+      async ({ fetch }) => {
+        const nested = await fetch('/handbook/guides/install/');
+        expect(nested.status).toBe(200);
+        expect(await nested.text()).toContain('Nested install steps');
+
+        const unsashed = await fetch('/handbook/guides/install');
+        expect(unsashed.status).toBe(308);
+        expect(unsashed.headers.get('location')).toBe('/handbook/guides/install/');
+      },
+      {
+        pages: [
+          { file: 'index.md', body: '# Home\n\nHello world content here.\n' },
+          { file: '01-guides/01-install.md', body: '# Install\n\nNested install steps.\n' },
+        ],
+      },
+    );
+  });
+
+  it('requires a session cookie for nested password-protected pages', async () => {
+    await withReader(
+      async ({ fetch }) => {
+        const denied = await fetch('/handbook/guides/install/');
+        expect(denied.status).toBe(302);
+        expect(denied.headers.get('location')).toContain('/_nrdocs/access?site=handbook');
+
+        const form = await fetch(
+          '/_nrdocs/access?site=handbook&return=%2Fhandbook%2Fguides%2Finstall%2F',
+        );
+        const csrf = extractCsrf(await form.text());
+        const ok = await fetch('/_nrdocs/access', {
+          method: 'POST',
+          headers: {
+            origin: 'https://docs.example.com',
+            'content-type': 'application/x-www-form-urlencoded',
+          },
+          body: `site=handbook&return=${encodeURIComponent('/handbook/guides/install/')}&csrf=${encodeURIComponent(csrf)}&password=${encodeURIComponent(PASSWORD)}`,
+        });
+        expect(ok.status).toBe(303);
+        const cookie = cookieFrom(ok);
+        expect(cookie).toBeTruthy();
+
+        const nested = await fetch('/handbook/guides/install/', { headers: { cookie: cookie! } });
+        expect(nested.status).toBe(200);
+        expect(await nested.text()).toContain('Nested install steps');
+      },
+      {
+        access: 'password',
+        pages: [
+          { file: 'index.md', body: '# Home\n\nHello world content here.\n' },
+          { file: '01-guides/01-install.md', body: '# Install\n\nNested install steps.\n' },
+        ],
+      },
+    );
   });
 
   it('returns identical 404 for empty, disabled, and unknown sites', async () => {
@@ -342,6 +467,10 @@ describe('reader serving', () => {
         expect(form.status).toBe(200);
         const formHtml = await form.text();
         expect(formHtml).toContain('Password required');
+        expect(formHtml).toContain('nr-platform-card');
+        expect(formHtml).toContain('https://github.com/noam-r/nrdocs');
+        expect(formHtml).toContain('id="nr-password"');
+        expect(formHtml).toContain('autofocus');
         expect(formHtml).toContain('lang="en"');
         expect(formHtml).toContain('dir="ltr"');
         const csrf = extractCsrf(formHtml);
@@ -426,6 +555,7 @@ describe('reader serving', () => {
         expect(logoutForm.status).toBe(200);
         const logoutFormHtml = await logoutForm.text();
         expect(logoutFormHtml).toContain('<h1>Sign out</h1>');
+        expect(logoutFormHtml).toContain('https://github.com/noam-r/nrdocs');
         expect(logoutFormHtml).toContain('action="/_nrdocs/logout"');
         expect(logoutFormHtml).toContain('name="site" value="handbook"');
         const logoutFormCsrf = extractCsrf(logoutFormHtml);
@@ -441,6 +571,102 @@ describe('reader serving', () => {
         expect(loggedOut.status).toBe(200);
         expect(await loggedOut.text()).toContain('You have been signed out.');
         expect(loggedOut.headers.get('set-cookie')).toMatch(/Max-Age=0/);
+      },
+      {
+        access: 'password',
+        canonicalOrigin: 'https://canonical.example.com',
+        requestOrigin: 'https://docs.example.com',
+      },
+    );
+  }, 120_000);
+
+  it('accepts same-origin referer when Origin header is absent', async () => {
+    await withReader(
+      async ({ fetch }) => {
+        const form = await fetch('/_nrdocs/access?site=handbook&return=%2Fhandbook%2F');
+        const csrf = extractCsrf(await form.text());
+        const ok = await fetch('/_nrdocs/access', {
+          method: 'POST',
+          headers: {
+            referer: 'https://docs.example.com/_nrdocs/access?site=handbook&return=%2Fhandbook%2F',
+            'content-type': 'application/x-www-form-urlencoded',
+          },
+          body: `site=handbook&return=${encodeURIComponent('/handbook/')}&csrf=${encodeURIComponent(csrf)}&password=${encodeURIComponent(PASSWORD)}`,
+        });
+        expect(ok.status).toBe(303);
+      },
+      { access: 'password' },
+    );
+  }, 120_000);
+
+  it('accepts classic form POST when Origin and Referer are absent but Sec-Fetch-Site is same-origin', async () => {
+    await withReader(
+      async ({ fetch }) => {
+        const form = await fetch('/_nrdocs/access?site=handbook&return=%2Fhandbook%2F');
+        expect(form.headers.get('referrer-policy')).toBe('same-origin');
+        const csrf = extractCsrf(await form.text());
+        const ok = await fetch('/_nrdocs/access', {
+          method: 'POST',
+          headers: {
+            'sec-fetch-site': 'same-origin',
+            'content-type': 'application/x-www-form-urlencoded',
+          },
+          body: `site=handbook&return=${encodeURIComponent('/handbook/')}&csrf=${encodeURIComponent(csrf)}&password=${encodeURIComponent(PASSWORD)}`,
+        });
+        expect(ok.status).toBe(303);
+      },
+      { access: 'password' },
+    );
+  }, 120_000);
+
+  it('rejects POST without Origin, Referer, or same-origin Sec-Fetch-Site', async () => {
+    await withReader(
+      async ({ fetch }) => {
+        const form = await fetch('/_nrdocs/access?site=handbook&return=%2Fhandbook%2F');
+        const csrf = extractCsrf(await form.text());
+        const denied = await fetch('/_nrdocs/access', {
+          method: 'POST',
+          headers: {
+            'content-type': 'application/x-www-form-urlencoded',
+          },
+          body: `site=handbook&return=${encodeURIComponent('/handbook/')}&csrf=${encodeURIComponent(csrf)}&password=${encodeURIComponent(PASSWORD)}`,
+        });
+        expect(denied.status).toBe(403);
+        expect(await denied.text()).toBe('Forbidden');
+      },
+      { access: 'password' },
+    );
+  }, 120_000);
+
+  it('returns structured 503 instead of Worker crash when access post throws unexpectedly', async () => {
+    await withReader(
+      async ({ fetch, env }) => {
+        const form = await fetch('/_nrdocs/access?site=handbook&return=%2Fhandbook%2F');
+        const csrf = extractCsrf(await form.text());
+        const badEnv = {
+          ...env,
+          DB: {
+            ...env.DB,
+            prepare(query: string) {
+              if (/instance_metadata/i.test(query)) {
+                throw new Error('forced failure');
+              }
+              return env.DB.prepare(query);
+            },
+          },
+        };
+        const res = await handleRequest(
+          new Request('https://docs.example.com/_nrdocs/access', {
+            method: 'POST',
+            headers: {
+              origin: 'https://docs.example.com',
+              'content-type': 'application/x-www-form-urlencoded',
+            },
+            body: `site=handbook&return=${encodeURIComponent('/handbook/')}&csrf=${encodeURIComponent(csrf)}&password=${encodeURIComponent(PASSWORD)}`,
+          }),
+          badEnv,
+        );
+        expect(res.status).toBe(503);
       },
       { access: 'password' },
     );

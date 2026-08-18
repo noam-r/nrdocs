@@ -7,7 +7,7 @@ Publish a Markdown directory as a protected Cloudflare minisite.
 
 Publisher commands:
   nrdocs connect [directory] [--title <title>]
-  nrdocs publish [directory]
+  nrdocs publish [directory] [--title <title>] [--force]
   nrdocs preview [directory]
   nrdocs generate nav [directory] [--title <title>] [--dry-run] [--force]
   nrdocs credentials list
@@ -15,9 +15,11 @@ Publisher commands:
 
 Administrative commands:
   nrdocs deploy [--domain <hostname>] [--instance <instance-id>]
+      Provision a Cloudflare instance (choose workers.dev or a custom domain)
   nrdocs instance list
   nrdocs instance show [instance-id]
   nrdocs instance use <instance-id>
+  nrdocs instance delete <instance-id>
   nrdocs site create <slug>
   nrdocs site list
   nrdocs site show <slug>
@@ -31,11 +33,13 @@ Administrative commands:
   nrdocs token list <slug>
   nrdocs token revoke <slug> <name-or-token-id>
 
+Site slugs use lowercase letters, digits, and hyphens (A–Z is stored lowercase).
+
 Global options:
   --help       Show help
   --version    Show version
   --json       Machine-readable output (list/show commands)
-  --instance   One-command administrative instance override
+  --instance   Administrative instance override (admin commands, connect, and publish)
 
 `;
 

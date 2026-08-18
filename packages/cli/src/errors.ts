@@ -87,6 +87,15 @@ export function unavailableCommand(command: string): CliError {
   });
 }
 
+export function interruptedError(): CliError {
+  return new CliError({
+    code: 'interrupted',
+    phase: 'internal',
+    exit_code: ExitCode.Interrupted,
+    safe_message: 'Interrupted.',
+  });
+}
+
 export function mapUnknownError(error: unknown): CliError {
   if (error instanceof CliError) return error;
   const msg = error instanceof Error ? error.message : 'An unexpected nrdocs error occurred.';

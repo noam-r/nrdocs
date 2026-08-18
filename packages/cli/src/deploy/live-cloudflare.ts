@@ -239,7 +239,14 @@ async function deployWorkerScript(
   }
 
   if (input.customDomain) {
-    await fetchImpl(`${API}/accounts/${input.accountId}/workers/domains`, {
+    if (!input.customDomainZoneId || !input.customDomainZoneName) {
+      throw new CloudflareApiError(
+        'api_error',
+        400,
+        `Custom domain ${input.customDomain} is missing zone metadata; cannot attach.`,
+      );
+    }
+    const domainRes = await fetchImpl(`${API}/accounts/${input.accountId}/workers/domains`, {
       method: 'PUT',
       headers: {
         authorization: `Bearer ${token}`,
@@ -249,11 +256,81 @@ async function deployWorkerScript(
         hostname: input.customDomain,
         service: input.workerName,
         environment: 'production',
+        zone_id: input.customDomainZoneId,
+        zone_name: input.customDomainZoneName,
       }),
     });
+    const domainJson = (await domainRes.json().catch(() => null)) as {
+      success?: boolean;
+      errors?: Array<{ message?: string }>;
+    } | null;
+    if (!domainRes.ok || domainJson?.success === false) {
+      const msg =
+        domainJson?.errors?.[0]?.message ??
+        `Failed to attach custom domain ${input.customDomain} (${domainRes.status})`;
+      throw new CloudflareApiError(
+        domainRes.status === 403 ? 'permission_denied' : 'api_error',
+        domainRes.status,
+        msg,
+      );
+    }
   }
 
   return { workersDevUrl: null };
+}
+
+async function resolveIpv4ViaPublicDns(hostname: string): Promise<string | null> {
+  const resolver = new dns.Resolver();
+  resolver.setServers(['1.1.1.1', '8.8.8.8']);
+  try {
+    const addrs = await new Promise<string[]>((resolve, reject) => {
+      resolver.resolve4(hostname, (err, addresses) => {
+        if (err) reject(err);
+        else resolve(addresses);
+      });
+    });
+    return addrs[0] ?? null;
+  } catch {
+    return null;
+  }
+}
+
+async function httpsGetToIp(
+  url: URL,
+  address: string,
+): Promise<{ status: number; body: string }> {
+  const https = await import('node:https');
+  return new Promise((resolve) => {
+    const req = https.request(
+      {
+        protocol: 'https:',
+        host: address,
+        servername: url.hostname,
+        method: 'GET',
+        path: `${url.pathname}${url.search}`,
+        headers: { host: url.hostname, accept: '*/*' },
+        timeout: 15_000,
+      },
+      (res) => {
+        const chunks: Buffer[] = [];
+        res.on('data', (chunk: Buffer) => {
+          chunks.push(chunk);
+        });
+        res.on('end', () => {
+          resolve({
+            status: res.statusCode ?? 0,
+            body: Buffer.concat(chunks).toString('utf8'),
+          });
+        });
+      },
+    );
+    req.on('error', () => resolve({ status: 0, body: '' }));
+    req.on('timeout', () => {
+      req.destroy();
+      resolve({ status: 0, body: '' });
+    });
+    req.end();
+  });
 }
 
 async function smokeGet(
@@ -264,8 +341,17 @@ async function smokeGet(
     const res = await fetchImpl(url, { method: 'GET', redirect: 'manual' });
     return { status: res.status, body: await res.text() };
   } catch {
-    // DNS / network failures (common when workers.dev is unreachable from the host)
-    return { status: 0, body: '' };
+    // Local resolvers (e.g. systemd-resolved) sometimes NXDOMAIN while public
+    // DNS already serves the Worker custom domain. Retry via 1.1.1.1 / 8.8.8.8.
+    try {
+      const parsed = new URL(url);
+      if (parsed.protocol !== 'https:') return { status: 0, body: '' };
+      const address = await resolveIpv4ViaPublicDns(parsed.hostname);
+      if (!address) return { status: 0, body: '' };
+      return await httpsGetToIp(parsed, address);
+    } catch {
+      return { status: 0, body: '' };
+    }
   }
 }
 

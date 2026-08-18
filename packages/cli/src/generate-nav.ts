@@ -6,7 +6,7 @@ import {
 import { parseNrdocsConfig } from '@nrdocs/contracts';
 import type { CommandContext } from './command-context.js';
 import { parseFlags } from './argv.js';
-import { resolvePublicationDirectory, configPathFor, loadNrdocsConfig } from './config.js';
+import { resolveGenerateNavDirectory, configPathFor, loadNrdocsConfig } from './config.js';
 import { localValidationError, usageError, ioError } from './errors.js';
 import { presentHumanSuccess } from './present.js';
 import { atomicWriteProjectFile, assertRealDirectory } from './fs-safe.js';
@@ -48,7 +48,7 @@ export async function runGenerateNavCommand(
   const titleFlag = flags['--title'];
   const directoryArg = positionals[0];
 
-  const root = await resolvePublicationDirectory(ctx.runtime, directoryArg);
+  const root = await resolveGenerateNavDirectory(ctx.runtime, directoryArg);
   await assertRealDirectory(ctx.runtime, root);
   const configPath = configPathFor(root);
 

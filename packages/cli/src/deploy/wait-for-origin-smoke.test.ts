@@ -35,13 +35,32 @@ describe('waitForOriginSmoke', () => {
     expect(onRetry).toHaveBeenCalled();
   });
 
-  it('stops early on hard network failure', async () => {
-    const smokeGet = vi.fn().mockResolvedValue({ status: 0, body: '' });
-    const result = await waitForOriginSmoke(smokeGet, 'https://example.workers.dev', {
+  it('retries a few DNS misses then succeeds', async () => {
+    const smokeGet = vi
+      .fn()
+      .mockResolvedValueOnce({ status: 0, body: '' })
+      .mockResolvedValueOnce({ status: 0, body: '' })
+      .mockResolvedValueOnce({ status: 0, body: '' })
+      .mockResolvedValueOnce({ status: 0, body: '' })
+      .mockResolvedValueOnce({ status: 200, body: '{"ok":true}' })
+      .mockResolvedValueOnce({ status: 200, body: 'nrdocs' });
+    const result = await waitForOriginSmoke(smokeGet, 'https://docs.example.com', {
       attempts: 10,
       delayMs: 1,
+      maxConsecutiveDnsMisses: 8,
+    });
+    expect(result.version.status).toBe(200);
+    expect(result.attempts).toHaveLength(3);
+  });
+
+  it('stops after several consecutive hard network failures', async () => {
+    const smokeGet = vi.fn().mockResolvedValue({ status: 0, body: '' });
+    const result = await waitForOriginSmoke(smokeGet, 'https://example.workers.dev', {
+      attempts: 20,
+      delayMs: 1,
+      maxConsecutiveDnsMisses: 3,
     });
     expect(result.version.status).toBe(0);
-    expect(result.attempts).toHaveLength(1);
+    expect(result.attempts).toHaveLength(3);
   });
 });

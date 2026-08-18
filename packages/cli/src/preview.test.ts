@@ -150,6 +150,10 @@ describe('nrdocs preview', () => {
 
           const css = await fetch(new URL('/_nrdocs/v1/reader.css', server.url));
           expect(css.status).toBe(200);
+          expect(await css.text()).toContain('url("/_nrdocs/v1/logo.svg")');
+          const logo = await fetch(new URL('/_nrdocs/v1/logo.svg', server.url));
+          expect(logo.status).toBe(200);
+          expect(await logo.text()).toContain('<svg');
 
           ac.abort();
         },
@@ -195,6 +199,28 @@ describe('nrdocs preview', () => {
         exit_code: ExitCode.LocalValidation,
       });
       expect(cap.stdout).not.toContain('Preview ready.');
+    });
+  });
+
+  it('previews broken page links and still binds a port', async () => {
+    await withTemp(async (runtime, cap, docs) => {
+      await fs.writeFile(
+        path.join(docs, 'nrdocs.yml'),
+        'title: Site\nnavigation:\n  - title: Home\n    file: index.md\n',
+      );
+      await fs.writeFile(path.join(docs, 'index.md'), '# Home\n\n[gone](gone.md)\n');
+      const ac = new AbortController();
+      await runPreviewCommand(ctxFor(runtime), ['docs'], {
+        signal: ac.signal,
+        onListening: async (server) => {
+          const home = await fetch(server.url);
+          expect(home.status).toBe(200);
+          expect(await home.text()).toContain('nr-broken-link');
+          ac.abort();
+        },
+      });
+      expect(cap.stdout).toContain('Preview ready.');
+      expect(cap.stderr).toMatch(/unlisted Markdown page|Broken links are shown/);
     });
   });
 

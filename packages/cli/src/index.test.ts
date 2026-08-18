@@ -6,6 +6,7 @@ import {
   CLI_PACKAGE,
   CLI_VERSION,
   ExitCode,
+  MIN_NODE_MAJOR,
   REMOVED_1X_COMMANDS,
   cliDependencies,
   createProcessRuntime,
@@ -119,6 +120,7 @@ describe('help and removed 1.x commands', () => {
       expect(cap.stdout).toContain('nrdocs generate nav');
       expect(cap.stdout).toContain('nrdocs credentials list');
       expect(cap.stdout).toContain('nrdocs instance use');
+      expect(cap.stdout).toContain('A–Z is stored lowercase');
       for (const removed of REMOVED_1X_COMMANDS) {
         expect(cap.stdout.includes(removed)).toBe(false);
       }
@@ -127,8 +129,10 @@ describe('help and removed 1.x commands', () => {
   });
 
   it('rejects removed top-level commands', async () => {
-    await withTempHome(async (_h, runtime) => {
+    await withTempHome(async (_h, runtime, cap) => {
       expect(await main(['init'], { runtime })).toBe(ExitCode.Usage);
+      expect(cap.stderr).toMatch(/no init command/i);
+      expect(cap.stderr).toContain('nrdocs connect');
       expect(await main(['repos'], { runtime })).toBe(ExitCode.Usage);
       expect(await main(['doctor'], { runtime })).toBe(ExitCode.Usage);
     });
@@ -144,6 +148,16 @@ describe('platform', () => {
       },
       { platform: 'win32' },
     );
+  });
+
+  it('fails on Node.js below 24 at startup', async () => {
+    await withTempHome(async (_h, runtime, cap) => {
+      expect(await main(['--version'], { runtime, nodeVersion: '20.19.5' })).toBe(
+        ExitCode.LocalIoOrState,
+      );
+      expect(cap.stderr).toContain(`Node.js ${MIN_NODE_MAJOR}`);
+      expect(cap.stderr).toContain('20.19.5');
+    });
   });
 });
 

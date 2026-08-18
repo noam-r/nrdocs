@@ -44,6 +44,14 @@ export type DeployWorkerInput = {
   sessionKeyBytes?: Uint8Array;
   workersDev: boolean;
   customDomain: string | null;
+  /** Required when attaching a Worker custom domain. */
+  customDomainZoneId?: string;
+  customDomainZoneName?: string;
+};
+
+export type D1QueryResult = {
+  results: Array<Record<string, string | number | null>>;
+  meta: { changes: number };
 };
 
 export type CloudflareControlPlane = {
@@ -65,7 +73,7 @@ export type CloudflareControlPlane = {
     databaseId: string,
     sql: string,
     params?: readonly (string | number | null)[],
-  ): Promise<unknown[]>;
+  ): Promise<D1QueryResult>;
   listR2(accountId: string): Promise<Array<{ name: string }>>;
   createR2(accountId: string, name: string): Promise<void>;
   deleteR2Bucket(accountId: string, bucket: string): Promise<void>;
@@ -78,7 +86,7 @@ export type CloudflareControlPlane = {
     opts?: { cursor?: string; limit?: number },
   ): Promise<{ keys: string[]; cursor?: string }>;
   deleteR2Object(accountId: string, bucket: string, key: string): Promise<void>;
-  listZones(accountId: string, name: string): Promise<CfZone[]>;
+  listZones(accountId: string, name?: string): Promise<CfZone[]>;
   /** Account workers.dev label (the middle label in worker.account.workers.dev). */
   getWorkersDevSubdomain(accountId: string): Promise<string>;
   enableWorkersDev(accountId: string, workerName: string): Promise<void>;
@@ -104,8 +112,12 @@ export type OriginSmokeResult = {
  * Poll version + root until both return 200.
  *
  * New workers.dev hostnames commonly return Cloudflare HTML 404 / error 1042 for
- * 30–90+ seconds after the subdomain API reports `enabled: true`. Callers should
- * budget minutes, not seconds.
+ * 30–90+ seconds after the subdomain API reports `enabled: true`. Custom domains
+ * additionally need DNS and TLS activation. Callers should budget minutes, not
+ * seconds.
+ *
+ * Transient DNS misses (status 0) are retried — local resolvers often lag public
+ * DNS. Hard failures only abort after several consecutive misses.
  */
 export async function waitForOriginSmoke(
   smokeGet: (url: string) => Promise<OriginSmokeProbe>,
@@ -113,15 +125,19 @@ export async function waitForOriginSmoke(
   opts: {
     attempts?: number;
     delayMs?: number;
+    /** Consecutive status-0 probes before giving up early. */
+    maxConsecutiveDnsMisses?: number;
     /** Invoked before sleeping when the origin is not ready yet. */
     onRetry?: (attempt: number) => Promise<void>;
   } = {},
 ): Promise<OriginSmokeResult> {
   const attemptsLimit = opts.attempts ?? 60;
   const delayMs = opts.delayMs ?? 3000;
+  const maxConsecutiveDnsMisses = opts.maxConsecutiveDnsMisses ?? 8;
   let version: OriginSmokeProbe = { status: 0, body: '' };
   let root: OriginSmokeProbe = { status: 0, body: '' };
   const attempts: OriginSmokeResult['attempts'] = [];
+  let consecutiveDnsMisses = 0;
 
   for (let attempt = 0; attempt < attemptsLimit; attempt++) {
     version = await smokeGet(`${origin}/_nrdocs/api/version`);
@@ -130,8 +146,12 @@ export async function waitForOriginSmoke(
     if (version.status === 200 && root.status === 200) {
       return { version, root, attempts };
     }
-    // DNS / hard network failure — do not spin the full budget.
-    if (version.status === 0 && root.status === 0) break;
+    if (version.status === 0 && root.status === 0) {
+      consecutiveDnsMisses += 1;
+      if (consecutiveDnsMisses >= maxConsecutiveDnsMisses) break;
+    } else {
+      consecutiveDnsMisses = 0;
+    }
     if (opts.onRetry) {
       try {
         await opts.onRetry(attempt);
@@ -195,6 +215,25 @@ export class CloudflareApiError extends Error {
     this.kind = kind;
     this.status = status;
   }
+}
+
+export function parseD1QueryResult(result: unknown): D1QueryResult {
+  const first = Array.isArray(result) ? result[0] : result;
+  if (typeof first !== 'object' || first === null) {
+    return { results: [], meta: { changes: 0 } };
+  }
+  const row = first as Record<string, unknown>;
+  const results = Array.isArray(row.results)
+    ? (row.results as Array<Record<string, string | number | null>>)
+    : [];
+  const meta =
+    typeof row.meta === 'object' && row.meta !== null
+      ? (row.meta as Record<string, unknown>)
+      : null;
+  const changes = typeof meta?.changes === 'number' ? meta.changes : 0;
+  const rowsWritten = typeof meta?.rows_written === 'number' ? meta.rows_written : 0;
+  const changedDb = meta?.changed_db === true ? 1 : 0;
+  return { results, meta: { changes: Math.max(changes, rowsWritten, changedDb) } };
 }
 
 export function createHttpCloudflareControlPlane(
@@ -270,15 +309,7 @@ export function createHttpCloudflareControlPlane(
       return api(
         'POST',
         `/accounts/${accountId}/d1/database/${databaseId}/query`,
-        (result) => {
-          if (!Array.isArray(result)) return [];
-          const first = result[0];
-          if (typeof first === 'object' && first !== null && 'results' in first) {
-            const results = (first as { results: unknown }).results;
-            return Array.isArray(results) ? results : [];
-          }
-          return [];
-        },
+        parseD1QueryResult,
         { body: { sql, params: [...params] } },
       );
     },
@@ -352,9 +383,13 @@ export function createHttpCloudflareControlPlane(
         () => null,
       );
     },
-    listZones: (accountId, name) =>
+    listZones: (accountId, name?) =>
       api('GET', `/zones`, parseZonesResult, {
-        query: { name, 'account.id': accountId },
+        query: {
+          'account.id': accountId,
+          per_page: '50',
+          ...(name !== undefined && name !== '' ? { name } : {}),
+        },
       }),
     getWorkersDevSubdomain: (accountId) =>
       api('GET', `/accounts/${accountId}/workers/subdomain`, (result) => {

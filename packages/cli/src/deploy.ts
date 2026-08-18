@@ -2,6 +2,7 @@ import {
   applyMigrations,
   insertInstanceMetadata,
   getInstanceMetadata,
+  updateInstanceCanonicalOrigin,
   type SqlExecutor,
 } from '@nrdocs/persistence';
 import {
@@ -18,6 +19,7 @@ import { CliError, usageError } from './errors.js';
 import { presentHumanSuccess } from './present.js';
 import { requireInteractiveTerminal, type Terminal } from './terminal.js';
 import {
+  readActiveInstanceId,
   readInstanceDescriptor,
   writeActiveInstanceId,
   writeInstanceDescriptor,
@@ -97,6 +99,219 @@ async function promptYesNo(terminal: Terminal, question: string): Promise<boolea
   return promptYesNo(terminal, question);
 }
 
+/** Longest matching active zone for a hostname (apex or subdomain). */
+export function findZoneForHostname(
+  zones: ReadonlyArray<{ id: string; name: string; status: string }>,
+  hostname: string,
+): { id: string; name: string; status: string } | undefined {
+  const host = hostname.toLowerCase();
+  return zones
+    .filter((z) => z.status === 'active')
+    .filter((z) => host === z.name || host.endsWith(`.${z.name}`))
+    .sort((a, b) => b.name.length - a.name.length)[0];
+}
+
+function hostnameUnderZone(hostname: string, zoneName: string): boolean {
+  return hostname === zoneName || hostname.endsWith(`.${zoneName}`);
+}
+
+/** Single DNS label suitable for `<label>.<zone>` shorthand. */
+function isDnsLabel(value: string): boolean {
+  return /^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/.test(value);
+}
+
+/**
+ * Normalize operator hostname input for a selected Cloudflare zone.
+ * Accepts a full hostname under the zone, or a single label expanded to
+ * `<label>.<zone>` (operators often type only the subdomain after picking a zone).
+ */
+export function resolveHostnameUnderZone(raw: string, zoneName: string): string {
+  let candidate = raw.trim().toLowerCase();
+  if (!candidate) {
+    throw usageError(
+      [
+        'Hostname is required.',
+        '',
+        `Enter the full hostname under ${zoneName}, for example:`,
+        `  ${zoneName}`,
+        `  docs.${zoneName}`,
+        `Or enter only a label such as docs (becomes docs.${zoneName}).`,
+        'Do not include https://, a path, or a port.',
+      ].join('\n'),
+    );
+  }
+  candidate = candidate.replace(/^https?:\/\//, '');
+  const slash = candidate.indexOf('/');
+  if (slash >= 0) candidate = candidate.slice(0, slash);
+  const colon = candidate.indexOf(':');
+  if (colon >= 0) candidate = candidate.slice(0, colon);
+  candidate = candidate.replace(/\.$/, '');
+
+  const parsed = parseCanonicalHostname(candidate);
+  if (parsed) {
+    if (!hostnameUnderZone(parsed, zoneName)) {
+      throw usageError(
+        [
+          `Hostname must be ${zoneName} or a subdomain of it.`,
+          `You entered: ${parsed}`,
+          '',
+          'Examples:',
+          `  ${zoneName}`,
+          `  docs.${zoneName}`,
+        ].join('\n'),
+      );
+    }
+    return parsed;
+  }
+
+  if (!candidate.includes('.') && isDnsLabel(candidate)) {
+    const expanded = `${candidate}.${zoneName}`;
+    const ok = parseCanonicalHostname(expanded);
+    if (ok) return ok;
+  }
+
+  throw usageError(
+    [
+      `Invalid hostname: ${raw.trim()}`,
+      '',
+      `Expected a full DNS name under ${zoneName}, for example:`,
+      `  ${zoneName}`,
+      `  docs.${zoneName}`,
+      `Or a single label such as docs (becomes docs.${zoneName}).`,
+      'Do not include https://, a path, a port, or a wildcard (*).',
+      'Hostnames must be lowercase letters, digits, and hyphens.',
+    ].join('\n'),
+  );
+}
+
+function requireCanonicalHostname(raw: string, flagLabel: string): string {
+  const candidate = raw.trim().toLowerCase();
+  const host = parseCanonicalHostname(candidate);
+  if (host) return host;
+  throw usageError(
+    [
+      `Invalid ${flagLabel} value: ${raw.trim()}`,
+      '',
+      'Expected a full lowercase hostname such as docs.example.com',
+      '(no https://, path, port, or wildcard).',
+    ].join('\n'),
+  );
+}
+
+async function promptPublishOrigin(
+  ctx: CommandContext,
+  cf: CloudflareControlPlane,
+  accountId: string,
+  plannedWorkersDevOrigin: string,
+  domainFlag: string | undefined,
+): Promise<string | null> {
+  if (domainFlag !== undefined) {
+    const host = requireCanonicalHostname(domainFlag, '--domain');
+    presentHumanSuccess(
+      ctx.runtime,
+      [
+        'Publish location (from --domain):',
+        `  Instance origin: https://${host}`,
+        `  Site URLs:       https://${host}/<slug>/`,
+        '',
+        'This instance will not use workers.dev.',
+      ].join('\n'),
+    );
+    return host;
+  }
+
+  presentHumanSuccess(
+    ctx.runtime,
+    [
+      'Where should this instance publish documentation?',
+      '',
+      '  [1] Cloudflare workers.dev  (default — no DNS setup)',
+      `      Origin: ${plannedWorkersDevOrigin}`,
+      `      Sites:  ${plannedWorkersDevOrigin}/<slug>/`,
+      '',
+      '  [2] Custom domain on a Cloudflare zone in this account',
+      '      You pick a zone, then enter the hostname (apex or subdomain).',
+      '      workers.dev will be disabled for this instance.',
+    ].join('\n'),
+  );
+
+  const choiceRaw = (await ctx.terminal.promptLine('Publish location [1/2]')).trim();
+  const choice = choiceRaw === '' ? '1' : choiceRaw;
+  if (choice === '1') {
+    presentHumanSuccess(
+      ctx.runtime,
+      [
+        'Using workers.dev.',
+        `Docs sites will be published under:`,
+        `  ${plannedWorkersDevOrigin}/<slug>/`,
+      ].join('\n'),
+    );
+    return null;
+  }
+  if (choice !== '2') {
+    throw usageError('Publish location must be 1 (workers.dev) or 2 (custom domain).');
+  }
+
+  const zones = (await cf.listZones(accountId).catch(mapCfError)).filter(
+    (z) => z.status === 'active',
+  );
+  if (zones.length === 0) {
+    throw authorityError(
+      [
+        'No active Cloudflare zones are visible for this account.',
+        'Custom domains require Zone Read on the API token and a zone in this account.',
+        'Choose publish location [1] for workers.dev, or add Zone permissions and retry.',
+      ].join('\n'),
+    );
+  }
+
+  presentHumanSuccess(
+    ctx.runtime,
+    ['Cloudflare zones in this account:', ...zones.map((z, i) => `  [${i + 1}] ${z.name}`)].join(
+      '\n',
+    ),
+  );
+  const zoneChoice = Number((await ctx.terminal.promptLine('Zone number:')).trim());
+  if (!Number.isInteger(zoneChoice) || zoneChoice < 1 || zoneChoice > zones.length) {
+    throw usageError('Invalid zone selection.');
+  }
+  const zone = zones[zoneChoice - 1]!;
+
+  presentHumanSuccess(
+    ctx.runtime,
+    [
+      `Selected zone: ${zone.name}`,
+      '',
+      'Enter the hostname to attach under this zone.',
+      'It must be a full DNS name, for example:',
+      `  ${zone.name}`,
+      `  docs.${zone.name}`,
+      `Or type only a label such as docs — that becomes docs.${zone.name}.`,
+      'Do not include https://, a path, or a port.',
+    ].join('\n'),
+  );
+  const entered = resolveHostnameUnderZone(
+    await ctx.terminal.promptLine('Hostname:'),
+    zone.name,
+  );
+
+  const origin = `https://${entered}`;
+  presentHumanSuccess(
+    ctx.runtime,
+    [
+      'Using custom domain.',
+      `  Instance origin: ${origin}`,
+      `  Site URLs:       ${origin}/<slug>/`,
+      '',
+      'workers.dev will be disabled for this instance.',
+    ].join('\n'),
+  );
+
+  const confirmed = await promptYesNo(ctx.terminal, 'Proceed with this hostname? [y/N]');
+  if (!confirmed) throw usageError('Deploy cancelled.');
+  return entered;
+}
+
 function stepsOf(desc: InstanceDescriptor): Set<string> {
   return new Set(desc.reconciliation?.completed_steps ?? []);
 }
@@ -122,7 +337,15 @@ export async function runDeployCommand(
   if (ctx.help) {
     presentHumanSuccess(
       ctx.runtime,
-      'nrdocs deploy [--domain <hostname>] [--instance <instance-id>]\n',
+      [
+        'nrdocs deploy [--domain <hostname>] [--instance <instance-id>]',
+        '',
+        'Provisions a Cloudflare instance (Worker + D1 + R2) that hosts documentation',
+        'sites. It does not upload Markdown; use site create, connect, and publish after.',
+        '',
+        'Without --domain, you choose workers.dev or a custom domain interactively.',
+        'With --domain, that hostname becomes the only canonical origin.',
+      ].join('\n') + '\n',
     );
     return;
   }
@@ -145,8 +368,7 @@ export async function runDeployCommand(
     (typeof flags['--instance'] === 'string' ? flags['--instance'] : undefined) ?? ctx.instance;
   const domainFlag = typeof flags['--domain'] === 'string' ? flags['--domain'] : undefined;
   if (domainFlag !== undefined) {
-    const host = parseCanonicalHostname(domainFlag);
-    if (!host) throw usageError('Invalid --domain hostname.');
+    requireCanonicalHostname(domainFlag, '--domain');
   }
 
   if (!options.cloudflare) {
@@ -174,83 +396,93 @@ export async function runDeployCommand(
     if (!id) throw usageError('--instance requires a valid opaque instance ID.');
     descriptor = await readInstanceDescriptor(ctx.runtime, id);
   } else {
-    isNew = true;
-    const displayRaw = await ctx.terminal.promptLine('Instance name:');
-    const display_name = normalizeDisplayName(displayRaw);
-    if (!display_name) throw usageError('Invalid instance name.');
-
-    let custom_hostname: string | null = null;
-    if (domainFlag) {
-      custom_hostname = parseCanonicalHostname(domainFlag);
+    const active = await readActiveInstanceId(ctx.runtime);
+    if (active) {
+      descriptor = await readInstanceDescriptor(ctx.runtime, active);
     } else {
-      const wantDomain = await promptYesNo(ctx.terminal, 'Custom domain? [y/N]');
-      if (wantDomain) {
-        const entered = parseCanonicalHostname(await ctx.terminal.promptLine('Hostname:'));
-        if (!entered) throw usageError('Invalid custom hostname.');
-        custom_hostname = entered;
-      }
-    }
-
-    // Auth + account before first mutation.
-    const tempDir = options.mkdtemp ? await options.mkdtemp() : await createNeutralTemp();
-    try {
-      if (!options.runCommand && !options.cloudflare) {
-        // unreachable due to cloudflare check above
-      }
-      // Credential resolution is required for real deploys; fakes inject cloudflare only.
-      if (options.runCommand) {
-        await resolveCloudflareCredential(ctx.runtime, options.runCommand, tempDir);
-      }
-    } finally {
-      if (options.rmTemp) await options.rmTemp(tempDir);
-    }
-
-    const accounts = await cf.listAccounts().catch(mapCfError);
-    let account_id: string;
-    const pinned = await resolveCloudflareAccountId(ctx.runtime);
-    if (pinned) {
-      if (!accounts.some((a) => a.id === pinned)) {
-        throw authorityError('CLOUDFLARE_ACCOUNT_ID is not accessible to this credential.');
-      }
-      account_id = pinned;
-    } else if (accounts.length === 1) {
-      account_id = accounts[0]!.id;
-    } else if (accounts.length === 0) {
-      throw authorityError('No Cloudflare accounts are accessible.');
-    } else {
+      isNew = true;
       presentHumanSuccess(
         ctx.runtime,
-        accounts.map((a, i) => `  [${i + 1}] ${a.name} (${a.id})`).join('\n'),
+        [
+          'nrdocs deploy creates a Cloudflare instance that will host your documentation.',
+          'Markdown is published later with: nrdocs site create → connect → publish.',
+          '',
+          'Each site will be available at:',
+          '  <instance-origin>/<slug>/',
+        ].join('\n'),
       );
-      const choice = Number((await ctx.terminal.promptLine('Account number:')).trim());
-      if (!Number.isInteger(choice) || choice < 1 || choice > accounts.length) {
-        throw usageError('Invalid account selection.');
+
+      const displayRaw = await ctx.terminal.promptLine('Instance name (label only):');
+      const display_name = normalizeDisplayName(displayRaw);
+      if (!display_name) throw usageError('Invalid instance name.');
+
+      // Auth + account before origin choice (needed for zones / workers.dev subdomain).
+      const tempDir = options.mkdtemp ? await options.mkdtemp() : await createNeutralTemp();
+      try {
+        if (options.runCommand) {
+          await resolveCloudflareCredential(ctx.runtime, options.runCommand, tempDir);
+        }
+      } finally {
+        if (options.rmTemp) await options.rmTemp(tempDir);
       }
-      account_id = accounts[choice - 1]!.id;
+
+      const accounts = await cf.listAccounts().catch(mapCfError);
+      let account_id: string;
+      const pinned = await resolveCloudflareAccountId(ctx.runtime);
+      if (pinned) {
+        if (!accounts.some((a) => a.id === pinned)) {
+          throw authorityError('CLOUDFLARE_ACCOUNT_ID is not accessible to this credential.');
+        }
+        account_id = pinned;
+      } else if (accounts.length === 1) {
+        account_id = accounts[0]!.id;
+      } else if (accounts.length === 0) {
+        throw authorityError('No Cloudflare accounts are accessible.');
+      } else {
+        presentHumanSuccess(
+          ctx.runtime,
+          accounts.map((a, i) => `  [${i + 1}] ${a.name} (${a.id})`).join('\n'),
+        );
+        const choice = Number((await ctx.terminal.promptLine('Account number:')).trim());
+        if (!Number.isInteger(choice) || choice < 1 || choice > accounts.length) {
+          throw usageError('Invalid account selection.');
+        }
+        account_id = accounts[choice - 1]!.id;
+      }
+
+      const suffix = generateResourceSuffix(randomBytes(16));
+      const names = plannedResourceNames(account_id, suffix);
+      const instance_id = generateInstanceId(randomBytes(16));
+      const accountSubdomain = await cf.getWorkersDevSubdomain(account_id).catch(mapCfError);
+      const plannedWorkersDevOrigin = workersDevOrigin(names.worker_name, accountSubdomain);
+
+      const custom_hostname = await promptPublishOrigin(
+        ctx,
+        cf,
+        account_id,
+        plannedWorkersDevOrigin,
+        domainFlag,
+      );
+
+      descriptor = {
+        instance_id,
+        display_name,
+        canonical_origin: '',
+        custom_hostname,
+        account_id,
+        resource_suffix: suffix,
+        database_id: '',
+        bucket_name: names.bucket_name,
+        worker_name: names.worker_name,
+        status: 'provisioning',
+        deployed_version: packageVersion,
+        reconciliation: {
+          completed_steps: [],
+          resume_hint: `nrdocs deploy --instance ${instance_id}`,
+        },
+      };
+      await writeInstanceDescriptor(ctx.runtime, descriptor);
     }
-
-    const suffix = generateResourceSuffix(randomBytes(16));
-    const names = plannedResourceNames(account_id, suffix);
-    const instance_id = generateInstanceId(randomBytes(16));
-
-    descriptor = {
-      instance_id,
-      display_name,
-      canonical_origin: '',
-      custom_hostname,
-      account_id,
-      resource_suffix: suffix,
-      database_id: '',
-      bucket_name: names.bucket_name,
-      worker_name: names.worker_name,
-      status: 'provisioning',
-      deployed_version: packageVersion,
-      reconciliation: {
-        completed_steps: [],
-        resume_hint: `nrdocs deploy --instance ${instance_id}`,
-      },
-    };
-    await writeInstanceDescriptor(ctx.runtime, descriptor);
   }
 
   presentHumanSuccess(ctx.runtime, 'Creating Cloudflare resources...');
@@ -265,19 +497,29 @@ export async function runDeployCommand(
       isResume: !isNew,
     });
   } catch (error) {
+    // reconcileInstance persists progress to disk as steps complete, but the
+    // in-memory `descriptor` is only reassigned on success. Re-read so a failure
+    // does not wipe completed_steps / database_id with the pre-reconcile snapshot.
+    let progressed = descriptor;
+    try {
+      progressed = await readInstanceDescriptor(ctx.runtime, descriptor.instance_id);
+    } catch {
+      /* keep caller snapshot */
+    }
     const failed = {
-      ...descriptor,
-      status: (descriptor.status === 'active' ? 'degraded' : 'provisioning') as
-        'degraded' | 'provisioning',
+      ...progressed,
+      status: (progressed.status === 'active' ? 'degraded' : 'provisioning') as
+        | 'degraded'
+        | 'provisioning',
       reconciliation: {
-        completed_steps: [...stepsOf(descriptor)],
-        resume_hint: `nrdocs deploy --instance ${descriptor.instance_id}`,
+        completed_steps: [...stepsOf(progressed)],
+        resume_hint: `nrdocs deploy --instance ${progressed.instance_id}`,
       },
     };
     await writeInstanceDescriptor(ctx.runtime, failed);
     presentHumanSuccess(
       ctx.runtime,
-      `Deployment incomplete.\n\nResume with:\n  nrdocs deploy --instance ${descriptor.instance_id}`,
+      `Deployment incomplete.\n\nResume with:\n  nrdocs deploy --instance ${failed.instance_id}`,
     );
     mapCfError(error);
   }
@@ -297,25 +539,18 @@ export async function runDeployCommand(
     await writeActiveInstanceId(ctx.runtime, descriptor.instance_id);
   }
 
-  if (
-    !isNew &&
-    initialWasActiveComplete(initialDescriptorSnapshot) &&
-    descriptor.status === 'active' &&
-    descriptor.deployed_version === packageVersion
-  ) {
-    presentHumanSuccess(ctx.runtime, 'unchanged');
-    return;
-  }
-
   presentHumanSuccess(
     ctx.runtime,
     [
       'nrdocs deployed.',
       '',
       `Name:      ${descriptor.display_name}`,
-      `URL:       ${descriptor.canonical_origin}`,
+      `Origin:    ${descriptor.canonical_origin}`,
       `Instance:  ${descriptor.instance_id}`,
       `Status:    active administrative instance`,
+      '',
+      'Documentation sites on this instance will be published at:',
+      `  ${descriptor.canonical_origin}/<slug>/`,
       '',
       'Next:',
       '  nrdocs site create <slug>',
@@ -333,6 +568,13 @@ function initialWasActiveComplete(desc: InstanceDescriptor | null): boolean {
   );
 }
 
+function completedOrStableSteps(desc: InstanceDescriptor): Set<string> {
+  if (desc.status === 'active' && desc.reconciliation === null) {
+    return new Set(['preflight', 'd1', 'r2', 'migrations', 'origin']);
+  }
+  return stepsOf(desc);
+}
+
 async function reconcileInstance(
   ctx: CommandContext,
   cf: CloudflareControlPlane,
@@ -345,38 +587,12 @@ async function reconcileInstance(
   },
 ): Promise<InstanceDescriptor> {
   let desc = initial;
-  const done = stepsOf(desc);
+  const done = completedOrStableSteps(desc);
+  const preserveSessionKey =
+    initial.status === 'active' ||
+    initial.status === 'degraded' ||
+    stepsOf(initial).has('worker');
   const names = plannedResourceNames(desc.account_id, desc.resource_suffix);
-
-  if (
-    options.isResume &&
-    initial.status === 'active' &&
-    initial.reconciliation === null &&
-    initial.deployed_version === options.packageVersion &&
-    initial.database_id !== '' &&
-    initial.canonical_origin !== ''
-  ) {
-    const preflight = await cf.preflight(desc.account_id, desc.custom_hostname !== null);
-    if (!preflight.ok) {
-      throw authorityError(`Missing Cloudflare capability:\n  ${preflight.missing}`);
-    }
-    const markerBytes = await cf.getR2Object(
-      desc.account_id,
-      names.bucket_name,
-      '_nrdocs/instance.json',
-    );
-    if (!markerBytes) throw authorityError('R2 ownership marker missing.');
-    const marker = JSON.parse(new TextDecoder().decode(markerBytes)) as R2InstanceMarker;
-    if (marker.instance_id !== desc.instance_id) {
-      throw authorityError('R2 ownership marker mismatch.');
-    }
-    const version = await cf.smokeGet(`${desc.canonical_origin}/_nrdocs/api/version`);
-    const root = await cf.smokeGet(`${desc.canonical_origin}/`);
-    if (version.status !== 200 || root.status !== 200) {
-      throw new CloudflareApiError('api_error', 500, 'Smoke test failed against canonical origin.');
-    }
-    return initial;
-  }
 
   const preflight = await cf.preflight(desc.account_id, desc.custom_hostname !== null);
   if (!preflight.ok) {
@@ -389,10 +605,14 @@ async function reconcileInstance(
   await writeInstanceDescriptor(ctx.runtime, desc);
 
   // Domain eligibility
+  let customDomainZone: { id: string; name: string } | undefined;
   if (desc.custom_hostname) {
-    const zones = await cf.listZones(desc.account_id, parentZone(desc.custom_hostname));
-    const zone = zones.find((z) => z.status === 'active');
-    if (!zone) throw usageError('Custom domain zone is not active in this account.');
+    const zones = await cf.listZones(desc.account_id);
+    const zone = findZoneForHostname(zones, desc.custom_hostname);
+    if (!zone) {
+      throw usageError('Custom domain must belong to an active Cloudflare zone in this account.');
+    }
+    customDomainZone = { id: zone.id, name: zone.name };
   }
 
   // D1
@@ -482,17 +702,28 @@ async function reconcileInstance(
         });
       }
     } else {
-      const { MIGRATIONS } = await import('@nrdocs/persistence');
-      const statements = MIGRATIONS.flatMap((m) =>
-        m.statements.map((sql) => ({ sql, params: [] as Array<string | number | null> })),
+      const schema = await cf.d1Query(
+        desc.account_id,
+        desc.database_id,
+        `SELECT name
+           FROM sqlite_master
+          WHERE type = 'table'
+            AND name = 'schema_migrations'
+          LIMIT 1`,
       );
-      await cf.d1Batch(desc.account_id, desc.database_id, statements);
-      const rows = await cf.d1Query(
+      if (schema.results.length === 0) {
+        const { MIGRATIONS } = await import('@nrdocs/persistence');
+        const statements = MIGRATIONS.flatMap((m) =>
+          m.statements.map((sql) => ({ sql, params: [] as Array<string | number | null> })),
+        );
+        await cf.d1Batch(desc.account_id, desc.database_id, statements);
+      }
+      const result = await cf.d1Query(
         desc.account_id,
         desc.database_id,
         'SELECT id FROM instance_metadata',
       );
-      if (rows.length === 0) {
+      if (result.results.length === 0) {
         await cf.d1Batch(desc.account_id, desc.database_id, [
           {
             sql: `INSERT INTO instance_metadata (
@@ -519,6 +750,14 @@ async function reconcileInstance(
   // Worker
   let workersDevUrl: string | null = null;
   if (!done.has('worker')) {
+    if (desc.custom_hostname && !customDomainZone) {
+      const zones = await cf.listZones(desc.account_id);
+      const zone = findZoneForHostname(zones, desc.custom_hostname);
+      if (!zone) {
+        throw usageError('Custom domain must belong to an active Cloudflare zone in this account.');
+      }
+      customDomainZone = { id: zone.id, name: zone.name };
+    }
     const result = await cf.deployWorker({
       accountId: desc.account_id,
       workerName: names.worker_name,
@@ -530,10 +769,16 @@ async function reconcileInstance(
       platformCss: BUNDLED_PLATFORM_CSS,
       platformJs: BUNDLED_PLATFORM_JS,
       platformMermaid: BUNDLED_PLATFORM_MERMAID,
-      createSessionKey: true,
-      sessionKeyBytes: options.randomBytes(32),
+      createSessionKey: !preserveSessionKey,
+      ...(preserveSessionKey ? {} : { sessionKeyBytes: options.randomBytes(32) }),
       workersDev: desc.custom_hostname === null,
       customDomain: desc.custom_hostname,
+      ...(customDomainZone
+        ? {
+            customDomainZoneId: customDomainZone.id,
+            customDomainZoneName: customDomainZone.name,
+          }
+        : {}),
     });
     workersDevUrl = result.workersDevUrl;
     desc = withStep(desc, 'worker');
@@ -552,11 +797,25 @@ async function reconcileInstance(
       origin = workersDevOrigin(names.worker_name, subdomain);
     }
     desc = { ...desc, canonical_origin: origin };
+    // Migrations may have written a temporary placeholder origin before the Worker
+    // URL was known — sync D1 so publish responses show the real site URL.
+    if (options.openD1) {
+      const db = await options.openD1(desc.database_id);
+      await updateInstanceCanonicalOrigin(db, origin);
+    } else {
+      await cf.d1Batch(desc.account_id, desc.database_id, [
+        {
+          sql: `UPDATE instance_metadata SET canonical_origin = ?`,
+          params: [origin],
+        },
+      ]);
+    }
     desc = withStep(desc, 'origin');
     await writeInstanceDescriptor(ctx.runtime, desc);
   }
 
-  // Smoke — workers.dev routing can lag 30–90s+ after subdomain enable.
+  // Smoke — workers.dev routing can lag 30–90s+ after subdomain enable;
+  // custom domains also need DNS + TLS activation.
   if (!done.has('smoke')) {
     const { version, root } = await waitForOriginSmoke(
       cf.smokeGet.bind(cf),
@@ -564,6 +823,7 @@ async function reconcileInstance(
       {
         attempts: 60,
         delayMs: 3000,
+        maxConsecutiveDnsMisses: desc.custom_hostname ? 20 : 8,
         onRetry: async (attempt) => {
           if (desc.custom_hostname !== null) return;
           if (attempt === 0 || attempt % 5 !== 0) return;
@@ -572,11 +832,22 @@ async function reconcileInstance(
       },
     );
     if (version.status !== 200 || root.status !== 200) {
-      throw new CloudflareApiError(
-        'api_error',
-        500,
-        `Smoke test failed against canonical origin (version=${version.status}, root=${root.status}).`,
-      );
+      const lines = [
+        `Smoke test failed against ${desc.canonical_origin}`,
+        `  /_nrdocs/api/version → HTTP ${version.status}`,
+        `  /                    → HTTP ${root.status}`,
+      ];
+      if (version.status === 0 || root.status === 0) {
+        lines.push(
+          '',
+          'HTTP 0 means the hostname did not resolve or TLS could not connect from this machine.',
+          'Public DNS may still be propagating. Check with:',
+          `  dig @1.1.1.1 ${desc.custom_hostname ?? new URL(desc.canonical_origin).hostname} A`,
+          'Then resume:',
+          `  nrdocs deploy --instance ${desc.instance_id}`,
+        );
+      }
+      throw new CloudflareApiError('api_error', 500, lines.join('\n'));
     }
     desc = withStep(desc, 'smoke');
     await writeInstanceDescriptor(ctx.runtime, desc);
@@ -590,12 +861,6 @@ async function reconcileInstance(
   };
   await writeInstanceDescriptor(ctx.runtime, desc);
   return desc;
-}
-
-function parentZone(hostname: string): string {
-  const parts = hostname.split('.');
-  if (parts.length <= 2) return hostname;
-  return parts.slice(-2).join('.');
 }
 
 async function snapshotDir(dir: string, ctx: CommandContext): Promise<string> {

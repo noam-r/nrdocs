@@ -1,27 +1,17 @@
 import { sha256Hex, formatSha256Digest } from '@nrdocs/contracts';
 
+/** Cloudflare Workers reject PBKDF2 iteration counts above 100,000. */
+export const READER_PASSWORD_PBKDF2_ITERATIONS = 100_000 as const;
+
 function bytesToBase64Url(bytes: Uint8Array): string {
   return Buffer.from(bytes).toString('base64url');
 }
 
-function isControl(cp: number): boolean {
-  return (cp >= 0x00 && cp <= 0x1f) || (cp >= 0x7f && cp <= 0x9f);
-}
-
 /** Validate reader password input rules (07-security). */
 export function assertReaderPassword(password: string): void {
-  const scalars = [...password];
-  if (scalars.length < 12 || scalars.length > 256) {
-    throw new Error('Reader password must contain 12 through 256 characters.');
-  }
-  const utf8 = new TextEncoder().encode(password);
-  if (utf8.byteLength > 1024) {
-    throw new Error('Reader password exceeds 1024 UTF-8 bytes.');
-  }
-  for (const ch of scalars) {
-    if (isControl(ch.codePointAt(0)!)) {
-      throw new Error('Reader password must not contain control characters.');
-    }
+  const length = [...password].length;
+  if (length < 1 || length > 256) {
+    throw new Error('Reader password must contain 1 through 256 characters.');
   }
 }
 
@@ -45,13 +35,13 @@ export async function derivePasswordVerifier(
       name: 'PBKDF2',
       hash: 'SHA-256',
       salt,
-      iterations: 600_000,
+      iterations: READER_PASSWORD_PBKDF2_ITERATIONS,
     },
     key,
     256,
   );
   const derived = new Uint8Array(bits);
-  return `pbkdf2-sha256$600000$${bytesToBase64Url(salt)}$${bytesToBase64Url(derived)}`;
+  return `pbkdf2-sha256$${READER_PASSWORD_PBKDF2_ITERATIONS}$${bytesToBase64Url(salt)}$${bytesToBase64Url(derived)}`;
 }
 
 export async function generatePublishingToken(

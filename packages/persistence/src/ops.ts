@@ -24,7 +24,14 @@ import {
   SCHEMA_VERSION,
   TOKEN_LAST_USED_MIN_INTERVAL_SECONDS,
 } from './constants.js';
-import { constraintFailure, descriptorMismatch, invariantFailure, notFound } from './errors.js';
+import {
+  PersistenceError,
+  constraintFailure,
+  conflict,
+  descriptorMismatch,
+  invariantFailure,
+  notFound,
+} from './errors.js';
 import {
   decodeInstanceMetadata,
   decodePublishingToken,
@@ -112,6 +119,16 @@ export async function getInstanceMetadata(db: SqlExecutor): Promise<InstanceMeta
   return decodeInstanceMetadata(row);
 }
 
+export async function updateInstanceCanonicalOrigin(
+  db: SqlExecutor,
+  canonical_origin: string,
+): Promise<InstanceMetadataRow> {
+  const origin = parseHttpsServerUrl(canonical_origin);
+  if (!origin) throw constraintFailure('invalid canonical_origin');
+  await db.run(`UPDATE instance_metadata SET canonical_origin = ?`, [origin]);
+  return getInstanceMetadata(db);
+}
+
 export async function assertDescriptorConsistency(
   db: SqlExecutor,
   descriptor: InstanceDescriptor,
@@ -166,6 +183,8 @@ export async function createSiteWithInitialToken(
 
   return db.transaction(async (tx) => {
     try {
+      const taken = await tx.one(`SELECT id FROM sites WHERE slug = ?`, [slug]);
+      if (taken) throw conflict('A site with this slug already exists.');
       await tx.run(
         `INSERT INTO sites (
           id, slug, enabled, access_mode, password_verifier, session_generation,
@@ -184,6 +203,7 @@ export async function createSiteWithInitialToken(
         [tokenId, id, tokenName, tokenVerifier, input.initialToken.expires_at ?? null, ts],
       );
     } catch (error) {
+      if (error instanceof PersistenceError) throw error;
       throw constraintFailure(error instanceof Error ? error.message : 'site create failed');
     }
     const site = decodeSite((await tx.one(`SELECT * FROM sites WHERE id = ?`, [id]))!);
@@ -219,6 +239,11 @@ export async function renameSite(
 ): Promise<SiteRow> {
   const slug = parseSlug(newSlug);
   if (!slug) throw constraintFailure('invalid or reserved slug');
+  const site = await getSiteById(db, siteId);
+  if (!site) throw notFound('site not found');
+  if (site.slug === slug) return site;
+  const taken = await getSiteBySlug(db, slug);
+  if (taken) throw conflict('A site with this slug already exists.');
   const ts = nowIso(now);
   const result = await db.run(`UPDATE sites SET slug = ?, updated_at = ? WHERE id = ?`, [
     slug,
@@ -334,6 +359,7 @@ export async function issueToken(
       [id, site_id, name, token_verifier, input.expires_at ?? null, ts],
     );
   } catch (error) {
+    if (error instanceof PersistenceError) throw error;
     throw constraintFailure(error instanceof Error ? error.message : 'token issue failed');
   }
   return decodePublishingToken(
@@ -454,8 +480,14 @@ export async function acquirePublishLock(
   const site = await getSiteById(db, siteId);
   if (!site) throw notFound('site not found');
 
-  if (result.changes === 1) {
-    return { ok: true, lockId, acquiredAt: ts, expiresAt: expires, site };
+  if (result.changes === 1 || site.publish_lock_id === lockId) {
+    return {
+      ok: true,
+      lockId,
+      acquiredAt: site.publish_lock_acquired_at ?? ts,
+      expiresAt: site.publish_lock_expires_at ?? expires,
+      site,
+    };
   }
 
   const remaining = site.publish_lock_expires_at
@@ -534,7 +566,9 @@ export async function releasePublishLock(
      WHERE id = ? AND publish_lock_id = ?`,
     [ts, input.siteId, input.lockId],
   );
-  return result.changes === 1;
+  if (result.changes === 1) return true;
+  const site = await getSiteById(db, input.siteId);
+  return site?.publish_lock_id === null;
 }
 
 // --- Promotion ---------------------------------------------------------------
@@ -637,6 +671,14 @@ export async function promoteArtifact(
     );
 
     if (result.changes !== 1) {
+      const refreshed = await getSiteById(tx, siteId);
+      if (
+        refreshed &&
+        refreshed.current_artifact_digest === digest &&
+        refreshed.publish_lock_id === null
+      ) {
+        return { result: 'published', site: refreshed } as const;
+      }
       return { result: 'rejected', reason: 'lock', site } as const;
     }
     return { result: 'published', site: (await getSiteById(tx, siteId))! } as const;
@@ -696,7 +738,7 @@ export async function finalizeSiteDeletion(
   now: Date = new Date(),
 ): Promise<boolean> {
   const ts = nowIso(now);
-  const result = await db.run(
+  await db.run(
     `DELETE FROM sites
      WHERE id = ?
        AND enabled = 0
@@ -708,9 +750,11 @@ export async function finalizeSiteDeletion(
        )
        AND (
          publish_lock_id IS NULL
+         OR publish_lock_expires_at IS NULL
          OR publish_lock_expires_at <= ?
        )`,
     [siteId, siteId, ts, ts],
   );
-  return result.changes === 1;
+  // D1 HTTP often reports meta.changes = 0 even when the DELETE succeeded.
+  return (await getSiteById(db, siteId)) === null;
 }

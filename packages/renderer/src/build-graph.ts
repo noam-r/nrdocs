@@ -22,12 +22,79 @@ import {
   RendererError,
   errorLoc,
   type NormalizedPublicationGraph,
+  type PublicationDiagnostic,
   type PublicationAsset,
   type PublicationAttachment,
   type PublicationNavNode,
   type PublicationRoot,
   type PublicationPage,
 } from './types.js';
+
+function posixDirname(file: string): string {
+  const i = file.lastIndexOf('/');
+  return i <= 0 ? '' : file.slice(0, i);
+}
+
+async function unlistedMarkdownMessage(input: {
+  href: string;
+  target: string;
+  sourceFile: string;
+  rootDir: string;
+  pageFiles: Set<string>;
+}): Promise<string> {
+  const exists = await isRealFile(path.join(input.rootDir, input.target));
+  const lines = [
+    'Link targets an unlisted Markdown page:',
+    `  ${input.href}`,
+    'resolved:',
+    `  ${input.target}`,
+    'from:',
+    `  ${input.sourceFile}`,
+    '',
+  ];
+  if (exists) {
+    lines.push(
+      'That file exists but is not listed in nrdocs.yml navigation.',
+      '',
+      'Add it to navigation, or run:',
+      '  nrdocs generate nav --force',
+    );
+    return lines.join('\n');
+  }
+
+  lines.push('That file does not exist on disk.');
+  const dir = posixDirname(input.target);
+  const listed = [...input.pageFiles].filter((file) => posixDirname(file) === dir).sort();
+  if (listed.length > 0) {
+    lines.push('', 'Pages listed in that directory:');
+    for (const file of listed.slice(0, 12)) {
+      lines.push(`  ${file}`);
+    }
+  }
+  const prefix = numberedStemPrefix(input.target);
+  const samePrefix =
+    prefix === null ? [] : listed.filter((file) => numberedStemPrefix(file) === prefix);
+  if (samePrefix.length > 0) {
+    lines.push('', 'A listed page in that directory uses the same NN- prefix:');
+    for (const file of samePrefix) {
+      lines.push(`  ${file}`);
+    }
+    lines.push('', 'Rename that file, or change the link, so the names match.');
+  } else {
+    lines.push('', 'Add or rename the Markdown file so that path exists.');
+  }
+  lines.push(
+    '',
+    '`nrdocs generate nav --force` only refreshes navigation from files that already exist.',
+  );
+  return lines.join('\n');
+}
+
+function numberedStemPrefix(file: string): string | null {
+  const base = file.slice(file.lastIndexOf('/') + 1);
+  const match = /^(\d{2})-/.exec(base);
+  return match ? match[1]! : null;
+}
 
 function firstNavigableRoute(nodes: PublicationNavNode[]): string | null {
   for (const n of nodes) {
@@ -110,9 +177,14 @@ async function collectReferences(
   rootDir: string,
   pages: PublicationPage[],
   pageFiles: Set<string>,
-): Promise<{ assets: PublicationAsset[]; attachments: PublicationAttachment[] }> {
+): Promise<{
+  assets: PublicationAsset[];
+  attachments: PublicationAttachment[];
+  diagnostics: PublicationDiagnostic[];
+}> {
   const assets = new Map<string, PublicationAsset>();
   const attachments = new Map<string, PublicationAttachment>();
+  const diagnostics: PublicationDiagnostic[] = [];
 
   for (const page of pages) {
     const bytes = new TextEncoder().encode(page.markdownText);
@@ -153,11 +225,19 @@ async function collectReferences(
 
       if (link.kind === 'page') {
         if (!pageFiles.has(target)) {
-          throw new RendererError(
-            'unlisted_markdown',
-            `Link targets an unlisted Markdown page:\n  ${link.href}\nfrom:\n  ${page.sourceFile}`,
-            errorLoc(page.sourceFile, link.line, link.column),
-          );
+          diagnostics.push({
+            code: 'unlisted_markdown',
+            message: await unlistedMarkdownMessage({
+              href: link.href,
+              target,
+              sourceFile: page.sourceFile,
+              rootDir,
+              pageFiles,
+            }),
+            sourceFile: page.sourceFile,
+            ...(link.line !== undefined ? { line: link.line } : {}),
+            ...(link.column !== undefined ? { column: link.column } : {}),
+          });
         }
         continue;
       }
@@ -233,6 +313,7 @@ async function collectReferences(
   return {
     assets: [...assets.values()],
     attachments: [...attachments.values()],
+    diagnostics,
   };
 }
 
@@ -285,7 +366,7 @@ export async function buildPublicationGraph(
   assertUniqueRoutes(pages.map((p) => ({ route: p.route, sourceFile: p.sourceFile })));
 
   const pageFiles = new Set(pages.map((p) => p.sourceFile));
-  const { assets, attachments } = await collectReferences(rootDir, pages, pageFiles);
+  const { assets, attachments, diagnostics } = await collectReferences(rootDir, pages, pageFiles);
   const root = selectRoot(pages, navTree);
 
   const graph: NormalizedPublicationGraph = {
@@ -302,6 +383,7 @@ export async function buildPublicationGraph(
     root,
     assets,
     attachments,
+    diagnostics,
   };
   assertPublicationCollisions(graph);
   return graph;

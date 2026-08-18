@@ -133,6 +133,20 @@ export async function removePublisherCredential(
   return { site_id: siteId, removed };
 }
 
+export async function tryReadPublisherCredential(
+  runtime: Runtime,
+  siteId: SiteId,
+): Promise<{ credential: PublisherCredentialFile; path: string } | null> {
+  try {
+    return await readPublisherCredential(runtime, siteId);
+  } catch (error) {
+    if (error instanceof Error && /No local credential exists/.test(error.message)) {
+      return null;
+    }
+    throw error;
+  }
+}
+
 /**
  * Resolve publisher credentials for a known expected site ID.
  * Does not contact the server (Phase 2).

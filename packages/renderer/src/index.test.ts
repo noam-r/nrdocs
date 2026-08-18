@@ -157,7 +157,7 @@ describe('auto discovery and graph', () => {
     );
   });
 
-  it('rejects unlisted markdown links under explicit navigation', async () => {
+  it('records unlisted markdown links under explicit navigation', async () => {
     await withFixture(
       {
         'index.md': '# Home\n\n[secret](secret.md)\n',
@@ -168,7 +168,36 @@ describe('auto discovery and graph', () => {
           title: 'Site',
           navigation: [{ title: 'Home', file: 'index.md' }],
         });
-        await expect(buildPublicationGraph(root, config)).rejects.toThrow(/unlisted/);
+        const graph = await buildPublicationGraph(root, config);
+        expect(graph.diagnostics).toHaveLength(1);
+        expect(graph.diagnostics[0]?.message).toMatch(
+          /unlisted Markdown page[\s\S]*resolved:\n {2}secret\.md[\s\S]*exists but is not listed/,
+        );
+      },
+    );
+  });
+
+  it('names a missing renamed markdown target and lists siblings in navigation', async () => {
+    await withFixture(
+      {
+        'index.md': '# Home\n\n[POC](07-slice/02-poc-migration.md)\n',
+        '07-slice/02-legacy-application-transition.md': '# Legacy\n',
+      },
+      async (root) => {
+        const config = parseNrdocsConfig({
+          title: 'Site',
+          navigation: [
+            { title: 'Home', file: 'index.md' },
+            {
+              title: 'Legacy',
+              file: '07-slice/02-legacy-application-transition.md',
+            },
+          ],
+        });
+        const graph = await buildPublicationGraph(root, config);
+        expect(graph.diagnostics[0]?.message).toMatch(
+          /does not exist on disk[\s\S]*07-slice\/02-legacy-application-transition\.md[\s\S]*same NN- prefix[\s\S]*generate nav --force` only refreshes/,
+        );
       },
     );
   });

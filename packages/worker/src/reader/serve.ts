@@ -6,7 +6,7 @@ import {
   type SiteRow,
   type SqlExecutor,
 } from '@nrdocs/persistence';
-import { parseManifestV1, parseSlug, type ManifestV1, type RequestId } from '@nrdocs/contracts';
+import { foldSlugInput, parseManifestV1, parseSlug, type ManifestV1, type RequestId } from '@nrdocs/contracts';
 import { ApiError } from '../http.js';
 import { RATE_LIMITS } from '../limits.js';
 import { enforceRateLimit, type RateLimiter } from '../rate-limit.js';
@@ -14,6 +14,7 @@ import {
   attachmentContentDisposition,
   ATTACHMENT_CSP,
   baseSecurityHeaders,
+  formSecurityHeaders,
   htmlSecurityHeaders,
   NO_STORE,
 } from './headers.js';
@@ -87,11 +88,15 @@ function normalizeSitePath(pathname: string, slug: string): string | null {
     return null;
   }
   if (rest.includes('\0') || rest.includes('\\') || rest.includes('//')) return null;
-  if (rest === '/') return '/';
   if (!rest.startsWith('/')) return null;
-  const segs = rest.slice(1).split('/');
-  if (segs.some((p) => p === '.' || p === '..' || p === '')) return null;
-  return rest;
+  if (rest === '/') return '/';
+
+  const hadTrailingSlash = rest.length > 1 && rest.endsWith('/');
+  const segs = rest.split('/').filter((p) => p.length > 0);
+  if (segs.some((p) => p === '.' || p === '..')) return null;
+  if (segs.length === 0) return '/';
+  const joined = `/${segs.join('/')}`;
+  return hadTrailingSlash ? `${joined}/` : joined;
 }
 
 async function authorizedForPasswordSite(
@@ -286,9 +291,32 @@ function parseForm(body: string): Map<string, string> {
 
 function originMatches(request: Request, canonicalOrigin: string): boolean {
   const origin = request.headers.get('origin');
-  if (!origin) return false;
+  const requestOrigin = new URL(request.url).origin;
+  let canonical: string;
   try {
-    return new URL(origin).origin === new URL(canonicalOrigin).origin;
+    canonical = new URL(canonicalOrigin).origin;
+  } catch {
+    canonical = requestOrigin;
+  }
+  if (!origin) {
+    const referer = request.headers.get('referer');
+    if (!referer) {
+      // Classic HTML form POST often omits Origin; Referer may be suppressed by
+      // Referrer-Policy. Modern browsers still send Sec-Fetch-Site.
+      const secFetchSite = request.headers.get('sec-fetch-site');
+      return secFetchSite === 'same-origin';
+    }
+    try {
+      const refererOrigin = new URL(referer).origin;
+      return refererOrigin === requestOrigin || refererOrigin === canonical;
+    } catch {
+      return false;
+    }
+  }
+  try {
+    const postedOrigin = new URL(origin).origin;
+    if (postedOrigin === requestOrigin) return true;
+    return postedOrigin === canonical;
   } catch {
     return false;
   }
@@ -306,7 +334,7 @@ function forbidden(ctx: ReaderContext): Response {
 
 export async function handleAccessGet(request: Request, ctx: ReaderContext): Promise<Response> {
   const url = new URL(request.url);
-  const slug = parseSlug(url.searchParams.get('site') ?? '');
+  const slug = parseSlug(foldSlugInput(url.searchParams.get('site') ?? ''));
   if (!slug) return htmlResponse(notFoundPage(), 404, { hsts: ctx.hsts });
   const site = await getSiteBySlug(ctx.db, slug);
   if (!siteIsReadable(site) || site.access_mode !== 'password') {
@@ -321,6 +349,7 @@ export async function handleAccessGet(request: Request, ctx: ReaderContext): Pro
   });
   return htmlResponse(passwordFormPage({ lang: siteLang(site), slug, returnPath, csrf }), 200, {
     hsts: ctx.hsts,
+    headers: formSecurityHeaders({ hsts: ctx.hsts }),
   });
 }
 
@@ -341,7 +370,7 @@ export async function handleAccessPost(request: Request, ctx: ReaderContext): Pr
     if (!form.has(req)) return forbidden(ctx);
   }
 
-  const slug = parseSlug(form.get('site')!);
+  const slug = parseSlug(foldSlugInput(form.get('site')!));
   if (!slug) return htmlResponse(notFoundPage(), 404, { hsts: ctx.hsts });
   const site = await getSiteBySlug(ctx.db, slug);
   if (!siteIsReadable(site) || site.access_mode !== 'password' || !site.password_verifier) {
@@ -398,7 +427,7 @@ export async function handleAccessPost(request: Request, ctx: ReaderContext): Pr
     return htmlResponse(
       passwordFormPage({ lang: siteLang(site), slug, returnPath, csrf, wrong: true }),
       200,
-      { hsts: ctx.hsts },
+      { hsts: ctx.hsts, headers: formSecurityHeaders({ hsts: ctx.hsts }) },
     );
   }
 
@@ -419,7 +448,7 @@ export async function handleAccessPost(request: Request, ctx: ReaderContext): Pr
 
 export async function handleLogoutGet(request: Request, ctx: ReaderContext): Promise<Response> {
   const url = new URL(request.url);
-  const slug = parseSlug(url.searchParams.get('site') ?? '');
+  const slug = parseSlug(foldSlugInput(url.searchParams.get('site') ?? ''));
   if (!slug) return htmlResponse(notFoundPage(), 404, { hsts: ctx.hsts });
   const site = await getSiteBySlug(ctx.db, slug);
   if (!site) return htmlResponse(notFoundPage(), 404, { hsts: ctx.hsts });
@@ -432,6 +461,7 @@ export async function handleLogoutGet(request: Request, ctx: ReaderContext): Pro
   });
   return htmlResponse(logoutFormPage({ lang: siteLang(site), slug, csrf }), 200, {
     hsts: ctx.hsts,
+    headers: formSecurityHeaders({ hsts: ctx.hsts }),
   });
 }
 
@@ -452,7 +482,7 @@ export async function handleLogoutPost(request: Request, ctx: ReaderContext): Pr
     if (!form.has(req)) return forbidden(ctx);
   }
 
-  const slug = parseSlug(form.get('site')!);
+  const slug = parseSlug(foldSlugInput(form.get('site')!));
   if (!slug) return htmlResponse(notFoundPage(), 404, { hsts: ctx.hsts });
   const site = await getSiteBySlug(ctx.db, slug);
   const returnPath = `/${slug}/`;

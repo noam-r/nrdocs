@@ -61,7 +61,12 @@ export type NormalizedPublicationGraph = {
   root: PublicationRoot;
   assets: PublicationAsset[];
   attachments: PublicationAttachment[];
+  diagnostics: PublicationDiagnostic[];
 };
+
+export function formatPublicationDiagnostics(diagnostics: PublicationDiagnostic[]): string {
+  return diagnostics.map((d) => d.message).join('\n\n');
+}
 
 export class RendererError extends Error {
   readonly code: string;

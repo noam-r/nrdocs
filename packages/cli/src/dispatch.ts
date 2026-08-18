@@ -14,8 +14,10 @@ import {
 } from './instance-store.js';
 import { parseInstanceId } from '@nrdocs/contracts';
 import { ROOT_HELP } from './help.js';
+import { runInstanceDeleteCommand, type InstanceDeleteOptions } from './admin/instance-delete.js';
 
 export type { CommandContext } from './command-context.js';
+export type { InstanceDeleteOptions };
 
 export async function runCredentialsCommand(
   ctx: CommandContext,
@@ -82,12 +84,18 @@ export async function runCredentialsCommand(
 export async function runInstanceCommand(
   ctx: CommandContext,
   args: readonly string[],
+  options: InstanceDeleteOptions = {},
 ): Promise<void> {
   const sub = args[0];
   if (ctx.help || sub === undefined || sub === 'help') {
     presentHumanSuccess(
       ctx.runtime,
-      'nrdocs instance list\nnrdocs instance show [instance-id]\nnrdocs instance use <instance-id>\n',
+      [
+        'nrdocs instance list',
+        'nrdocs instance show [instance-id]',
+        'nrdocs instance use <instance-id>',
+        'nrdocs instance delete <instance-id>',
+      ].join('\n') + '\n',
     );
     return;
   }
@@ -170,6 +178,10 @@ export async function runInstanceCommand(
     );
     return;
   }
+  if (sub === 'delete') {
+    await runInstanceDeleteCommand(ctx, args.slice(1), options);
+    return;
+  }
   throw usageError(`Unknown instance command: ${sub}`, 'Run: nrdocs instance --help');
 }
 
@@ -187,6 +199,7 @@ export async function runStubCommand(commandPath: string, ctx: CommandContext): 
     'site disable',
     'site rename',
     'site delete',
+    'instance delete',
     'token issue',
     'token revoke',
   ]);

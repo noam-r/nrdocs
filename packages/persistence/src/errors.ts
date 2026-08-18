@@ -42,3 +42,21 @@ export function constraintFailure(message: string): PersistenceError {
 export function descriptorMismatch(message: string): PersistenceError {
   return new PersistenceError('descriptor_mismatch', message, ExitCode.CredentialOrAuthority);
 }
+
+/** Map sqlite/D1 engine errors to PersistenceError without leaking SQL dialects. */
+export function mapSqlEngineError(error: unknown): never {
+  const message = error instanceof Error ? error.message : 'sql error';
+  if (/UNIQUE/i.test(message)) {
+    if (/sites\.slug/i.test(message)) {
+      throw conflict('A site with this slug already exists.');
+    }
+    if (/publishing_tokens/i.test(message)) {
+      throw conflict('A publishing token with this name already exists on the site.');
+    }
+    throw conflict('A unique constraint was violated.');
+  }
+  if (/CHECK|FOREIGN KEY|constraint|ABORT/i.test(message)) {
+    throw constraintFailure(message);
+  }
+  throw new PersistenceError('io', message);
+}

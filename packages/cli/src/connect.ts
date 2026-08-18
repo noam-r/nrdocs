@@ -1,76 +1,137 @@
 import path from 'node:path';
-import { parse as parseYaml } from 'yaml';
-import {
-  normalizeTitle,
-  parseHttpsServerUrl,
-  parseNrdocsConfig,
-  type NrdocsConfig,
-  type SiteId,
-} from '@nrdocs/contracts';
-import { serializeNrdocsYaml } from '@nrdocs/renderer';
+import { parseHttpsServerUrl, type SiteId } from '@nrdocs/contracts';
 import type { CommandContext } from './command-context.js';
 import { parseFlags } from './argv.js';
-import { configPathFor, loadNrdocsConfig, resolvePublicationDirectory } from './config.js';
+import { resolvePublicationDirectory } from './config.js';
 import { readEnvCredentialPair, writePublisherCredential } from './credentials-store.js';
-import { credentialError, ioError, localValidationError, usageError } from './errors.js';
+import { credentialError, localValidationError, usageError } from './errors.js';
 import { presentHumanSuccess } from './present.js';
 import {
   fetchProtocolVersion,
   fetchPublishTarget,
   type PublisherClientOptions,
 } from './publisher-client.js';
-import { atomicWriteProjectFile } from './fs-safe.js';
 import { confirmOrDecline, requireInteractiveTerminal } from './terminal.js';
 import { credentialPath } from './runtime.js';
 import { CliError } from './errors.js';
 import { ExitCode } from '@nrdocs/contracts';
+import {
+  resolvePublicationTitle,
+  tryLoadPublicationConfig,
+  writeConnectedNrdocsYml,
+} from './publication-config.js';
+import { tryResolveSelectedInstance } from './instance-store.js';
+import { tryBeginAdminSession, type AdminOptions, type AdminSession } from './admin/context.js';
+import { bindDirectoryOnAdminInstance } from './admin/publish-bind.js';
+import { getSiteById } from '@nrdocs/persistence';
+import { siteUrl } from './admin/site.js';
+import type { SiteRow } from '@nrdocs/persistence';
 
-export type ConnectOptions = PublisherClientOptions;
+export type ConnectOptions = PublisherClientOptions & AdminOptions;
 
-async function tryLoadConfig(
+function presentAdminConnectSuccess(
   ctx: CommandContext,
-  root: string,
-): Promise<{ path: string; config: NrdocsConfig } | null> {
-  try {
-    const loaded = await loadNrdocsConfig(ctx.runtime, root);
-    return { path: loaded.path, config: loaded.config };
-  } catch (error) {
-    if (error instanceof Error && /nrdocs\.yml was not found/.test(error.message)) {
-      return null;
-    }
-    throw error;
-  }
+  input: {
+    root: string;
+    session: AdminSession;
+    site: SiteRow;
+    siteId: SiteId;
+    title: string;
+  },
+): void {
+  const relDir = path.relative(ctx.runtime.cwd, input.root) || '.';
+  const origin = input.session.descriptor.canonical_origin;
+  presentHumanSuccess(
+    ctx.runtime,
+    [
+      'Connected directory.',
+      '',
+      `Directory:  ${input.root}`,
+      `Site:       ${input.title}`,
+      `Site ID:    ${input.siteId}`,
+      `Instance:   ${origin}`,
+      `URL:        ${siteUrl(origin, input.site.slug)}`,
+      '',
+      'No publishing token is required on this machine.',
+      '',
+      'Next:',
+      `  nrdocs preview ${relDir}`,
+      `  nrdocs publish ${relDir}`,
+    ].join('\n'),
+  );
 }
 
-function resolveTitle(input: {
-  existing: NrdocsConfig | null;
-  titleFlag: string | undefined;
-  interactive: boolean;
-  prompt: () => Promise<string>;
-}): Promise<string> {
-  return (async () => {
-    const existingTitle = input.existing?.title;
-    if (typeof input.titleFlag === 'string') {
-      const normalized = normalizeTitle(input.titleFlag);
-      if (!normalized) throw localValidationError('Invalid --title value.');
-      if (existingTitle && existingTitle !== normalized) {
-        throw localValidationError(
-          `Site title already set to:\n  ${existingTitle}\n\nEdit nrdocs.yml directly to change it. connect does not update the site title.`,
-        );
-      }
-      return existingTitle ?? normalized;
-    }
-    if (existingTitle) return existingTitle;
-    if (!input.interactive) {
-      throw usageError(
-        'A title is required when creating or completing nrdocs.yml.\nPass --title <title>.',
+async function tryConnectViaAdminInstance(
+  ctx: CommandContext,
+  input: {
+    root: string;
+    existing: Awaited<ReturnType<typeof tryLoadPublicationConfig>>;
+    titleFlag: string | undefined;
+    options: AdminOptions;
+  },
+): Promise<boolean> {
+  const session = await tryBeginAdminSession(ctx, 'nrdocs connect', input.options);
+  if (!session) return false;
+
+  requireInteractiveTerminal(ctx.runtime, 'connect');
+  const boundSiteId = input.existing?.config.publish?.credential ?? null;
+
+  if (boundSiteId) {
+    const site = await getSiteById(session.db, boundSiteId);
+    if (!site) {
+      throw credentialError(
+        [
+          'This site is not on the selected administrative instance.',
+          '',
+          `Site ID:  ${boundSiteId}`,
+          `Instance: ${session.descriptor.canonical_origin}`,
+          '',
+          'Run:',
+          '  nrdocs instance use <instance-id>',
+          `  nrdocs connect ${input.root}`,
+        ].join('\n'),
       );
     }
-    const entered = (await input.prompt()).trim();
-    const normalized = normalizeTitle(entered);
-    if (!normalized) throw localValidationError('Invalid title.');
-    return normalized;
-  })();
+    const title = await resolvePublicationTitle({
+      existing: input.existing?.config ?? null,
+      titleFlag: input.titleFlag,
+      interactive: true,
+      prompt: async () => ctx.terminal.promptLine('Site title:'),
+    });
+    await writeConnectedNrdocsYml(ctx, input.root, {
+      existing: input.existing?.config ?? null,
+      siteId: boundSiteId,
+      title,
+    });
+    presentAdminConnectSuccess(ctx, {
+      root: input.root,
+      session,
+      site,
+      siteId: boundSiteId,
+      title,
+    });
+    return true;
+  }
+
+  const bound = await bindDirectoryOnAdminInstance(ctx, {
+    session,
+    root: input.root,
+    existing: input.existing?.config ?? null,
+    titleFlag: input.titleFlag,
+    mode: 'connect',
+  });
+  const site = await getSiteById(session.db, bound.siteId);
+  if (!site) {
+    throw localValidationError('Site disappeared after connect bind.');
+  }
+  presentAdminConnectSuccess(ctx, {
+    root: input.root,
+    session,
+    site,
+    siteId: bound.siteId,
+    title: bound.config.title ?? bound.siteId,
+  });
+  return true;
 }
 
 export async function runConnectCommand(
@@ -79,7 +140,19 @@ export async function runConnectCommand(
   options: ConnectOptions = {},
 ): Promise<void> {
   if (ctx.help) {
-    presentHumanSuccess(ctx.runtime, 'nrdocs connect [directory] [--title <title>]\n');
+    presentHumanSuccess(
+      ctx.runtime,
+      [
+        'nrdocs connect [directory] [--title <title>]',
+        '',
+        'On a remote machine, connect a docs directory with a publishing token.',
+        'On an administrator machine with a local instance, prefer:',
+        '',
+        '  nrdocs publish [directory]',
+        '',
+        'which binds and publishes without a token.',
+      ].join('\n'),
+    );
     return;
   }
   if (ctx.json) throw usageError('connect does not support --json.');
@@ -91,11 +164,14 @@ export async function runConnectCommand(
   const titleFlag = typeof flags['--title'] === 'string' ? flags['--title'] : undefined;
 
   const root = await resolvePublicationDirectory(ctx.runtime, positionals[0]);
-  const configPath = configPathFor(root);
-  const existing = await tryLoadConfig(ctx, root);
+  const existing = await tryLoadPublicationConfig(ctx, root);
 
   const envPair = readEnvCredentialPair(ctx.runtime);
   const envMode = envPair !== null;
+
+  if (!envMode && (await tryConnectViaAdminInstance(ctx, { root, existing, titleFlag, options }))) {
+    return;
+  }
 
   let server: string;
   let token: string;
@@ -104,21 +180,30 @@ export async function runConnectCommand(
     token = envPair!.token;
   } else {
     requireInteractiveTerminal(ctx.runtime, 'connect');
-    const serverRaw = (await ctx.terminal.promptLine('Server:')).trim();
-    const parsed = parseHttpsServerUrl(serverRaw, true);
-    if (!parsed) {
-      throw localValidationError(
-        'Server must be an https origin (http://127.0.0.1 is allowed locally).',
-      );
+    const localInstance = await tryResolveSelectedInstance(ctx.runtime, ctx.instance);
+    const origin = localInstance?.canonical_origin
+      ? parseHttpsServerUrl(localInstance.canonical_origin, true)
+      : null;
+    if (origin) {
+      server = origin;
+      presentHumanSuccess(ctx.runtime, `Server:     ${server}`);
+    } else {
+      const serverRaw = (await ctx.terminal.promptLine('Server:')).trim();
+      const parsed = parseHttpsServerUrl(serverRaw, true);
+      if (!parsed) {
+        throw localValidationError(
+          'Server must be an https origin (http://127.0.0.1 is allowed locally).',
+        );
+      }
+      server = parsed;
     }
-    server = parsed;
     token = await ctx.terminal.promptMasked('Publishing token:');
     if (!/^nrd_pub_[A-Za-z0-9_-]{43}$/.test(token)) {
       throw credentialError('Publishing token is malformed.');
     }
   }
 
-  const title = await resolveTitle({
+  const title = await resolvePublicationTitle({
     existing: existing?.config ?? null,
     titleFlag,
     interactive: !envMode,
@@ -141,8 +226,6 @@ export async function runConnectCommand(
       expectedExisting &&
       !envMode
     ) {
-      // First discovery without expected header shouldn't hit this; with expected it can.
-      // Re-fetch without expected to learn token site for rebind confirmation.
       const discovered = await fetchPublishTarget(server, token, options);
       presentHumanSuccess(
         ctx.runtime,
@@ -176,14 +259,7 @@ export async function runConnectCommand(
     }
   }
 
-  // Interactive rebind when pointer differs but server accepted expected header...
-  // Actually if expected was sent and matched, sites are equal. If no expected, we discovered.
-  // If expected was sent and mismatch, we handled above via site_mismatch.
-  // Additional case: expected exists, we omitted header on purpose? We always send expected when present.
-  // For interactive rebind after mismatch we already confirmed.
-
   if (expectedExisting && expectedExisting !== target.site.id && !envMode) {
-    // Safety: if somehow we got a different site without going through confirm
     presentHumanSuccess(
       ctx.runtime,
       [
@@ -213,37 +289,11 @@ export async function runConnectCommand(
   }
 
   const siteId = target.site.id as SiteId;
-  const language = existing?.config.language ?? 'und';
-  const direction = existing?.config.direction ?? 'auto';
-  const navigation =
-    existing?.config.navigation === undefined ? 'auto' : existing.config.navigation;
-
-  const nextConfig: NrdocsConfig = {
-    publish: { credential: siteId },
+  await writeConnectedNrdocsYml(ctx, root, {
+    existing: existing?.config ?? null,
+    siteId,
     title,
-    language,
-    direction,
-    navigation: navigation === undefined ? 'auto' : navigation,
-  };
-
-  const yamlText = Array.isArray(nextConfig.navigation)
-    ? serializeNrdocsYaml(nextConfig, nextConfig.navigation)
-    : serializeNrdocsYaml({ ...nextConfig, navigation: 'auto' });
-
-  try {
-    parseNrdocsConfig(parseYaml(yamlText), { requireCredential: true });
-  } catch (error) {
-    const msg = error instanceof Error ? error.message : 'invalid config';
-    throw localValidationError(`Proposed nrdocs.yml failed validation (${msg}).`);
-  }
-
-  // Writes only after full validation.
-  try {
-    await atomicWriteProjectFile(ctx.runtime, configPath, yamlText, 0o644);
-  } catch (error) {
-    if (error instanceof Error && /symbolic-link|Failed to write/.test(error.message)) throw error;
-    throw ioError(`Unable to write:\n  ${configPath}`);
-  }
+  });
 
   if (!envMode) {
     await writePublisherCredential(ctx.runtime, siteId, { server, token });

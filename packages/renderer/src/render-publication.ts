@@ -24,9 +24,16 @@ export type InMemoryArtifact = {
   files: RenderedFile[];
 };
 
+export type RenderProgress = {
+  phase: 'page';
+  current: number;
+  total: number;
+};
+
 export type RenderOptions = {
   siteId: SiteId;
   generatorVersion: string;
+  onProgress?: (progress: RenderProgress) => void;
 };
 
 async function fileSha256(bytes: Uint8Array): Promise<string> {
@@ -50,6 +57,7 @@ export async function renderPublication(
   }> = [];
 
   for (let i = 0; i < ordered.length; i++) {
+    options.onProgress?.({ phase: 'page', current: i + 1, total: ordered.length });
     const meta = ordered[i]!;
     const page = pageBySource.get(meta.sourceFile);
     if (!page) {

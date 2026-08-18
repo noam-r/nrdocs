@@ -1,7 +1,6 @@
 import {
   findTokenByNameOrId,
   getAuthoritativeUtcNow,
-  getSiteBySlug,
   isTokenUsable,
   issueToken,
   listTokensForSite,
@@ -15,6 +14,8 @@ import { presentHumanSuccess, presentJsonSuccess } from '../present.js';
 import { confirmOrDecline } from '../terminal.js';
 import { beginAdminSession, type AdminOptions } from './context.js';
 import { generatePublishingToken } from './crypto.js';
+import { loadSiteBySlugArg } from './site.js';
+import { SITE_SLUG_RULES } from './slug.js';
 import { addSecondsToRfc3339, parseTtlDuration } from './ttl.js';
 
 export async function runTokenCommand(
@@ -30,6 +31,8 @@ export async function runTokenCommand(
         'nrdocs token issue <slug> --name <name> [--ttl <duration>]',
         'nrdocs token list <slug>',
         'nrdocs token revoke <slug> <name-or-token-id>',
+        '',
+        SITE_SLUG_RULES,
       ].join('\n') + '\n',
     );
     return;
@@ -83,8 +86,7 @@ async function tokenIssue(
   }
 
   const session = await beginAdminSession(ctx, 'token issue', options, { mutating: true });
-  const site = await getSiteBySlug(session.db, positionals[0]!);
-  if (!site) throw localValidationError(`No site with slug:\n  ${positionals[0]}`);
+  const site = await loadSiteBySlugArg(session.db, positionals[0]!);
 
   const nowIso = await getAuthoritativeUtcNow(session.db);
   const expires_at = ttlSeconds === null ? null : addSecondsToRfc3339(nowIso, ttlSeconds);
@@ -133,8 +135,7 @@ async function tokenList(
   const { positionals } = parseFlags(args);
   if (positionals.length !== 1) throw usageError('token list requires exactly one slug.');
   const session = await beginAdminSession(ctx, 'token list', options, { mutating: false });
-  const site = await getSiteBySlug(session.db, positionals[0]!);
-  if (!site) throw localValidationError(`No site with slug:\n  ${positionals[0]}`);
+  const site = await loadSiteBySlugArg(session.db, positionals[0]!);
   const nowIso = await getAuthoritativeUtcNow(session.db);
   const tokens = await listTokensForSite(session.db, site.id);
   const rows = tokens.map((t) => ({
@@ -174,14 +175,13 @@ async function tokenRevoke(
   if (positionals.length !== 2) {
     throw usageError('token revoke requires <slug> <name-or-token-id>.');
   }
-  const [slug, nameOrId] = positionals;
+  const [slugArg, nameOrId] = positionals;
   const session = await beginAdminSession(ctx, 'token revoke', options, { mutating: true });
-  const site = await getSiteBySlug(session.db, slug!);
-  if (!site) throw localValidationError(`No site with slug:\n  ${slug}`);
+  const site = await loadSiteBySlugArg(session.db, slugArg!);
   const token = await findTokenByNameOrId(session.db, site.id, nameOrId!);
   if (!token) {
     throw localValidationError(
-      `No publishing token matching:\n  ${nameOrId}\nfor site:\n  ${slug}`,
+      `No publishing token matching:\n  ${nameOrId}\nfor site:\n  ${site.slug}`,
     );
   }
 

@@ -95,4 +95,25 @@ describe('validateStoredPage', () => {
       }),
     ).toThrow(/lang/);
   });
+
+  it('accepts struck-through broken page links', () => {
+    const html = assemblePageDocument({
+      language: 'en',
+      direction: 'ltr',
+      siteTitle: 'Handbook',
+      pageTitle: 'Home',
+      pageRoute: '/',
+      articleHtml:
+        '<h1 id="nr-h-0123456789abcdef">Home</h1>\n<p><span class="nr-broken-link" title="Broken link: secret.md">Secret</span></p>\n',
+      navTree: [{ kind: 'page', title: 'Home', route: '/', depth: 0, children: [] }],
+      prev: null,
+      next: null,
+    });
+    expect(() =>
+      validateStoredPage(new TextEncoder().encode(html), {
+        pageRoute: '/',
+        manifest: minimalManifest(),
+      }),
+    ).not.toThrow();
+  });
 });

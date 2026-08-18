@@ -10,7 +10,20 @@ It is authoritative for user-visible command names and local filesystem behavior
 
 ### 1. One Publisher Path
 
-The complete local publisher path is:
+On a machine with a local administrative instance, the complete path is:
+
+```bash
+nrdocs deploy
+nrdocs publish ./docs
+```
+
+The first `publish` interactively picks or creates a site on the active instance and writes `nrdocs.yml`. Later runs are:
+
+```bash
+nrdocs publish ./docs
+```
+
+On a machine without administrative instance state, the publisher path is:
 
 ```bash
 nrdocs connect ./docs
@@ -18,13 +31,7 @@ nrdocs preview ./docs
 nrdocs publish ./docs
 ```
 
-The repeat path is:
-
-```bash
-nrdocs publish ./docs
-```
-
-There is no `init` command.
+The repeat path is still `nrdocs publish ./docs`. There is no `init` command.
 
 ### 2. One Directory Is One Publication Unit
 
@@ -42,13 +49,15 @@ The supplied directory is the publication root.
 
 `nrdocs.yml` identifies the intended destination through an opaque immutable site ID.
 
-The secret token and server URL remain outside the publication directory. Unless a complete environment credential pair is supplied for the invocation, the CLI opens the exact local credential file named by the pointer. Environment credentials must resolve to that same expected site ID. The CLI never selects a credential heuristically.
+The secret token and server URL remain outside the publication directory. Unless a complete environment credential pair is supplied for the invocation, the CLI opens the exact local credential file named by the pointer when that file exists. Environment credentials must resolve to that same expected site ID. The CLI never selects a stored publisher credential heuristically.
+
+On a machine with a resolvable administrative instance and no publisher token for the pointer, `publish` uses that instance's control plane instead of a publisher token. It still does not guess a site from the directory name.
 
 ### 4. Commands Have Narrow Responsibilities
 
-- `connect` validates and stores publishing authority and creates or updates configuration.
+- `connect` validates a publishing token and creates or updates configuration for remote publishers.
 - `preview` validates and renders locally.
-- `publish` validates, renders, uploads, and promotes content.
+- `publish` validates, renders, uploads, and promotes content. On an administrator machine, first-time `publish` may also bind the directory to a site (and create that site when the instance has none).
 - `generate nav` materializes editable navigation.
 - `credentials` manages publisher-side local token storage.
 - `site` manages serving destinations and reader access.
@@ -58,7 +67,9 @@ The secret token and server URL remain outside the publication directory. Unless
 
 ### 5. No Hidden Mutations
 
-`publish` does not create configuration, connect a site, write credentials, alter reader access, or change site lifecycle.
+`publish` does not write publisher credential files, alter reader access on an existing site, or change site lifecycle.
+
+On an administrator machine, an unbound first `publish` may write `nrdocs.yml` and may create a new site (including its initial access mode) after interactive prompts. Repeat `publish` of an already-bound directory does not mutate configuration.
 
 `preview` does not write configuration or persistent output.
 
@@ -77,11 +88,12 @@ Ambiguous or incomplete state is an error with a concrete remediation command.
 The CLI must not guess based on:
 
 - the only stored site credential;
-- the active administrative instance;
 - a directory or repository name;
 - a Git remote;
 - the most recently used site; or
 - a token belonging to a different site.
+
+Admin-local `publish` may use the active administrative instance as the destination host. When that instance has more than one site, the operator must pick a site by number. When it has exactly one site, `publish` uses that site and prints the slug and origin. It must not infer a site from the directory name.
 
 ### 8. Supported Operating Systems
 
@@ -137,11 +149,13 @@ Read-oriented and status commands support:
 --json
 ```
 
-Administrative commands support a one-command instance override:
+Administrative commands, `nrdocs connect`, and `nrdocs publish` support a one-command instance override:
 
 ```text
 --instance <instance-id>
 ```
+
+`--instance` on `publish` applies only to the admin-local control-plane path. It does not select a remote publisher credential.
 
 No global `--token`, `--profile`, or `--api-url` option exists.
 
@@ -151,7 +165,7 @@ No global `--token`, `--profile`, or `--api-url` option exists.
 
 ```text
 nrdocs connect [directory]
-nrdocs publish [directory]
+nrdocs publish [directory] [--title <title>] [--force]
 nrdocs preview [directory]
 nrdocs generate nav [directory]
 nrdocs credentials list
@@ -166,6 +180,7 @@ nrdocs deploy [--domain <hostname>] [--instance <instance-id>]
 nrdocs instance list
 nrdocs instance show [instance-id]
 nrdocs instance use <instance-id>
+nrdocs instance delete <instance-id>
 
 nrdocs site create <slug>
 nrdocs site list
@@ -434,7 +449,7 @@ Root entries have depth 1. Each `children` edge increases depth by one, and dept
 - A file may appear only once.
 - Generated routes must be unique.
 - An explicit list defines the complete published page allowlist.
-- A link to an unlisted Markdown file is a validation error.
+- A link to an unlisted or missing Markdown file is a broken-link diagnostic, not a renderer failure. Preview still serves the site. `publish` prints the diagnostics and refuses unless `--force` is supplied. Forced publications render those links as struck-through broken links in the reader.
 
 ## Automatic Navigation
 
@@ -767,21 +782,26 @@ The exact resolution algorithm is:
 
 ```text
 1. Resolve the publication directory.
-2. Load <directory>/nrdocs.yml.
-3. Validate required title and navigation.
-4. Read publish.credential as expected_site_id.
-5. If NRDOCS_URL or NRDOCS_TOKEN is present:
+2. Load <directory>/nrdocs.yml when it exists (missing file is allowed only for admin-local first bind).
+3. If NRDOCS_URL or NRDOCS_TOKEN is present:
      a. Require both.
-     b. Use them for this invocation.
-   Otherwise:
-     a. Open ~/.nrdocs/sites/<expected_site_id>.json.
+     b. Require publish.credential in nrdocs.yml.
+     c. Use the environment pair for the publisher HTTP API.
+4. Else if publish.credential is set and ~/.nrdocs/sites/<site-id>.json exists:
+     a. Open that file.
      b. Read server and token.
-6. Validate the token with the server.
-7. Require token_site_id == expected_site_id.
-8. Continue validation, rendering, and upload.
+     c. Use the publisher HTTP API.
+5. Else if a local administrative instance is selected (--instance or active-instance)
+   and Cloudflare control-plane credentials resolve:
+     a. If publish.credential is set, require that site on this instance and publish via D1/R2.
+     b. If unbound, interactively pick or create a site, write nrdocs.yml, then publish via D1/R2.
+     c. Do not write a publisher credential file.
+6. Else fail and instruct the operator to run nrdocs connect.
+7. For the HTTP path: validate the token with the server and require token_site_id == expected_site_id.
+8. Continue validation, rendering, and promotion.
 ```
 
-There is no fallback after a missing file, incomplete environment pair, invalid token, or site mismatch.
+A complete environment pair always wins over an admin session and over a local credential file. There is no fallback after an incomplete environment pair, invalid token, or site mismatch on the HTTP path.
 
 ## `nrdocs connect`
 
@@ -802,7 +822,7 @@ An incomplete environment pair is a validation failure and never falls back to p
 
 ### Interactive inputs
 
-- Server URL through an interactive prompt.
+- Server URL through an interactive prompt, unless a local administrative instance is selected (`--instance` or `active-instance`) and its `canonical_origin` is known. In that case `connect` uses that origin and does not prompt for Server.
 - Publishing token through a masked interactive prompt.
 - Site title through `--title` or, when the configuration lacks one and the option is absent, an interactive prompt.
 
@@ -883,8 +903,24 @@ nrdocs preview [directory]
 ### Usage
 
 ```bash
-nrdocs publish [directory]
+nrdocs publish [directory] [--title <title>] [--force]
 ```
+
+`--title` is used only when admin-local `publish` creates or completes `nrdocs.yml`. It does not change an existing title.
+
+`--force` publishes even when the site has broken page links. Those links are shown struck through in the reader. Without `--force`, `publish` prints the diagnostics and leaves the live site unchanged.
+
+### Admin-local bind
+
+When step 5 of credential resolution applies and the directory is unbound, `publish` requires an interactive terminal and:
+
+- **0 sites:** prompts for slug, title if missing, and reader access (as `site create`); creates the site; does not print a publishing token.
+- **1 site:** uses that site and prints its slug and origin.
+- **N sites:** numbered picker (slug and URL). Does not infer a site from the directory name.
+
+It then writes `<directory>/nrdocs.yml` with `publish.credential` and default `navigation: auto` when navigation is absent. It does not store a publisher token.
+
+Repeat publish of a bound directory on the admin machine is non-interactive (Cloudflare credentials still resolve from `cloudflare.env` or the process environment).
 
 ### Behavior
 
@@ -959,7 +995,7 @@ creation, resume, ownership-marker checks, and upgrade behavior are defined by
 
 Instance filenames are opaque IDs. Hostnames and human-readable instance names do not appear in filenames.
 
-`display_name` is required, persisted in both the local descriptor and D1 instance metadata, and used only for human-readable output. It is normalized to Unicode NFC, trimmed, 1–80 Unicode scalar values long, and contains no control characters. It need not be unique. It never selects an instance, grants authority, determines a hostname, or serves as a Cloudflare resource identifier; `instance use`, `instance show <instance-id>`, and `--instance` accept only the opaque instance ID.
+`display_name` is required, persisted in both the local descriptor and D1 instance metadata, and used only for human-readable output. It is normalized to Unicode NFC, trimmed, 1–80 Unicode scalar values long, and contains no control characters. It need not be unique. It never selects an instance, grants authority, determines a hostname, or serves as a Cloudflare resource identifier; `instance use`, `instance show <instance-id>`, `instance delete <instance-id>`, and `--instance` accept only the opaque instance ID.
 
 ## Administrative Authentication Resolution
 
@@ -979,13 +1015,17 @@ but never creates or updates it during deploy.
 If authentication is unavailable, the CLI directs the user to create
 `~/.nrdocs/cloudflare.env`, set `CLOUDFLARE_API_TOKEN`, or run `wrangler login`.
 
-Publisher credentials never authorize administrative commands, and the active administrative instance never selects a publisher destination.
+Publisher credentials never authorize administrative commands. The active administrative instance does not select a remote publisher credential file. Admin-local `publish` may use that instance as the destination host as specified in Credential Resolution for `publish`.
 
 ## Site Command Semantics
 
 ### `site create`
 
 Creates an enabled empty site, requires an access choice, prompts for a reader password when needed, and issues one initial named publishing token.
+
+ASCII letters in the slug argument are stored lowercase. `nrdocs site --help` states the slug grammar (letters, digits, hyphens; not `_nrdocs`). Other invalid input is rejected before access prompts.
+
+If the slug is already taken, the command fails immediately after resolving the instance. It does not prompt for access, password, or token name. The error names the existing site URL and site ID and tells the operator to publish or inspect rather than create again. It never reports a SQL unique-constraint string.
 
 ### `site list`
 
@@ -1020,6 +1060,14 @@ Changes the public slug while preserving immutable identity and all other state.
 ### `site delete`
 
 Permanently deletes site state and the current artifact after exact-slug confirmation. It creates no soft-delete or recovery state.
+
+### `instance delete`
+
+Permanently deletes the Cloudflare Worker, private R2 bucket, and D1 database
+owned by one local instance descriptor after exact opaque instance-ID
+confirmation, then removes the local descriptor. Ownership markers are verified
+before any mutation. Missing resources from an interrupted deploy are skipped.
+See `08-cloudflare-deployment-and-operations.md`.
 
 ## Token Command Semantics
 

@@ -3,11 +3,18 @@ import type { AddressInfo } from 'node:net';
 import type { ManifestV1 } from '@nrdocs/contracts';
 import type { InMemoryArtifact } from '@nrdocs/renderer';
 import { ioError } from './errors.js';
+import { PLATFORM_LOGO_SVG } from './platform-logo.js';
 
 export const PREVIEW_PORT_START = 4173;
 export const PREVIEW_PORT_END = 4273;
 
-const PLATFORM_CSS = `/* nrdocs preview stub reader.css */\nbody{font-family:system-ui,sans-serif;margin:0}\n`;
+const PLATFORM_CSS = `/* nrdocs preview stub reader.css */
+body{font-family:system-ui,sans-serif;margin:0}
+.nr-site-title{display:flex;align-items:center;gap:.55rem;color:inherit;text-decoration:none;font-weight:650}
+.nr-site-title::before{content:"";flex:0 0 auto;width:3.02rem;height:1.65rem;background-color:currentColor;-webkit-mask:url("/_nrdocs/v1/logo.svg") center / contain no-repeat;mask:url("/_nrdocs/v1/logo.svg") center / contain no-repeat;mask-mode:alpha}
+.nr-broken-link{color:#b3261e;text-decoration:line-through;cursor:help}
+.nr-broken-link::after{content:" \\26D4";text-decoration:none}
+`;
 const PLATFORM_JS = `/* nrdocs preview stub reader.js */\n`;
 const PLATFORM_MERMAID = `/* nrdocs preview stub mermaid.js */\nexport default {};\n`;
 
@@ -127,6 +134,16 @@ function buildRouteTable(artifact: InMemoryArtifact): {
     kind: 'platform',
     bytes: enc.encode(PLATFORM_MERMAID),
     mediaType: 'text/javascript; charset=utf-8',
+  });
+  routes.set('/_nrdocs/v1/logo.svg', {
+    kind: 'platform',
+    bytes: enc.encode(PLATFORM_LOGO_SVG),
+    mediaType: 'image/svg+xml; charset=utf-8',
+  });
+  routes.set('/favicon.ico', {
+    kind: 'platform',
+    bytes: enc.encode(PLATFORM_LOGO_SVG),
+    mediaType: 'image/svg+xml; charset=utf-8',
   });
 
   const redirectTo =
