@@ -76,6 +76,7 @@ export function assemblePageDocument(input: ShellInput): string {
     '  <meta charset="utf-8">',
     '  <meta name="viewport" content="width=device-width,initial-scale=1">',
     `  <title>${escapeHtml(title)}</title>`,
+    '  <link rel="icon" href="/_nrdocs/v1/logo.svg" type="image/svg+xml">',
     '  <link rel="stylesheet" href="/_nrdocs/v1/reader.css">',
     '  <script type="module" src="/_nrdocs/v1/reader.js"></script>',
     '</head>',

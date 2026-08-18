@@ -30,6 +30,14 @@ export function htmlSecurityHeaders(opts?: { hsts?: boolean }): Record<string, s
   };
 }
 
+/** Platform forms POST back to this origin; allow Referer on same-origin submit. */
+export function formSecurityHeaders(opts?: { hsts?: boolean }): Record<string, string> {
+  return {
+    ...htmlSecurityHeaders(opts),
+    'referrer-policy': 'same-origin',
+  };
+}
+
 export function sanitizeAttachmentBasename(filename: string): string {
   let out = '';
   for (const ch of filename) {

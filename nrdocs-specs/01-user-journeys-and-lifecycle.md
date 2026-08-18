@@ -262,11 +262,15 @@ nrdocs connect ./docs --title "Product Handbook"
 
 ### Interactive mode
 
+When no local administrative instance is selected:
+
 ```text
 Server:           https://docs.example.com
 Publishing token: ********
 Site title:       Product Handbook
 ```
+
+When `--instance` or `active-instance` points at a local instance with a known origin, `connect` uses that origin and does not prompt for Server. It still prompts for the publishing token (unless `NRDOCS_URL` and `NRDOCS_TOKEN` are both set).
 
 The title prompt is shown only when `nrdocs.yml` does not already contain a title and `--title` was not supplied.
 
@@ -360,7 +364,7 @@ navigation:
     file: 01-introduction.md
 ```
 
-The directory may be previewed, but it cannot be published through stored credentials until `connect` adds `publish.credential`.
+The directory may be previewed. A remote publisher cannot publish through stored credentials until `connect` adds `publish.credential`. An administrator on a machine with a local instance may bind and publish with `nrdocs publish` instead.
 
 If `navigation` is already an explicit list, the command refuses to overwrite it unless `--force` is supplied.
 
@@ -380,7 +384,7 @@ nrdocs preview ./docs
 
 - `nrdocs.yml` exists.
 - `title` exists.
-- Navigation and content validate.
+- Navigation and content are loadable. Broken page links are warnings shown in the reader; they do not block preview.
 
 A publishing credential is not required.
 
@@ -426,7 +430,17 @@ Publish validated content to an enabled empty site.
 nrdocs publish ./docs
 ```
 
-### Required behavior
+### Administrator machine
+
+After `nrdocs deploy` (and `nrdocs instance use` when more than one instance exists), the operator can publish without `connect`, a server URL, or a publishing token:
+
+```bash
+nrdocs publish ./docs
+```
+
+If the directory is unbound, the command interactively picks or creates a site on the active instance, writes `nrdocs.yml`, and promotes the artifact through the instance control plane.
+
+### Remote publisher
 
 The CLI:
 
@@ -440,7 +454,9 @@ The CLI:
 8. Uploads the artifact.
 9. Causes the server to promote it atomically.
 
-The site becomes live immediately under the access mode selected during site creation. No administrator approval or enablement action follows publication.
+### Required behavior
+
+The site becomes live immediately under the access mode selected during site creation or admin-local first bind. No administrator approval or enablement action follows publication.
 
 ### Success output
 

@@ -784,7 +784,7 @@ The artifact contains only:
 - assets referenced by those pages; and
 - allowed attachments referenced by those pages.
 
-An unlisted Markdown link under explicit navigation is a local error. Unreferenced files are ignored. Prohibited HTML, JavaScript, CSS, WebAssembly, raw HTML, MDX, plugins, components, and unsupported file types fail locally and remain independently rejectable by the Worker.
+An unlisted or missing Markdown page link is a local diagnostic. Preview still serves the publication and shows the link struck through. `publish` prints the diagnostic and refuses unless `--force` is supplied. Forced publications include the same broken-link rendering. Unreferenced files are ignored. Prohibited HTML, JavaScript, CSS, WebAssembly, raw HTML, MDX, plugins, components, and unsupported file types fail locally and remain independently rejectable by the Worker.
 
 `preview` stops before packaging and upload. It uses the same discovery, validation, renderer, routes, and fixed interface, but needs no credential and creates no durable server state.
 

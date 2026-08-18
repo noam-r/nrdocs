@@ -20,19 +20,40 @@ import {
 import { openMemorySqlite } from '@nrdocs/persistence/sqlite';
 import { handleRequest, type WorkerEnv } from '@nrdocs/worker';
 import { ExitCode, createProcessRuntime, main, type Runtime } from './index.js';
+import { derivePasswordVerifier as deriveCliPasswordVerifier } from './admin/crypto.js';
 import { createRejectingTerminal, type Terminal } from './terminal.js';
 import { loadNrdocsConfig } from './config.js';
 import { listPublisherCredentials, readPublisherCredential } from './credentials-store.js';
+import { writeActiveInstanceId, writeInstanceDescriptor } from './instance-store.js';
+import type { InstanceDescriptor } from '@nrdocs/contracts';
 
 const INST = formatId('inst', new Uint8Array(16).fill(1)) as InstanceId;
 const SITE = formatId('site', new Uint8Array(16).fill(2)) as SiteId;
 const TOK = formatId('tok', new Uint8Array(16).fill(3)) as TokenRecordId;
 const TOKEN_SECRET = new Uint8Array(32).fill(9);
+const PASSWORD = 'correct-horse-battery-staple';
+const SESSION_KEY = new Uint8Array(32).fill(7);
 
 async function mintToken(secret = TOKEN_SECRET): Promise<{ plaintext: string; verifier: string }> {
   const plaintext = `nrd_pub_${Buffer.from(secret).toString('base64url')}`;
   const verifier = formatSha256Digest(await sha256Hex(new TextEncoder().encode(plaintext)));
   return { plaintext, verifier };
+}
+
+async function derivePasswordVerifier(password: string): Promise<string> {
+  return deriveCliPasswordVerifier(password, new Uint8Array(16).fill(3));
+}
+
+function extractCsrf(html: string): string {
+  const m = html.match(/name="csrf" value="([^"]+)"/);
+  if (!m) throw new Error('csrf missing');
+  return m[1]!;
+}
+
+function extractReturnPath(html: string): string {
+  const m = html.match(/name="return" value="([^"]+)"/);
+  if (!m) throw new Error('return missing');
+  return m[1]!;
 }
 
 function captureIo() {
@@ -96,7 +117,14 @@ async function withPublisherWorld(
     docs: string;
     token: string;
     publisher: { fetch: typeof fetch };
+    executor: ReturnType<typeof openMemorySqlite>['executor'];
+    store: MemoryArtifactStore;
   }) => Promise<void>,
+  opts: {
+    access?: 'public' | 'password';
+    canonicalOrigin?: string;
+    requestOrigin?: string;
+  } = {},
 ) {
   const home = await fs.mkdtemp(path.join(os.tmpdir(), 'nrdocs-p10-home-'));
   const cwd = await fs.mkdtemp(path.join(os.tmpdir(), 'nrdocs-p10-cwd-'));
@@ -107,18 +135,22 @@ async function withPublisherWorld(
   const { plaintext, verifier } = await mintToken();
   const { executor } = openMemorySqlite();
   await applyMigrations(executor);
+  const canonicalOrigin = opts.canonicalOrigin ?? 'https://docs.example.com';
+  const requestOrigin = opts.requestOrigin ?? 'https://docs.example.com';
   await insertInstanceMetadata(executor, {
     id: INST,
     display_name: 'docs',
     account_id: 'acct',
     resource_suffix: '3f6m8p0q2r4s6t8v0w2x',
-    canonical_origin: 'https://docs.example.com',
+    canonical_origin: canonicalOrigin,
     deployed_version: '2.0.0',
   });
+  const access = opts.access ?? 'public';
   await createSiteWithInitialToken(executor, {
     id: SITE,
     slug: 'handbook',
-    access_mode: 'public',
+    access_mode: access,
+    ...(access === 'password' ? { password_verifier: await derivePasswordVerifier(PASSWORD) } : {}),
     initialToken: { id: TOK, name: 'initial', token_verifier: verifier },
   });
 
@@ -130,13 +162,14 @@ async function withPublisherWorld(
     NRDOCS_PACKAGE_VERSION: '2.0.0',
     __artifactStore: store,
     __clientIp: '203.0.113.10',
+    __sessionKey: SESSION_KEY,
   };
 
   const publisherFetch: typeof fetch = async (input, init) => {
     const url = typeof input === 'string' || input instanceof URL ? String(input) : input.url;
     const parsed = new URL(url);
     const pathAndQuery = `${parsed.pathname}${parsed.search}`;
-    return handleRequest(new Request(`https://docs.example.com${pathAndQuery}`, init), env);
+    return handleRequest(new Request(`${requestOrigin}${pathAndQuery}`, init), env);
   };
 
   const cap = captureIo();
@@ -162,6 +195,8 @@ async function withPublisherWorld(
       docs,
       token: plaintext,
       publisher: { fetch: publisherFetch },
+      executor,
+      store,
     });
   } finally {
     await fs.rm(home, { recursive: true, force: true });
@@ -197,9 +232,78 @@ describe('nrdocs connect and publish', () => {
       cap.reset();
       const published = await main(['publish', 'docs'], { runtime, publisher });
       expect(published).toBe(ExitCode.Success);
+      expect(cap.stderr).toContain('Checking destination');
+      expect(cap.stderr).toContain('Building publication');
+      expect(cap.stderr).toContain('Uploading');
       expect(cap.stdout).toContain('Published successfully.');
       expect(cap.stdout).toContain('https://docs.example.com/handbook/');
       expect(cap.stdout + cap.stderr).not.toContain(token);
+    });
+  });
+
+  it('refuses broken page links unless --force is supplied', async () => {
+    await withPublisherWorld(async ({ runtime, cap, docs, token, publisher }) => {
+      const connected = await main(['connect', 'docs', '--title', 'Handbook'], {
+        runtime,
+        terminal: scriptedTerminal({
+          lines: ['https://docs.example.com'],
+          masked: [token],
+        }),
+        publisher,
+      });
+      expect(connected).toBe(ExitCode.Success);
+
+      await fs.appendFile(path.join(docs, 'index.md'), '\n[gone](gone.md)\n');
+      cap.reset();
+      const blocked = await main(['publish', 'docs'], { runtime, publisher });
+      expect(blocked).toBe(ExitCode.LocalValidation);
+      expect(cap.stderr).toMatch(/broken page link/);
+      expect(cap.stderr).toMatch(/--force/);
+      expect(cap.stderr).toMatch(/was not changed/);
+
+      cap.reset();
+      const forced = await main(['publish', 'docs', '--force'], { runtime, publisher });
+      expect(forced).toBe(ExitCode.Success);
+      expect(cap.stderr).toMatch(/Publishing with broken page link/);
+      expect(cap.stdout).toContain('Published successfully.');
+    });
+  });
+
+  it('binds via the local instance without Server or publishing token prompts', async () => {
+    await withPublisherWorld(async ({ runtime, cap, docs, publisher, executor, store }) => {
+      await writeInstanceDescriptor(runtime, {
+        instance_id: INST,
+        display_name: 'docs',
+        canonical_origin: 'https://docs.example.com',
+        custom_hostname: null,
+        account_id: 'acct',
+        resource_suffix: '3f6m8p0q2r4s6t8v0w2x',
+        database_id: 'db',
+        bucket_name: 'bucket',
+        worker_name: 'worker',
+        status: 'active',
+        deployed_version: '2.0.0',
+        reconciliation: null,
+      } satisfies InstanceDescriptor);
+      await writeActiveInstanceId(runtime, INST);
+
+      const code = await main(['connect', 'docs', '--title', 'Handbook'], {
+        runtime,
+        terminal: createRejectingTerminal(),
+        publisher,
+        admin: { openDb: async () => executor, artifactStore: store },
+      });
+      expect(code).toBe(ExitCode.Success);
+      expect(cap.stdout).toContain('Connected directory.');
+      expect(cap.stdout).toContain('No publishing token is required on this machine.');
+      expect(cap.stdout).toContain('https://docs.example.com/handbook/');
+      expect(cap.stdout).not.toContain('Publishing token:');
+      expect(cap.stdout).not.toContain('Credential stored:');
+      expect(await listPublisherCredentials(runtime)).toEqual([]);
+
+      const { config } = await loadNrdocsConfig(runtime, docs);
+      expect(config.publish?.credential).toBe(SITE);
+      expect(config.title).toBe('Handbook');
     });
   });
 
@@ -239,6 +343,59 @@ describe('nrdocs connect and publish', () => {
       expect(cap.stdout).toMatch(/Published successfully|Publication unchanged/);
       expect(await listPublisherCredentials(envRuntime)).toEqual([]);
     });
+  });
+
+  it('token publish works with password reader login on alternate canonical host', async () => {
+    await withPublisherWorld(
+      async ({ runtime, cap, token, publisher }) => {
+        const code = await main(['connect', 'docs', '--title', 'Handbook'], {
+          runtime,
+          terminal: scriptedTerminal({
+            lines: ['https://docs.example.com'],
+            masked: [token],
+          }),
+          publisher,
+        });
+        expect(code).toBe(ExitCode.Success);
+
+        cap.reset();
+        expect(await main(['publish', 'docs'], { runtime, publisher })).toBe(ExitCode.Success);
+        expect(cap.stdout).toMatch(/Published successfully|Publication unchanged/);
+
+        const gated = await publisher.fetch('https://docs.example.com/handbook/');
+        expect(gated.status).toBe(302);
+        const loc = gated.headers.get('location')!;
+        const formRes = await publisher.fetch(`https://docs.example.com${loc}`);
+        expect(formRes.status).toBe(200);
+        const formHtml = await formRes.text();
+        const csrf = extractCsrf(formHtml);
+        const returnPath = extractReturnPath(formHtml);
+        const login = await publisher.fetch('https://docs.example.com/_nrdocs/access', {
+          method: 'POST',
+          headers: {
+            origin: 'https://docs.example.com',
+            'content-type': 'application/x-www-form-urlencoded',
+          },
+          body: `site=handbook&return=${encodeURIComponent(returnPath)}&csrf=${encodeURIComponent(
+            csrf,
+          )}&password=${encodeURIComponent(PASSWORD)}`,
+        });
+        expect(login.status).toBe(303);
+        const cookie = login.headers.get('set-cookie');
+        expect(cookie).toBeTruthy();
+
+        const authed = await publisher.fetch('https://docs.example.com/handbook/', {
+          headers: { cookie: cookie!.split(';')[0]! },
+        });
+        expect(authed.status).toBe(200);
+        expect(await authed.text()).toContain('Hello from Phase 10.');
+      },
+      {
+        access: 'password',
+        canonicalOrigin: 'https://canonical.example.com',
+        requestOrigin: 'https://docs.example.com',
+      },
+    );
   });
 
   it('rejects incomplete env pair and missing non-interactive title without writing', async () => {

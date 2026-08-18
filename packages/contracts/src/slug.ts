@@ -1,6 +1,11 @@
-/** Site slug validation — never silently rewritten. */
+/** Site slug validation — never silently rewritten. Callers may ASCII-case-fold first. */
 
 const SLUG_RE = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/;
+
+/** Trim and ASCII-lowercase. Does not insert hyphens, drop characters, or otherwise rewrite. */
+export function foldSlugInput(value: string): string {
+  return value.trim().toLowerCase();
+}
 
 export const RESERVED_ROOT_SEGMENTS = Object.freeze(['_nrdocs'] as const);
 

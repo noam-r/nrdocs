@@ -1,7 +1,7 @@
 /** Verifier shape validation for durable rows (cryptography lives elsewhere). */
 
 const TOKEN_VERIFIER_RE = /^sha256:[0-9a-f]{64}$/;
-const PASSWORD_VERIFIER_RE = /^pbkdf2-sha256\$600000\$[A-Za-z0-9_-]{22}\$[A-Za-z0-9_-]{43}$/;
+const PASSWORD_VERIFIER_RE = /^pbkdf2-sha256\$[0-9]{1,7}\$[A-Za-z0-9_-]{22}\$[A-Za-z0-9_-]{43}$/;
 
 export function parseTokenVerifier(value: unknown): string | null {
   if (typeof value !== 'string') return null;

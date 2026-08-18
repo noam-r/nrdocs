@@ -202,9 +202,9 @@ This permits deterministic tests without implementing a general framework or ser
 
 - Commands receiving `[directory]` resolve exactly that directory or the current directory.
 - No ancestor search is permitted.
-- Publisher destination comes only from `publish.credential` plus its exact credential source.
+- Publisher destination comes from `publish.credential` plus its exact credential source, or from an explicit admin-local bind on `publish`.
 - Administrative destination comes only from `--instance` or `active-instance`.
-- Publisher state never selects an administrative instance, and administrative state never selects a publisher site.
+- Publisher state never selects an administrative instance. Admin-local `publish` may use the active instance as the destination host; it still must not infer a site from the directory name.
 
 ### Secret handling
 
@@ -618,7 +618,7 @@ Implement in `packages/renderer`:
 - referenced image and attachment collection;
 - root-containment checks for every resolved path;
 - rejection of selected or referenced entries with a symbolic-link entry or directory component;
-- broken, escaping, unsupported, and unlisted-Markdown reference errors; and
+- broken, escaping, unsupported, and unlisted-Markdown reference diagnostics; and
 - source-location-aware diagnostics where the parser provides locations.
 
 Implement `nrdocs generate nav [directory]`, including:
@@ -641,7 +641,7 @@ Create fixture directories for:
 - route collisions;
 - empty, control-containing, 160-scalar, 161-scalar, normalized, and duplicate-title cases;
 - exact, NFC, and locale-independent Unicode case collisions across selected source paths, public paths, and artifact paths;
-- unlisted Markdown links;
+- unlisted Markdown links, including `publish --force` broken-link rendering;
 - symlinked navigation candidates, selected pages, referenced files, ancestor directories, and escaping relative paths;
 - valid UTF-8 with and without one leading BOM, invalid UTF-8, misplaced or repeated BOMs, and LF/CRLF/CR-equivalent sources;
 - broken references;
@@ -1033,15 +1033,18 @@ Implement `nrdocs connect [directory]`:
 - minimally invasive `nrdocs.yml` create/update; and
 - clear next steps.
 
-Implement `nrdocs publish [directory]`:
+Implement `nrdocs publish [directory] [--force]`:
 
-- exact configuration and credential resolution order;
-- complete environment-pair override without persistence;
-- publish-target preflight before rendering;
-- token/site equality check;
+- exact configuration and credential resolution order (environment pair, local token file, then admin-local D1/R2);
+- complete environment-pair override without persistence and without falling through to admin bind;
+- admin-local first bind (0/1/N sites) that writes `nrdocs.yml` and does not store a publisher token;
+- `--instance` allowed on `publish` for the admin path only;
+- publish-target preflight before rendering on the HTTP path;
+- token/site equality check on the HTTP path;
 - reuse of the Phase 3 and 4 pipeline;
+- `--force` to publish with broken page links rendered as struck-through reader markup;
 - pre-upload counts;
-- artifact upload with required headers;
+- artifact upload with required headers, or admin-local staging/promotion;
 - `published` and `unchanged` results;
 - disabled-site success explanation; and
 - stage-specific failure output stating that live content was unchanged.
@@ -1056,6 +1059,10 @@ Implement `nrdocs publish [directory]`:
 - Different-site interactive reconnect requires explicit confirmation; environment-backed reconnect fails without writing.
 - Partial write failure does not leave inconsistent local state.
 - Local and environment credential resolution follow the exact algorithm.
+- Admin-local unbound publish with 0, 1, or N sites binds without a Server or token prompt and does not write a credential file.
+- Bound `nrdocs.yml` with an admin session and no credential file publishes without `connect`.
+- Bound `nrdocs.yml` with no admin session and no credential file instructs the operator to run `connect`.
+- A complete `NRDOCS_URL`/`NRDOCS_TOKEN` pair wins over an admin session.
 - CI mode makes no filesystem credential write and uses no Git metadata.
 - Site mismatch aborts before rendering or upload.
 - Local validation failure makes no publish request.
@@ -1065,10 +1072,11 @@ Implement `nrdocs publish [directory]`:
 
 ### Exit gate
 
-- The documented `connect → preview → publish` happy path works from a plain directory with no Git.
+- The documented admin `deploy → publish` happy path works from a plain directory with no Git.
+- The documented remote `connect → preview → publish` happy path works from a plain directory with no Git.
 - Subsequent publication needs only `nrdocs publish`.
 - Generic CI needs only `NRDOCS_URL`, `NRDOCS_TOKEN`, the directory, and `nrdocs.yml`.
-- No destination is guessed.
+- No destination is guessed from a directory name.
 
 ## Phase 11: Reader Serving and Password Access
 

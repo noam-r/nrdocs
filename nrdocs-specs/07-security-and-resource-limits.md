@@ -69,10 +69,9 @@ best-effort and never changes the authentication result.
 
 ### Input rules
 
-A reader password contains 12 through 256 Unicode scalar values and at most
-1,024 UTF-8 bytes. It is used exactly as entered: no trimming, case conversion,
-or Unicode normalization occurs. NUL and Unicode control characters in category
-`Cc` are rejected. No composition rules are imposed.
+A reader password contains 1 through 256 Unicode scalar values. It is used
+exactly as entered: no trimming, case conversion, or Unicode normalization
+occurs. No composition rules are imposed.
 
 The CLI reads passwords from a hidden interactive prompt, confirms new
 passwords, and never accepts them as command-line arguments or prints them.
@@ -81,20 +80,24 @@ passwords, and never accepts them as command-line arguments or prints them.
 
 The CLI derives the verifier with PBKDF2-HMAC-SHA-256 using:
 
-- 600,000 iterations;
+- 100,000 iterations (Cloudflare Workers reject PBKDF2 counts above 100,000);
 - a fresh 16-byte cryptographically random salt; and
 - a 32-byte derived key.
 
 The stored form is:
 
 ```text
-pbkdf2-sha256$600000$<unpadded-base64url-salt>$<unpadded-base64url-key>
+pbkdf2-sha256$100000$<unpadded-base64url-salt>$<unpadded-base64url-key>
 ```
 
-The Worker rejects every other algorithm, parameter count, encoding, salt
-length, or key length. It compares derived keys in constant time. There is no
-pepper: password verification occurs in the Worker while password setup occurs
-in the administrator CLI, and sharing a pepper would enlarge the secret
+The Worker verifies using the iteration count written in the string. It accepts
+only `100000` and the legacy label `600000`. A `600000` label is tried at
+600,000 iterations when the runtime allows it, and at 100,000 otherwise, so
+verifiers minted while the CLI hashed at 100,000 but labeled 600,000 still
+match. The Worker rejects every other algorithm, parameter count, encoding,
+salt length, or key length. It compares derived keys in constant time. There is
+no pepper: password verification occurs in the Worker while password setup
+occurs in the administrator CLI, and sharing a pepper would enlarge the secret
 boundary.
 
 ## Reader Sessions

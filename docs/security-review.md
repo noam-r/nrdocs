@@ -9,7 +9,7 @@
 | Asset            | Threat                             | Control                                                                |
 | ---------------- | ---------------------------------- | ---------------------------------------------------------------------- |
 | Publishing token | Theft / reuse                      | Bearer only; SHA-256 verifier at rest; revoke/expire                   |
-| Reader password  | Offline crack / online brute force | PBKDF2-SHA256 600k; dual rate limits before derive                     |
+| Reader password  | Offline crack / online brute force | PBKDF2-SHA256 100k (Workers cap); dual rate limits before derive       |
 | Reader session   | Cross-site reuse / CSRF            | Site-scoped `__Host-` cookie; generation counter; Origin+CSRF on POSTs |
 | Artifacts        | Stale / orphan serve               | D1 current pointer only; 503 on inconsistency                          |
 | Admin plane      | Unattended mutation                | Interactive TTY required; no Worker admin HTTP                         |

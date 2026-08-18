@@ -3,7 +3,7 @@
  * Structural types only — no workers-types or network client dependency.
  */
 
-import { PersistenceError, constraintFailure } from './errors.js';
+import { mapSqlEngineError } from './errors.js';
 import type { SqlExecutor, SqlRow, SqlRunResult, SqlValue } from './sql.js';
 
 export type D1PreparedStatementLike = {
@@ -18,21 +18,18 @@ export type D1DatabaseLike = {
 };
 
 function mapD1Error(error: unknown): never {
-  const message = error instanceof Error ? error.message : 'd1 error';
-  if (/UNIQUE|CHECK|FOREIGN KEY|constraint|ABORT/i.test(message)) {
-    throw constraintFailure(message);
-  }
-  throw new PersistenceError('io', message);
+  mapSqlEngineError(error);
 }
 
 function changesFrom(result: {
-  meta?: { changes?: number; rows_written?: number };
+  meta?: { changes?: number; rows_written?: number; changed_db?: boolean };
   changes?: number;
 }): number {
-  if (typeof result.changes === 'number') return result.changes;
-  if (typeof result.meta?.changes === 'number') return result.meta.changes;
-  if (typeof result.meta?.rows_written === 'number') return result.meta.rows_written;
-  return 0;
+  const top = typeof result.changes === 'number' ? result.changes : 0;
+  const metaChanges = typeof result.meta?.changes === 'number' ? result.meta.changes : 0;
+  const rowsWritten = typeof result.meta?.rows_written === 'number' ? result.meta.rows_written : 0;
+  const changedDb = result.meta?.changed_db === true ? 1 : 0;
+  return Math.max(top, metaChanges, rowsWritten, changedDb);
 }
 
 /** Worker `env.DB` adapter — same SqlExecutor seam as the CLI. */
@@ -86,7 +83,10 @@ export type D1HttpQueryClient = {
   query(
     sql: string,
     params?: readonly SqlValue[],
-  ): Promise<{ results: SqlRow[]; meta?: { changes?: number } }>;
+  ): Promise<{
+    results: SqlRow[];
+    meta?: { changes?: number; rows_written?: number; changed_db?: boolean };
+  }>;
 };
 
 /** Administrator D1 HTTP adapter — one statement per request/params array. */
@@ -95,7 +95,7 @@ export function createD1HttpExecutor(client: D1HttpQueryClient): SqlExecutor {
     async run(sql, params = []): Promise<SqlRunResult> {
       try {
         const result = await client.query(sql, params);
-        return { changes: Number(result.meta?.changes ?? 0) };
+        return { changes: changesFrom(result) };
       } catch (error) {
         mapD1Error(error);
       }

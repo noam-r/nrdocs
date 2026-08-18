@@ -1,7 +1,8 @@
 /**
  * Administrator control-plane persistence adapter.
- * Executes shared @nrdocs/persistence operations through node:sqlite (tests)
- * or the D1 HTTP query client (deploy/admin commands).
+ * Production commands use the D1 HTTP query client.
+ * Tests import `@nrdocs/persistence/sqlite` directly so `node:sqlite` stays
+ * off the published CLI startup graph.
  */
 export {
   applyMigrations,
@@ -11,4 +12,3 @@ export {
   type D1HttpQueryClient,
   type SqlExecutor,
 } from '@nrdocs/persistence';
-export { createSqliteExecutor, openMemorySqlite } from '@nrdocs/persistence/sqlite';

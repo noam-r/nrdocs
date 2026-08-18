@@ -55,7 +55,8 @@ async function main() {
     const bin = path.join(tmp, 'node_modules', 'nrdocs', 'dist', 'bin.js');
     const packagedWorker = path.join(tmp, 'node_modules', 'nrdocs', 'packaged', 'worker.mjs');
     const packagedCss = path.join(tmp, 'node_modules', 'nrdocs', 'packaged', 'reader.css');
-    for (const required of [bin, packagedWorker, packagedCss]) {
+    const packagedLogo = path.join(tmp, 'node_modules', 'nrdocs', 'packaged', 'logo.svg');
+    for (const required of [bin, packagedWorker, packagedCss, packagedLogo]) {
       if (!(await fs.stat(required).catch(() => null))) {
         throw new Error(`Missing required packed file: ${required}`);
       }
@@ -73,16 +74,44 @@ async function main() {
     if (JSON.stringify(pkgJson).includes('workspace:')) {
       throw new Error('Packed package.json still contains workspace: protocol.');
     }
+    for (const dep of [
+      'yaml',
+      'highlight.js',
+      'mdast-util-from-markdown',
+      'mdast-util-gfm',
+      'micromark-extension-gfm',
+      'unist-util-visit',
+    ]) {
+      if (!pkgJson.dependencies?.[dep]) {
+        throw new Error(`Packed package.json missing runtime dependency: ${dep}`);
+      }
+    }
     const help = run(process.execPath, [bin, '--help'], { cwd: tmp });
     if (!help.stdout.includes('nrdocs')) {
       throw new Error('Packed CLI --help did not print nrdocs.');
     }
-    const win = run(process.execPath, [bin, '--version'], {
-      cwd: tmp,
-      env: { ...process.env, NRDOCS_FORCE_PLATFORM: 'win32' },
-    });
-    // version should still work; platform check runs on commands — assert help works.
-    void win;
+    const version = run(process.execPath, [bin, '--version'], { cwd: tmp });
+    if (!version.stdout.includes(workspacePkg.version)) {
+      throw new Error(
+        `Packed CLI --version expected ${workspacePkg.version}, got: ${version.stdout}`,
+      );
+    }
+    const wrapper = await fs.readFile(bin, 'utf8');
+    if (
+      !wrapper.includes('requires Node.js') ||
+      /^\s*import\s+['"]\.\/bin\.bundle\.js['"]/m.test(wrapper)
+    ) {
+      throw new Error(
+        'Packed CLI wrapper must check the Node.js version before loading the bundle.',
+      );
+    }
+    const bundle = await fs.readFile(
+      path.join(tmp, 'node_modules', 'nrdocs', 'dist', 'bin.bundle.js'),
+      'utf8',
+    );
+    if (bundle.includes('node:sqlite')) {
+      throw new Error('Packed CLI bundle must not import node:sqlite (test-only adapter).');
+    }
     console.log('pack-check ok:', path.relative(repoRoot, tgz));
     console.log('version:', workspacePkg.version);
   } finally {

@@ -7,7 +7,11 @@ import {
 } from '@nrdocs/persistence';
 import type { InstanceDescriptor, InstanceId, SiteId } from '@nrdocs/contracts';
 import type { CommandContext } from '../command-context.js';
-import { resolveTargetInstanceId, readInstanceDescriptor } from '../instance-store.js';
+import {
+  resolveTargetInstanceId,
+  readInstanceDescriptor,
+  readActiveInstanceId,
+} from '../instance-store.js';
 import { requireInteractiveTerminal } from '../terminal.js';
 import { presentHumanSuccess } from '../present.js';
 import { usageError } from '../errors.js';
@@ -77,6 +81,19 @@ export async function beginAdminSession(
     db,
     store,
   };
+}
+
+/** Open an admin session when a local instance is selected; otherwise null. */
+export async function tryBeginAdminSession(
+  ctx: CommandContext,
+  action: string,
+  options: AdminOptions,
+): Promise<AdminSession | null> {
+  if (ctx.instance === undefined) {
+    const active = await readActiveInstanceId(ctx.runtime);
+    if (!active) return null;
+  }
+  return beginAdminSession(ctx, action, options, { mutating: false });
 }
 
 export async function purgeSiteArtifacts(

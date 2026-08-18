@@ -14,6 +14,50 @@ export async function resolvePublicationDirectory(
   return assertRealDirectory(runtime, absolute);
 }
 
+/** Resolve the docs directory for generate nav when no path argument is given. */
+export async function resolveGenerateNavDirectory(
+  runtime: Runtime,
+  directoryArg: string | undefined,
+): Promise<string> {
+  if (directoryArg !== undefined) {
+    return resolvePublicationDirectory(runtime, directoryArg);
+  }
+
+  const cwd = path.resolve(runtime.cwd);
+  try {
+    await assertRegularNonSymlinkFile(runtime, configPathFor(cwd), 'nrdocs.yml');
+    return assertRealDirectory(runtime, cwd);
+  } catch {
+    // Continue to search immediate child directories.
+  }
+
+  let entries: string[];
+  try {
+    entries = await runtime.fs.readdir(cwd);
+  } catch {
+    return assertRealDirectory(runtime, cwd);
+  }
+
+  const candidates: string[] = [];
+  for (const name of entries.sort()) {
+    const child = path.join(cwd, name);
+    try {
+      const st = await runtime.fs.lstat(child);
+      if (!st.isDirectory() || st.isSymbolicLink()) continue;
+      await assertRegularNonSymlinkFile(runtime, configPathFor(child), 'nrdocs.yml');
+      candidates.push(child);
+    } catch {
+      continue;
+    }
+  }
+
+  if (candidates.length === 1) {
+    return candidates[0]!;
+  }
+
+  return assertRealDirectory(runtime, cwd);
+}
+
 export function configPathFor(root: string): string {
   return path.join(root, 'nrdocs.yml');
 }

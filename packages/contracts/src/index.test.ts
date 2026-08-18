@@ -6,6 +6,7 @@ import {
   parsePublisherCredentialFile,
   parseInstanceDescriptor,
   parseSlug,
+  foldSlugInput,
   normalizeTitle,
   resolveLanguage,
   parseDirection,
@@ -98,6 +99,9 @@ describe('slug and ids', () => {
       expect(parseSlug(s)).toBeNull();
     }
     expect(parseSlug(fixtures.idSlugPathCases.reservedSlug)).toBeNull();
+    expect(parseSlug('Foo')).toBeNull();
+    expect(foldSlugInput('  Product-Handbook  ')).toBe('product-handbook');
+    expect(parseSlug(foldSlugInput('Product-Handbook'))).toBe('product-handbook');
   });
 
   it('parses and formats opaque IDs', () => {

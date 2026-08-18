@@ -2,7 +2,12 @@
  * Cloudflare Worker for publish and serve.
  * Phase 9: publisher API. Phase 11: reader serving and password access.
  */
-import { CONTRACTS_PACKAGE, parseSlug, PublisherApiErrorCode } from '@nrdocs/contracts';
+import {
+  CONTRACTS_PACKAGE,
+  foldSlugInput,
+  parseSlug,
+  PublisherApiErrorCode,
+} from '@nrdocs/contracts';
 import {
   getSiteBySlug,
   MemoryArtifactStore,
@@ -35,6 +40,9 @@ import {
   notFoundPage,
   unavailablePage,
 } from './reader/platform-pages.js';
+import { htmlSecurityHeaders } from './reader/headers.js';
+
+export { verifyReaderPassword } from './reader/password.js';
 
 export const WORKER_PACKAGE = '@nrdocs/worker' as const;
 
@@ -164,7 +172,7 @@ export async function handleRequest(request: Request, env: WorkerEnv): Promise<R
         const res = await handleAccessGet(request, ctx);
         return method === 'HEAD' ? headOf(res) : res;
       }
-      if (method === 'POST') return handleAccessPost(request, ctx);
+      if (method === 'POST') return await handleAccessPost(request, ctx);
       return htmlResponse(notFoundPage(), 405, { hsts });
     }
 
@@ -176,7 +184,7 @@ export async function handleRequest(request: Request, env: WorkerEnv): Promise<R
         const res = await handleLogoutGet(request, ctx);
         return method === 'HEAD' ? headOf(res) : res;
       }
-      if (method === 'POST') return handleLogoutPost(request, ctx);
+      if (method === 'POST') return await handleLogoutPost(request, ctx);
       return htmlResponse(notFoundPage(), 405, { hsts });
     }
 
@@ -220,7 +228,23 @@ export async function handleRequest(request: Request, env: WorkerEnv): Promise<R
 
     const segments = url.pathname.split('/').filter((s) => s.length > 0);
     const slugCandidate = segments[0];
-    const slug = slugCandidate ? parseSlug(slugCandidate) : null;
+    const slug = slugCandidate ? parseSlug(foldSlugInput(slugCandidate)) : null;
+
+    if (
+      slug &&
+      slugCandidate &&
+      slugCandidate !== slug &&
+      (method === 'GET' || method === 'HEAD')
+    ) {
+      const canonical = `/${slug}${url.pathname.slice(1 + slugCandidate.length)}${url.search}`;
+      return new Response(null, {
+        status: 308,
+        headers: {
+          ...htmlSecurityHeaders({ hsts }),
+          location: canonical,
+        },
+      });
+    }
 
     if (slug && (method === 'GET' || method === 'HEAD')) {
       const key = resolveSessionKey(env);
@@ -246,6 +270,9 @@ export async function handleRequest(request: Request, env: WorkerEnv): Promise<R
     if (error instanceof ApiError) {
       return errorResponse(requestId, error);
     }
+    const message = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
+    // Diagnostic for production incidents; request_id is returned to caller.
+    console.error(`nrdocs worker failure request_id=${requestId} path=${url.pathname} ${message}`);
     return errorResponse(
       requestId,
       new ApiError(PublisherApiErrorCode.TemporarilyUnavailable, 'Temporarily unavailable.'),

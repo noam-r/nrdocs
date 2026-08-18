@@ -1,13 +1,9 @@
 import { DatabaseSync } from 'node:sqlite';
-import { PersistenceError, constraintFailure } from './errors.js';
+import { mapSqlEngineError } from './errors.js';
 import type { SqlExecutor, SqlRow, SqlRunResult, SqlValue } from './sql.js';
 
 function mapSqliteError(error: unknown): never {
-  const message = error instanceof Error ? error.message : 'sqlite error';
-  if (/UNIQUE|CHECK|FOREIGN KEY|constraint|ABORT/i.test(message)) {
-    throw constraintFailure(message);
-  }
-  throw new PersistenceError('io', message);
+  mapSqlEngineError(error);
 }
 
 export type SqliteDatabase = DatabaseSync;

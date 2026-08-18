@@ -1,5 +1,5 @@
 import type { SiteId } from '@nrdocs/contracts';
-import { buildArtifactFromConfig } from '@nrdocs/renderer';
+import { buildArtifactFromConfig, formatPublicationDiagnostics } from '@nrdocs/renderer';
 import type { RendererError } from '@nrdocs/renderer';
 import type { CommandContext } from './command-context.js';
 import { parseFlags } from './argv.js';
@@ -63,6 +63,12 @@ export async function runPreviewCommand(
   }
 
   const server = await listenPreviewServer(built.artifact);
+
+  if ((built.diagnostics ?? []).length > 0) {
+    ctx.runtime.io.writeStderr(
+      `${formatPublicationDiagnostics(built.diagnostics)}\n\nBroken links are shown struck through.\n`,
+    );
+  }
 
   presentHumanSuccess(
     ctx.runtime,

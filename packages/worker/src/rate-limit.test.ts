@@ -42,6 +42,22 @@ describe('rate limiters', () => {
     expect(await composite.take('m', 1, 60_000, 'other')).toBe(false);
   });
 
+  it('CompositeRateLimiter falls back to memory when binding throws', async () => {
+    const binding = {
+      limit: vi.fn(async () => {
+        throw new Error('binding unavailable');
+      }),
+    };
+    const memory = new MemoryRateLimiter();
+    const composite = new CompositeRateLimiter(
+      { 'pwd-ip': new CloudflareBindingRateLimiter(binding) },
+      memory,
+    );
+    expect(await composite.take('k', 1, 60_000, 'pwd-ip')).toBe(true);
+    expect(await composite.take('k', 1, 60_000, 'pwd-ip')).toBe(false);
+    expect(binding.limit).toHaveBeenCalled();
+  });
+
   it('createCompositeRateLimiter maps env bindings', async () => {
     const binding = {
       limit: vi.fn(async () => ({ success: false })),

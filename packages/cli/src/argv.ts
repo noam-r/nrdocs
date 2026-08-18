@@ -1,4 +1,4 @@
-import { usageError } from './errors.js';
+import { usageError, type CliError } from './errors.js';
 
 export type GlobalFlags = {
   help: boolean;
@@ -124,3 +124,19 @@ export const REMOVED_TOP_LEVEL = new Set([
   'nav',
   'config',
 ]);
+
+const REMOVED_TOP_LEVEL_REMEDIATION: Record<string, string> = {
+  init: [
+    'nrdocs 2.0 has no init command. Connect a publication directory with:',
+    '  nrdocs connect [directory]',
+    'Run: nrdocs --help',
+  ].join('\n'),
+  nav: 'Use: nrdocs generate nav [directory]',
+};
+
+export function removedTopLevelError(command: string): CliError {
+  return usageError(
+    `Unknown command: ${command}`,
+    REMOVED_TOP_LEVEL_REMEDIATION[command] ?? 'Run: nrdocs --help',
+  );
+}

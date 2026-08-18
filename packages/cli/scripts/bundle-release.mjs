@@ -80,6 +80,10 @@ async function bundleWorker() {
   }
   await fs.writeFile(path.join(packagedDir, 'reader.css'), cssMatch[1], 'utf8');
   await fs.writeFile(path.join(packagedDir, 'reader.js'), jsMatch[1], 'utf8');
+  await fs.copyFile(
+    path.join(repoRoot, 'assets/nrdocs-logo.svg'),
+    path.join(packagedDir, 'logo.svg'),
+  );
   // mermaid.js already written by writeMermaidBundle (prefer esbuild output over TS stub)
   const mermaidStat = await fs.stat(path.join(packagedDir, 'mermaid.js')).catch(() => null);
   if (!mermaidStat) {
@@ -87,9 +91,15 @@ async function bundleWorker() {
   }
   await fs.writeFile(
     path.join(packagedDir, 'MANIFEST.txt'),
-    ['nrdocs release unit assets', 'worker.mjs', 'reader.css', 'reader.js', 'mermaid.js', ''].join(
-      '\n',
-    ),
+    [
+      'nrdocs release unit assets',
+      'worker.mjs',
+      'reader.css',
+      'reader.js',
+      'mermaid.js',
+      'logo.svg',
+      '',
+    ].join('\n'),
     'utf8',
   );
 }
@@ -103,7 +113,9 @@ async function bundleCli() {
     platform: 'node',
     format: 'esm',
     outfile: path.join(distDir, 'bin.bundle.js'),
-    // Keep registry packages external; workspace packages are still inlined.
+    // Registry packages stay external (must also be package.json dependencies so
+    // `node dist/bin.js` works in the monorepo and after npm pack). Workspace
+    // packages (@nrdocs/*) are inlined.
     external: [
       'yaml',
       'highlight.js',
@@ -115,16 +127,51 @@ async function bundleCli() {
     banner: { js: '// nrdocs release bundle' },
     logLevel: 'warning',
   });
+  const pkg = JSON.parse(await fs.readFile(path.join(cliRoot, 'package.json'), 'utf8'));
+  const minMajor = minNodeMajor(pkg.engines?.node);
+  // Static `import './bin.bundle.js'` is hoisted and would load `node:sqlite`
+  // (and any other Node-24-only builtins) before a version check can run.
   await fs.writeFile(
     path.join(distDir, 'bin.js'),
-    `#!/usr/bin/env node\nimport './bin.bundle.js';\n`,
+    `#!/usr/bin/env node
+const major = Number.parseInt(process.versions.node, 10);
+if (!Number.isFinite(major) || major < ${minMajor}) {
+  process.stderr.write(
+    \`nrdocs requires Node.js ${minMajor} or later. This is Node.js \${process.versions.node}.\\n\\nInstall Node.js ${minMajor} from https://nodejs.org/\\n\`,
+  );
+  process.exit(50);
+}
+function onInterrupt() {
+  process.stderr.write('\\n');
+  process.exit(130);
+}
+process.once('SIGINT', onInterrupt);
+process.once('SIGTERM', onInterrupt);
+import('./bin.bundle.js').catch((error) => {
+  const message = error instanceof Error ? error.message : String(error);
+  if (message) process.stderr.write(message + '\\n');
+  process.exit(1);
+});
+`,
     'utf8',
   );
   await fs.chmod(path.join(distDir, 'bin.js'), 0o755);
 }
 
+function minNodeMajor(enginesNode) {
+  const match = String(enginesNode ?? '').match(/(\d+)/);
+  if (!match) {
+    throw new Error('packages/cli package.json engines.node must include a major version');
+  }
+  return Number(match[1]);
+}
+
 async function writeRuntimePackageJson() {
   const pkg = JSON.parse(await fs.readFile(path.join(cliRoot, 'package.json'), 'utf8'));
+  const runtimeDeps = { ...(pkg.dependencies ?? {}) };
+  for (const key of Object.keys(runtimeDeps)) {
+    if (key.startsWith('@nrdocs/')) delete runtimeDeps[key];
+  }
   const runtime = {
     name: pkg.name,
     version: pkg.version,
@@ -133,14 +180,7 @@ async function writeRuntimePackageJson() {
     bin: { nrdocs: './dist/bin.js' },
     files: ['dist/bin.js', 'dist/bin.bundle.js', 'packaged', 'README.md'],
     engines: pkg.engines,
-    dependencies: {
-      yaml: '2.8.0',
-      'highlight.js': '11.11.1',
-      'mdast-util-from-markdown': '2.0.2',
-      'mdast-util-gfm': '3.0.0',
-      'micromark-extension-gfm': '3.0.0',
-      'unist-util-visit': '5.0.0',
-    },
+    dependencies: runtimeDeps,
   };
   await fs.writeFile(
     path.join(cliRoot, 'package.runtime.json'),

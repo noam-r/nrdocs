@@ -25,10 +25,12 @@ export {
   renderPublication,
   type InMemoryArtifact,
   type RenderedFile,
+  type RenderProgress,
 } from './render-publication.js';
 export { packArtifact, buildDeterministicTar, gzipDeterministic } from './pack-artifact.js';
 export {
   buildArtifactFromConfig,
   buildArtifactFromGraph,
   FIXED_PAGE_VALIDATOR_GAP,
+  type BuiltArtifact,
 } from './artifact.js';

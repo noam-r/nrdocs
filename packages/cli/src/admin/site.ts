@@ -1,4 +1,4 @@
-import { formatId, parseSlug, type SiteId, type TokenRecordId } from '@nrdocs/contracts';
+import { formatId, type SiteId, type TokenRecordId } from '@nrdocs/contracts';
 import {
   beginSiteDeletion,
   changeSitePassword,
@@ -8,24 +8,54 @@ import {
   inspectSiteDeletionState,
   listSites,
   listTokensForSite,
+  PUBLISH_LOCK_LEASE_SECONDS,
   renameSite,
   setSiteAccessPassword,
   setSiteAccessPublic,
   setSiteEnabled,
+  type SiteRow,
+  type SqlExecutor,
 } from '@nrdocs/persistence';
 import type { CommandContext } from '../command-context.js';
 import { parseFlags } from '../argv.js';
-import { localValidationError, usageError } from '../errors.js';
+import { CliError, localValidationError, usageError } from '../errors.js';
 import { presentHumanSuccess, presentJsonSuccess } from '../present.js';
 import { confirmOrDecline, confirmPhraseOrDecline } from '../terminal.js';
 import { beginAdminSession, purgeSiteArtifacts, type AdminOptions } from './context.js';
 import { derivePasswordVerifier, generatePublishingToken, assertReaderPassword } from './crypto.js';
+import { requireSiteSlug, SITE_SLUG_RULES } from './slug.js';
 
-function siteUrl(origin: string, slug: string): string {
+export function siteUrl(origin: string, slug: string): string {
   return `${origin.replace(/\/$/, '')}/${slug}/`;
 }
 
-async function promptAccessMode(ctx: CommandContext): Promise<'public' | 'password'> {
+export async function loadSiteBySlugArg(db: SqlExecutor, raw: string): Promise<SiteRow> {
+  const slug = requireSiteSlug(raw);
+  const site = await getSiteBySlug(db, slug);
+  if (!site) throw localValidationError(`No site with slug:\n  ${slug}`);
+  return site;
+}
+
+export function siteAlreadyExistsError(origin: string, site: SiteRow): CliError {
+  return localValidationError(
+    [
+      `A site with slug "${site.slug}" already exists.`,
+      '',
+      `URL:      ${siteUrl(origin, site.slug)}`,
+      `Site ID:  ${site.id}`,
+      '',
+      'You do not need to create it again.',
+      '',
+      'Publish docs with:',
+      '  nrdocs publish [directory]',
+      '',
+      'Inspect it with:',
+      `  nrdocs site show ${site.slug}`,
+    ].join('\n'),
+  );
+}
+
+export async function promptAccessMode(ctx: CommandContext): Promise<'public' | 'password'> {
   const answer = (await ctx.terminal.promptLine('Reader access [public/password]:'))
     .trim()
     .toLowerCase();
@@ -34,7 +64,7 @@ async function promptAccessMode(ctx: CommandContext): Promise<'public' | 'passwo
   throw usageError('Reader access must be public or password.');
 }
 
-async function promptNewPassword(ctx: CommandContext): Promise<string> {
+export async function promptNewPassword(ctx: CommandContext): Promise<string> {
   const a = await ctx.terminal.promptMasked('Reader password:');
   const b = await ctx.terminal.promptMasked('Confirm reader password:');
   if (a !== b) throw localValidationError('Reader passwords do not match.');
@@ -65,6 +95,8 @@ export async function runSiteCommand(
         'nrdocs site disable <slug>',
         'nrdocs site rename <old-slug> <new-slug>',
         'nrdocs site delete <slug>',
+        '',
+        SITE_SLUG_RULES,
       ].join('\n') + '\n',
     );
     return;
@@ -112,10 +144,11 @@ async function siteCreate(
 ): Promise<void> {
   const { positionals } = parseFlags(args);
   if (positionals.length !== 1) throw usageError('site create requires exactly one slug.');
-  const slug = parseSlug(positionals[0]);
-  if (!slug) throw usageError('Invalid or reserved site slug.');
+  const slug = requireSiteSlug(positionals[0]!);
 
   const session = await beginAdminSession(ctx, 'site create', options, { mutating: true });
+  const existing = await getSiteBySlug(session.db, slug);
+  if (existing) throw siteAlreadyExistsError(session.descriptor.canonical_origin, existing);
   presentHumanSuccess(ctx.runtime, `Slug:     ${slug}`);
 
   const access = await promptAccessMode(ctx);
@@ -147,6 +180,11 @@ async function siteCreate(
       },
     });
   } catch (error) {
+    if (error instanceof CliError) throw error;
+    const msg = error instanceof Error ? error.message : '';
+    if (/already exists/i.test(msg) || /UNIQUE|SQLITE_CONSTRAINT/i.test(msg)) {
+      throw localValidationError(`A site with slug "${slug}" already exists.`);
+    }
     throw localValidationError(error instanceof Error ? error.message : 'site create failed');
   }
 
@@ -218,8 +256,7 @@ async function siteShow(
   const { positionals } = parseFlags(args);
   if (positionals.length !== 1) throw usageError('site show requires exactly one slug.');
   const session = await beginAdminSession(ctx, 'site show', options, { mutating: false });
-  const site = await getSiteBySlug(session.db, positionals[0]!);
-  if (!site) throw localValidationError(`No site with slug:\n  ${positionals[0]}`);
+  const site = await loadSiteBySlugArg(session.db, positionals[0]!);
   const tokens = await listTokensForSite(session.db, site.id);
   const data = {
     slug: site.slug,
@@ -267,8 +304,7 @@ async function siteAccess(
     throw usageError('site access mode must be public or password.');
   }
   const session = await beginAdminSession(ctx, 'site access', options, { mutating: true });
-  const site = await getSiteBySlug(session.db, slugArg!);
-  if (!site) throw localValidationError(`No site with slug:\n  ${slugArg}`);
+  const site = await loadSiteBySlugArg(session.db, slugArg!);
 
   if (mode === 'public') {
     if (site.access_mode === 'public') {
@@ -307,8 +343,7 @@ async function sitePasswordChange(
   const { positionals } = parseFlags(args);
   if (positionals.length !== 1) throw usageError('site password change requires exactly one slug.');
   const session = await beginAdminSession(ctx, 'site password change', options, { mutating: true });
-  const site = await getSiteBySlug(session.db, positionals[0]!);
-  if (!site) throw localValidationError(`No site with slug:\n  ${positionals[0]}`);
+  const site = await loadSiteBySlugArg(session.db, positionals[0]!);
   if (site.access_mode !== 'password') {
     throw localValidationError('site password change is only valid for password-protected sites.');
   }
@@ -331,8 +366,7 @@ async function siteEnable(
   const session = await beginAdminSession(ctx, enabled ? 'site enable' : 'site disable', options, {
     mutating: true,
   });
-  const site = await getSiteBySlug(session.db, positionals[0]!);
-  if (!site) throw localValidationError(`No site with slug:\n  ${positionals[0]}`);
+  const site = await loadSiteBySlugArg(session.db, positionals[0]!);
   if (site.enabled === enabled) {
     presentHumanSuccess(ctx.runtime, 'unchanged');
     return;
@@ -350,12 +384,14 @@ async function siteRename(
   if (positionals.length !== 2) {
     throw usageError('site rename requires <old-slug> <new-slug>.');
   }
-  const [oldSlug, newSlugRaw] = positionals;
-  const newSlug = parseSlug(newSlugRaw);
-  if (!newSlug) throw usageError('Invalid or reserved new slug.');
+  const [oldSlugRaw, newSlugRaw] = positionals;
+  const newSlug = requireSiteSlug(newSlugRaw!, 'new slug');
   const session = await beginAdminSession(ctx, 'site rename', options, { mutating: true });
-  const site = await getSiteBySlug(session.db, oldSlug!);
-  if (!site) throw localValidationError(`No site with slug:\n  ${oldSlug}`);
+  const site = await loadSiteBySlugArg(session.db, oldSlugRaw!);
+  const taken = await getSiteBySlug(session.db, newSlug);
+  if (taken && taken.id !== site.id) {
+    throw siteAlreadyExistsError(session.descriptor.canonical_origin, taken);
+  }
   const oldUrl = siteUrl(session.descriptor.canonical_origin, site.slug);
   const newUrl = siteUrl(session.descriptor.canonical_origin, newSlug);
   presentHumanSuccess(
@@ -387,8 +423,7 @@ async function siteDelete(
   const { positionals } = parseFlags(args);
   if (positionals.length !== 1) throw usageError('site delete requires exactly one slug.');
   const session = await beginAdminSession(ctx, 'site delete', options, { mutating: true });
-  const site = await getSiteBySlug(session.db, positionals[0]!);
-  if (!site) throw localValidationError(`No site with slug:\n  ${positionals[0]}`);
+  const site = await loadSiteBySlugArg(session.db, positionals[0]!);
 
   presentHumanSuccess(
     ctx.runtime,
@@ -415,11 +450,12 @@ async function siteDelete(
   }
 
   await beginSiteDeletion(session.db, site.id);
-  // Wait out active lock if present (tests use expired/absent locks).
-  for (let i = 0; i < 5; i++) {
+  const waitDeadline = Date.now() + (PUBLISH_LOCK_LEASE_SECONDS + 5) * 1000;
+  for (;;) {
     const state = await inspectSiteDeletionState(session.db, site.id);
-    if (state.readyForFinalDelete) break;
-    if (!state.lockActive) break;
+    if (state.readyForFinalDelete || !state.lockActive) break;
+    if (Date.now() >= waitDeadline) break;
+    await new Promise((resolve) => setTimeout(resolve, 2000));
   }
   const purged = await purgeSiteArtifacts(session.store, site.id);
   if (!purged.empty) {
@@ -433,10 +469,24 @@ async function siteDelete(
     );
     throw localValidationError('R2 site prefix was not fully deleted.');
   }
-  const finalized = await finalizeSiteDeletion(session.db, site.id);
-  if (!finalized) {
+  await finalizeSiteDeletion(session.db, site.id);
+  const remaining = await getSiteBySlug(session.db, site.slug);
+  if (remaining) {
+    const state = await inspectSiteDeletionState(session.db, remaining.id);
     throw localValidationError(
-      'Could not finalize site deletion (lock still active or site state incomplete).',
+      [
+        'Could not finalize site deletion.',
+        `enabled: ${state.site?.enabled === false ? 'no' : 'yes'}`,
+        `usable tokens: ${state.usableTokenCount}`,
+        `lock active: ${state.lockActive ? 'yes' : 'no'}`,
+        state.site?.publish_lock_expires_at
+          ? `lock expires: ${state.site.publish_lock_expires_at}`
+          : null,
+        '',
+        `Resume with:\n  nrdocs site delete ${site.slug}`,
+      ]
+        .filter((line): line is string => line !== null)
+        .join('\n'),
     );
   }
   presentHumanSuccess(ctx.runtime, `Site deleted.\nSlug: ${site.slug}`);

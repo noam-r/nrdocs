@@ -27,12 +27,16 @@ Page schema version 1 uses exactly:
 /_nrdocs/v1/reader.css
 /_nrdocs/v1/reader.js
 /_nrdocs/v1/mermaid.js
+/_nrdocs/v1/logo.svg
 ```
 
 The first two appear on every content page. `reader.js` imports `mermaid.js`
-only when a Mermaid block exists. Assets are packaged and deployed atomically
-with the Worker. Package-manifest hashes are checked during build and deploy;
-same-origin subresource integrity attributes are not required.
+only when a Mermaid block exists. Every content page also references `logo.svg`
+as the favicon. The same image is painted as a flat header mark beside the site
+title from `reader.css`. `/favicon.ico` serves that logo so origin-level tab
+icons work. Assets are packaged and deployed atomically with the Worker.
+Package-manifest hashes are checked during build and deploy; same-origin
+subresource integrity attributes are not required.
 
 ## Complete Page Skeleton
 
@@ -46,6 +50,7 @@ shape; values shown as placeholders are escaped validated data:
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title><page-title> · <site-name></title>
+  <link rel="icon" href="/_nrdocs/v1/logo.svg" type="image/svg+xml">
   <link rel="stylesheet" href="/_nrdocs/v1/reader.css">
   <script type="module" src="/_nrdocs/v1/reader.js"></script>
 </head>
@@ -237,15 +242,18 @@ error. Logout returns to that same site root.
 ## Fixed Platform Pages
 
 Platform pages use the current site's language and direction where known, or
-`lang="und" dir="auto"` otherwise. Copy is exact:
+`lang="und" dir="auto"` otherwise. Copy is exact. Every platform page uses the
+same card chrome: the platform logo mark, the page heading/body below, and a
+footer link `nrdocs on GitHub` to `https://github.com/noam-r/nrdocs`.
 
 | Page           | Heading                        | Body/action                                                            |
 | -------------- | ------------------------------ | ---------------------------------------------------------------------- |
-| Instance root  | `nrdocs`                       | `This nrdocs instance serves sites at their direct URLs.`              |
+| Instance root  | `nrdocs`                       | `Publish a Markdown directory as a protected website.`                 |
 | Password form  | `Password required`            | `Enter the password to continue.`; label `Password`; button `Continue` |
 | Wrong password | `Password required`            | `The password is incorrect. Try again.`                                |
+| Sign-out form  | `Sign out`                     | `End your session for this site.`; button `Sign out`                   |
 | Logout         | `You have been signed out.`    | Link `Return to site.`                                                 |
-| 404            | `Not found`                    | `The requested page is unavailable.`                                   |
+| 404            | `Not found`                    | `The requested page is unavailable.`; link `Instance home` to `/`      |
 | 500/503        | `Site temporarily unavailable` | `Try again later.` and a safe request ID                               |
 
 Access pages contain the signed hidden CSRF and safe-return fields described in

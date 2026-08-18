@@ -67,6 +67,7 @@ describe('Phase 4 render + pack', () => {
         const html = new TextDecoder().decode(home.bytes);
         expect(html.startsWith('<!doctype html>\n<html lang="en" dir="ltr">')).toBe(true);
         expect(html).toContain('href="/_nrdocs/v1/reader.css"');
+        expect(html).toContain('href="/_nrdocs/v1/logo.svg"');
         expect(html).toContain('src="/_nrdocs/v1/reader.js"');
         expect(html).toContain('href="overview/"');
         expect(html).toContain('class="language-javascript"');
@@ -84,6 +85,30 @@ describe('Phase 4 render + pack', () => {
         expect(artifact.manifest.assets).toHaveLength(1);
         expect(artifact.files.some((f) => f.objectPath.endsWith('.md'))).toBe(false);
         expect(artifact.files.some((f) => f.objectPath === 'nrdocs.yml')).toBe(false);
+      },
+    );
+  });
+
+  it('renders unlisted markdown links as broken', async () => {
+    await withFixture(
+      {
+        'index.md': '# Home\n\nSee [Secret](secret.md).\n',
+      },
+      async (root) => {
+        const config = parseNrdocsConfig({
+          title: 'Handbook',
+          navigation: [{ title: 'Home', file: 'index.md' }],
+        });
+        const { artifact, diagnostics } = await buildArtifactFromConfig(root, config, {
+          siteId: SITE,
+        });
+        expect(diagnostics).toHaveLength(1);
+        const home = artifact.files.find((f) => f.objectPath === 'pages/index.html')!;
+        const html = new TextDecoder().decode(home.bytes);
+        expect(html).toContain('class="nr-broken-link"');
+        expect(html).toContain('title="Broken link: secret.md"');
+        expect(html).toContain('Secret');
+        expect(html).not.toContain('href="secret.md"');
       },
     );
   });

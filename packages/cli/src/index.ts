@@ -4,13 +4,14 @@
 import { CONTRACTS_PACKAGE, ExitCode } from '@nrdocs/contracts';
 import { PERSISTENCE_PACKAGE } from '@nrdocs/persistence';
 import { RENDERER_PACKAGE } from '@nrdocs/renderer';
-import { peelGlobals, REMOVED_TOP_LEVEL } from './argv.js';
+import { peelGlobals, REMOVED_TOP_LEVEL, removedTopLevelError } from './argv.js';
 import { CLI_PACKAGE, CLI_VERSION } from './help.js';
 import {
   rootHelp,
   runCredentialsCommand,
   runInstanceCommand,
   type CommandContext,
+  type InstanceDeleteOptions,
 } from './dispatch.js';
 import { runGenerateNavCommand } from './generate-nav.js';
 import { runPreviewCommand } from './preview.js';
@@ -19,12 +20,18 @@ import { runAdminSiteCommand, runAdminTokenCommand, type AdminOptions } from './
 import { runConnectCommand, type ConnectOptions } from './connect.js';
 import { runPublishCommand, type PublishOptions } from './publish.js';
 import { presentError, presentHumanSuccess } from './present.js';
-import { assertSupportedPlatform, createProcessRuntime, type Runtime } from './runtime.js';
-import { createRejectingTerminal, type Terminal } from './terminal.js';
+import {
+  assertSupportedNode,
+  assertSupportedPlatform,
+  createProcessRuntime,
+  MIN_NODE_MAJOR,
+  type Runtime,
+} from './runtime.js';
+import { createProcessTerminal, type Terminal } from './terminal.js';
 import { usageError } from './errors.js';
 
 export { CLI_PACKAGE, CLI_VERSION };
-export { createProcessRuntime };
+export { createProcessRuntime, assertSupportedNode, MIN_NODE_MAJOR };
 export type { Runtime, Terminal };
 
 export function cliDependencies(): {
@@ -44,7 +51,10 @@ export type RunOptions = {
   terminal?: Terminal;
   deploy?: DeployOptions;
   admin?: AdminOptions;
+  instanceDelete?: InstanceDeleteOptions;
   publisher?: ConnectOptions & PublishOptions;
+  /** Test seam; production uses `process.versions.node`. */
+  nodeVersion?: string;
 };
 
 async function dispatch(
@@ -53,6 +63,7 @@ async function dispatch(
   options: {
     deploy?: DeployOptions;
     admin?: AdminOptions;
+    instanceDelete?: InstanceDeleteOptions;
     publisher?: ConnectOptions & PublishOptions;
   } = {},
 ): Promise<void> {
@@ -66,7 +77,7 @@ async function dispatch(
 
   const [head, ...tail] = rest;
   if (REMOVED_TOP_LEVEL.has(head!)) {
-    throw usageError(`Unknown command: ${head}`);
+    throw removedTopLevelError(head!);
   }
 
   switch (head) {
@@ -74,13 +85,19 @@ async function dispatch(
       await runCredentialsCommand(ctx, tail);
       return;
     case 'instance':
-      await runInstanceCommand(ctx, tail);
+      await runInstanceCommand(ctx, tail, options.instanceDelete ?? {});
       return;
     case 'connect':
-      await runConnectCommand(ctx, tail, options.publisher ?? {});
+      await runConnectCommand(ctx, tail, {
+        ...(options.publisher ?? {}),
+        ...(options.admin ?? {}),
+      });
       return;
     case 'publish':
-      await runPublishCommand(ctx, tail, options.publisher ?? {});
+      await runPublishCommand(ctx, tail, {
+        ...(options.publisher ?? {}),
+        ...(options.admin ?? {}),
+      });
       return;
     case 'preview':
       await runPreviewCommand(ctx, tail);
@@ -113,11 +130,12 @@ export async function runCli(
   options: RunOptions = {},
 ): Promise<number> {
   const runtime = options.runtime ?? createProcessRuntime();
-  const terminal = options.terminal ?? createRejectingTerminal();
+  const terminal = options.terminal ?? createProcessTerminal();
   let json = false;
 
   try {
     assertSupportedPlatform(runtime);
+    assertSupportedNode(options.nodeVersion ?? process.versions.node);
     const { globals, rest } = peelGlobals(argv);
     json = globals.json;
 
@@ -132,13 +150,11 @@ export async function runCli(
     const head = rest[0];
     if (
       globals.instance !== undefined &&
-      (head === 'connect' ||
-        head === 'publish' ||
-        head === 'preview' ||
-        head === 'generate' ||
-        head === 'credentials')
+      (head === 'preview' || head === 'generate' || head === 'credentials')
     ) {
-      throw usageError('--instance is only valid on administrative commands.');
+      throw usageError(
+        '--instance is only valid on administrative commands, connect, and publish.',
+      );
     }
 
     const ctx: CommandContext = {
@@ -157,6 +173,7 @@ export async function runCli(
     await dispatch(ctx, rest, {
       ...(options.deploy !== undefined ? { deploy: options.deploy } : {}),
       ...(options.admin !== undefined ? { admin: options.admin } : {}),
+      ...(options.instanceDelete !== undefined ? { instanceDelete: options.instanceDelete } : {}),
       ...(options.publisher !== undefined ? { publisher: options.publisher } : {}),
     });
     return ExitCode.Success;
@@ -178,6 +195,7 @@ export { loadNrdocsConfig, resolvePublicationDirectory } from './config.js';
 export {
   readEnvCredentialPair,
   resolvePublisherCredential,
+  tryReadPublisherCredential,
   writePublisherCredential,
   listPublisherCredentials,
   removePublisherCredential,
@@ -188,12 +206,16 @@ export {
   listInstanceDescriptors,
   readInstanceDescriptor,
   resolveTargetInstanceId,
+  tryResolveSelectedInstance,
+  deleteInstanceDescriptor,
+  clearActiveInstanceIdIf,
 } from './instance-store.js';
 export {
   requireInteractiveTerminal,
   confirmOrDecline,
   confirmPhraseOrDecline,
   isPublisherCiMode,
+  createProcessTerminal,
   createRejectingTerminal,
 } from './terminal.js';
 export { CliError } from './errors.js';
@@ -213,13 +235,8 @@ export {
   normalizeRequestPath,
   attachmentContentDisposition,
 } from './preview-server.js';
-export {
-  applyMigrations,
-  createD1HttpExecutor,
-  createSqliteExecutor,
-  openMemorySqlite,
-} from './persistence-adapter.js';
-export type { D1HttpQueryClient, SqlExecutor } from './persistence-adapter.js';
+export { applyMigrations, createD1HttpExecutor } from '@nrdocs/persistence';
+export type { D1HttpQueryClient, SqlExecutor } from '@nrdocs/persistence';
 export { runDeployCommand, createFakeCloudflare } from './deploy.js';
 export type { DeployOptions } from './deploy.js';
 export { extractWranglerToken } from './deploy/auth.js';

@@ -376,7 +376,7 @@ nrdocs 2.0 has no:
 - public site directory; or
 - source-download interface.
 
-The instance root shows a generic fixed message and never lists sites.
+The instance root shows a branded fixed page with a GitHub project link and never lists sites.
 
 ## Deployment Model
 

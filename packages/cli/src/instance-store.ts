@@ -110,6 +110,64 @@ export async function writeActiveInstanceId(
   await atomicWriteFile(runtime, activeInstancePath(runtime), `${instanceId}\n`, 0o600);
 }
 
+/** Remove the local descriptor file for an instance. */
+export async function deleteInstanceDescriptor(
+  runtime: Runtime,
+  instanceId: InstanceId,
+): Promise<void> {
+  const filePath = instancePath(runtime, instanceId);
+  try {
+    await runtime.fs.unlink(filePath);
+  } catch (error) {
+    const code =
+      error && typeof error === 'object' && 'code' in error
+        ? String((error as { code?: unknown }).code)
+        : '';
+    if (code === 'ENOENT') return;
+    throw ioError(`Unable to delete instance descriptor:\n  ${filePath}`);
+  }
+}
+
+/** Clear active-instance only when it currently points at `instanceId`. */
+export async function clearActiveInstanceIdIf(
+  runtime: Runtime,
+  instanceId: InstanceId,
+): Promise<boolean> {
+  const active = await readActiveInstanceId(runtime);
+  if (active !== instanceId) return false;
+  const filePath = activeInstancePath(runtime);
+  try {
+    await runtime.fs.unlink(filePath);
+  } catch (error) {
+    const code =
+      error && typeof error === 'object' && 'code' in error
+        ? String((error as { code?: unknown }).code)
+        : '';
+    if (code === 'ENOENT') return true;
+    throw ioError(`Unable to clear active-instance:\n  ${filePath}`);
+  }
+  return true;
+}
+
+/** Selected instance descriptor when `--instance` or active-instance is present. */
+export async function tryResolveSelectedInstance(
+  runtime: Runtime,
+  instanceFlag: string | undefined,
+): Promise<InstanceDescriptor | null> {
+  if (instanceFlag !== undefined) {
+    const id = parseInstanceId(instanceFlag);
+    if (!id) throw usageError('--instance requires a valid opaque instance ID.');
+    return readInstanceDescriptor(runtime, id);
+  }
+  const active = await readActiveInstanceId(runtime);
+  if (!active) return null;
+  try {
+    return await readInstanceDescriptor(runtime, active);
+  } catch {
+    return null;
+  }
+}
+
 export async function resolveTargetInstanceId(
   runtime: Runtime,
   instanceFlag: string | undefined,

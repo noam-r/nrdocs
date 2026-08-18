@@ -209,6 +209,36 @@ the paginated R2 REST object API, deletes batches until a fresh listing is
 empty, and then deletes D1 metadata. It is resumable and never uses a public
 bucket URL or S3 credential.
 
+## Instance Deletion
+
+```text
+nrdocs instance delete <instance-id>
+```
+
+Instance deletion permanently removes the Cloudflare resources owned by one
+local instance descriptor, then deletes that descriptor. It requires an
+interactive terminal and confirmation by typing the exact opaque instance ID.
+
+Before mutation, delete verifies ownership:
+
+- the R2 marker `_nrdocs/instance.json` matches the descriptor when the bucket
+  exists; and
+- D1 `instance_metadata` matches the descriptor when the database exists.
+
+Ownership failure refuses the command with no Cloudflare mutations.
+
+Cleanup order for owned resources only:
+
+1. delete the Worker script (also removes workers.dev / custom-domain attachment);
+2. empty and delete the R2 bucket;
+3. delete the D1 database;
+4. remove the local descriptor and clear `active-instance` when it pointed at
+   this ID.
+
+Missing resources from an interrupted deploy are skipped. Delete never adopts
+or removes unrelated account resources and never auto-selects another active
+instance.
+
 ## Local Descriptor Requirements
 
 The descriptor schema in `02-cli-configuration-and-credentials.md` includes:

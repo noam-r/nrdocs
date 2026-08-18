@@ -181,13 +181,13 @@ async function walkDir(
     if (c.kind === 'nonconforming_md') {
       throw new RendererError(
         'nonconforming',
-        `Automatic navigation cannot order:\n  ${joinRel(relDir, c.name)}\n\nRename it using the NN-slug.md convention, or run:\n  nrdocs generate nav`,
+        `Automatic navigation cannot order:\n  ${joinRel(relDir, c.name)}\n\nRename it using the NN-slug.md convention, or run:\n  nrdocs generate nav [directory]`,
       );
     }
     if (c.kind === 'nonconforming_dir') {
       throw new RendererError(
         'nonconforming',
-        `Automatic navigation cannot order directory:\n  ${joinRel(relDir, c.name)}\n\nRename it using the NN-slug/ convention, or run:\n  nrdocs generate nav`,
+        `Automatic navigation cannot order directory:\n  ${joinRel(relDir, c.name)}\n\nRename it using the NN-slug/ convention, or run:\n  nrdocs generate nav [directory]`,
       );
     }
   }

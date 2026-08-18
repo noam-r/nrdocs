@@ -16,6 +16,7 @@ export type FakeCloudflareState = {
   workersDevHost?: string;
   smokeOk?: boolean;
   deployedWorkers: DeployWorkerInput[];
+  d1BatchCalls: number;
 };
 
 export function createFakeCloudflare(initial: Partial<FakeCloudflareState> = {}): {
@@ -33,6 +34,7 @@ export function createFakeCloudflare(initial: Partial<FakeCloudflareState> = {})
     workersDevHost: initial.workersDevHost ?? 'nrdocs-test.example.workers.dev',
     smokeOk: initial.smokeOk ?? true,
     deployedWorkers: [],
+    d1BatchCalls: 0,
   };
   if (initial.failPreflight !== undefined) state.failPreflight = initial.failPreflight;
   if (initial.failStep !== undefined) state.failStep = initial.failStep;
@@ -64,13 +66,13 @@ export function createFakeCloudflare(initial: Partial<FakeCloudflareState> = {})
       state.d1 = state.d1.filter((d) => d.uuid !== databaseId);
     },
     async d1Batch() {
-      // no-op success for migrations in fake
+      state.d1BatchCalls += 1;
     },
     async d1Query(_a, _d, sql) {
       if (/SELECT \* FROM instance_metadata/i.test(sql)) {
-        return [];
+        return { results: [], meta: { changes: 0 } };
       }
-      return [];
+      return { results: [], meta: { changes: 0 } };
     },
     async listR2() {
       return state.r2.map((name) => ({ name }));
@@ -113,7 +115,8 @@ export function createFakeCloudflare(initial: Partial<FakeCloudflareState> = {})
     async deleteR2Object(_a, bucket, key) {
       state.objects.delete(`${bucket}/${key}`);
     },
-    async listZones(_accountId, name) {
+    async listZones(_accountId, name?) {
+      if (name === undefined || name === '') return [...state.zones];
       return state.zones.filter((z) => z.name === name);
     },
     async getWorkersDevSubdomain() {

@@ -160,6 +160,7 @@ function contentClassesOk(
   for (const c of classes) {
     if (kind === 'align' && ALIGN_CLASS.has(c)) continue;
     if (c === 'nr-mermaid') continue;
+    if (c === 'nr-broken-link') continue;
     if (LANGUAGE_CLASS_RE.test(c)) continue;
     if (HLJS_CLASS_RE.test(c)) continue;
     if (c === NAV_SECTION_CLASS) continue;
@@ -289,8 +290,13 @@ function walkContent(
     }
     case 'code':
     case 'span': {
-      const attrs = requireAttrs(el, new Set(['class']));
+      const attrs = requireAttrs(el, new Set(tag === 'span' ? ['class', 'title'] : ['class']));
       const cls = (attrs.get('class') ?? '').split(/\s+/).filter(Boolean);
+      if (tag === 'span' && cls.includes('nr-broken-link')) {
+        if (cls.length !== 1) fail('Invalid span class.');
+        break;
+      }
+      if (attrs.has('title')) fail('title is only allowed on broken links.');
       if (!contentClassesOk(cls, tag === 'code' ? 'code' : 'span')) fail(`Invalid ${tag} class.`);
       break;
     }
@@ -397,10 +403,11 @@ export function validateStoredPage(
   const body = docEl.querySelector(':scope > body');
   if (!head || !body) fail('Document requires head and body.');
 
-  // Head children: meta charset, meta viewport, title, link css, script module — exact order
+  // Head children: meta charset, meta viewport, title, icon, link css, script module — exact order
   const headChildren = Array.from(head.children);
-  if (headChildren.length !== 5) fail('Head must contain exactly five elements.');
-  const [metaCharset, metaViewport, titleEl, linkCss, scriptJs] = headChildren as Element[];
+  if (headChildren.length !== 6) fail('Head must contain exactly six elements.');
+  const [metaCharset, metaViewport, titleEl, linkIcon, linkCss, scriptJs] =
+    headChildren as Element[];
   if (metaCharset!.tagName !== 'META' || metaCharset!.getAttribute('charset') !== 'utf-8') {
     fail('First head element must be meta charset=utf-8.');
   }
@@ -415,6 +422,15 @@ export function validateStoredPage(
   requireAttrs(metaViewport!, new Set(['name', 'content']));
   if (titleEl!.tagName !== 'TITLE') fail('Third head element must be title.');
   requireAttrs(titleEl!, new Set());
+  if (
+    linkIcon!.tagName !== 'LINK' ||
+    linkIcon!.getAttribute('rel') !== 'icon' ||
+    linkIcon!.getAttribute('href') !== PLATFORM_ASSETS[3] ||
+    linkIcon!.getAttribute('type') !== 'image/svg+xml'
+  ) {
+    fail('Icon must be the fixed platform logo.svg.');
+  }
+  requireAttrs(linkIcon!, new Set(['rel', 'href', 'type']));
   if (
     linkCss!.tagName !== 'LINK' ||
     linkCss!.getAttribute('rel') !== 'stylesheet' ||

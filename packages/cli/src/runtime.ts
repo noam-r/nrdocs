@@ -74,6 +74,8 @@ export function createProcessRuntime(
   };
 }
 
+export const MIN_NODE_MAJOR = 24;
+
 export function assertSupportedPlatform(runtime: Runtime): void {
   if (runtime.platform === 'win32') {
     throw new CliError({
@@ -82,6 +84,19 @@ export function assertSupportedPlatform(runtime: Runtime): void {
       exit_code: ExitCode.LocalIoOrState,
       safe_message:
         'nrdocs 2.0 supports Linux and macOS only. Windows is outside the support contract.',
+    });
+  }
+}
+
+export function assertSupportedNode(nodeVersion: string = process.versions.node): void {
+  const major = Number.parseInt(nodeVersion, 10);
+  if (!Number.isFinite(major) || major < MIN_NODE_MAJOR) {
+    throw new CliError({
+      code: 'unsupported_runtime',
+      phase: 'io',
+      exit_code: ExitCode.LocalIoOrState,
+      safe_message: `nrdocs requires Node.js ${MIN_NODE_MAJOR} or later. This is Node.js ${nodeVersion}.`,
+      remediation: `Install Node.js ${MIN_NODE_MAJOR} from https://nodejs.org/`,
     });
   }
 }

@@ -213,11 +213,8 @@ export function renderArticleHtml(
     if (attachHref !== null) {
       return `<a href="${escapeAttr(attachHref)}"${title}>${children}</a>`;
     }
-    throw new RendererError(
-      'broken_link',
-      `Unable to resolve link:\n  ${href}\nfrom:\n  ${sourceFile}`,
-      { sourceFile },
-    );
+    const label = children.trim() ? children : escapeHtml(href);
+    return `<span class="nr-broken-link" title="${escapeAttr(`Broken link: ${href}`)}">${label}</span>`;
   };
 
   const renderImage = (image: Image): string => {
