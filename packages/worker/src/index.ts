@@ -42,6 +42,8 @@ import {
 } from './reader/platform-pages.js';
 import { htmlSecurityHeaders } from './reader/headers.js';
 
+export { verifyReaderPassword } from './reader/password.js';
+
 export const WORKER_PACKAGE = '@nrdocs/worker' as const;
 
 export type WorkerEnv = {
@@ -228,7 +230,12 @@ export async function handleRequest(request: Request, env: WorkerEnv): Promise<R
     const slugCandidate = segments[0];
     const slug = slugCandidate ? parseSlug(foldSlugInput(slugCandidate)) : null;
 
-    if (slug && slugCandidate !== slug && (method === 'GET' || method === 'HEAD')) {
+    if (
+      slug &&
+      slugCandidate &&
+      slugCandidate !== slug &&
+      (method === 'GET' || method === 'HEAD')
+    ) {
       const canonical = `/${slug}${url.pathname.slice(1 + slugCandidate.length)}${url.search}`;
       return new Response(null, {
         status: 308,

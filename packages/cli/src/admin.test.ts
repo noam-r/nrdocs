@@ -20,7 +20,7 @@ import {
   generatePublishingToken,
   derivePasswordVerifier,
 } from './admin/crypto.js';
-import { verifyReaderPassword } from '../../worker/src/reader/password.js';
+import { verifyReaderPassword } from '@nrdocs/worker';
 import { sitePrefix } from '@nrdocs/persistence';
 
 const INST = 'inst_01ARZ3NDEKTSV4RRFFQ69G5FAV' as InstanceId;

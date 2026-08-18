@@ -484,8 +484,6 @@ export async function runDeployCommand(
 
   presentHumanSuccess(ctx.runtime, 'Creating Cloudflare resources...');
 
-  const initialDescriptorSnapshot = isNew ? null : { ...descriptor };
-
   try {
     descriptor = await reconcileInstance(ctx, cf, descriptor, {
       packageVersion,
@@ -551,16 +549,6 @@ export async function runDeployCommand(
       'Next:',
       '  nrdocs site create <slug>',
     ].join('\n'),
-  );
-}
-
-function initialWasActiveComplete(desc: InstanceDescriptor | null): boolean {
-  return (
-    desc !== null &&
-    desc.status === 'active' &&
-    desc.reconciliation === null &&
-    desc.canonical_origin !== '' &&
-    desc.database_id !== ''
   );
 }
 

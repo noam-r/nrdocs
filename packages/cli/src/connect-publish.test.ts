@@ -18,7 +18,7 @@ import {
   sqliteAsD1Database,
 } from '@nrdocs/persistence';
 import { openMemorySqlite } from '@nrdocs/persistence/sqlite';
-import { handleRequest, type WorkerEnv } from '../../worker/src/index.js';
+import { handleRequest, type WorkerEnv } from '@nrdocs/worker';
 import { ExitCode, createProcessRuntime, main, type Runtime } from './index.js';
 import { derivePasswordVerifier as deriveCliPasswordVerifier } from './admin/crypto.js';
 import { createRejectingTerminal, type Terminal } from './terminal.js';

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildDeterministicTar } from '../../renderer/src/pack-artifact.js';
+import { buildDeterministicTar } from '@nrdocs/renderer';
 import { extractUstarFiles } from './archive.js';
 
 describe('extractUstarFiles', () => {
