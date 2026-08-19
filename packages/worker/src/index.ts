@@ -33,6 +33,9 @@ import {
   handleSiteContent,
   type ReaderContext,
 } from './reader/serve.js';
+import { handleAgentCleanRoute, handleAgentGrantRoute } from './reader/agent-serve.js';
+import { handleAgentShareGet, handleAgentSharePost } from './reader/agent-share.js';
+import { redactAgentGrantPath } from './redact.js';
 import {
   headOf,
   htmlResponse,
@@ -53,6 +56,8 @@ export type WorkerEnv = {
   NRDOCS_PACKAGE_VERSION: string;
   /** Base64url-encoded 32-byte HMAC key for reader sessions and CSRF. */
   NRDOCS_SESSION_KEY?: string;
+  /** HTTPS origin used for agent share URLs and Origin checks. */
+  NRDOCS_CANONICAL_ORIGIN?: string;
   /** Cloudflare Rate Limit bindings (optional; memory fallback when absent). */
   PASSWORD_IP_LIMIT?: CfRateLimitBinding;
   PASSWORD_SITE_LIMIT?: CfRateLimitBinding;
@@ -60,6 +65,8 @@ export type WorkerEnv = {
   TOKEN_RESOLVE_LIMIT?: CfRateLimitBinding;
   TOKEN_PUBLISH_LIMIT?: CfRateLimitBinding;
   INSTANCE_API_LIMIT?: CfRateLimitBinding;
+  AGENT_SHARE_IP_LIMIT?: CfRateLimitBinding;
+  AGENT_SHARE_INSTANCE_LIMIT?: CfRateLimitBinding;
   /** Test injectables */
   __artifactStore?: ArtifactObjectStore;
   __rateLimiter?: RateLimiter;
@@ -188,6 +195,31 @@ export async function handleRequest(request: Request, env: WorkerEnv): Promise<R
       return htmlResponse(notFoundPage(), 405, { hsts });
     }
 
+    if (url.pathname === '/_nrdocs/agent-share') {
+      const key = resolveSessionKey(env);
+      if (!key) return htmlResponse(unavailablePage(requestId), 503, { hsts });
+      const ctx = buildReaderContext(request, env, key);
+      if (method === 'GET' || method === 'HEAD') {
+        const res = await handleAgentShareGet(request, ctx, env);
+        return method === 'HEAD' ? headOf(res) : res;
+      }
+      if (method === 'POST') return await handleAgentSharePost(request, ctx, env);
+      return htmlResponse(notFoundPage(), 405, { hsts });
+    }
+
+    if (url.pathname.startsWith('/_nrdocs/agent/share/')) {
+      const key = resolveSessionKey(env);
+      if (!key) return htmlResponse(unavailablePage(requestId), 503, { hsts });
+      const ctx = buildReaderContext(request, env, key);
+      return handleAgentGrantRoute(request, ctx, url.pathname);
+    }
+
+    if (url.pathname.startsWith('/_nrdocs/agent/')) {
+      const key = resolveSessionKey(env);
+      const ctx = buildReaderContext(request, env, key ?? new Uint8Array(32));
+      return handleAgentCleanRoute(request, ctx, url.pathname);
+    }
+
     if (url.pathname === '/' || url.pathname === '') {
       if (method !== 'GET' && method !== 'HEAD') {
         return htmlResponse(notFoundPage(), 405, { hsts });
@@ -272,7 +304,9 @@ export async function handleRequest(request: Request, env: WorkerEnv): Promise<R
     }
     const message = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
     // Diagnostic for production incidents; request_id is returned to caller.
-    console.error(`nrdocs worker failure request_id=${requestId} path=${url.pathname} ${message}`);
+    console.error(
+      `nrdocs worker failure request_id=${requestId} path=${redactAgentGrantPath(url.pathname)} ${redactAgentGrantPath(message)}`,
+    );
     return errorResponse(
       requestId,
       new ApiError(PublisherApiErrorCode.TemporarilyUnavailable, 'Temporarily unavailable.'),

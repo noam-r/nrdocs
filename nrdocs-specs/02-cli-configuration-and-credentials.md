@@ -13,7 +13,7 @@ It is authoritative for user-visible command names and local filesystem behavior
 On a machine with a local administrative instance, the complete path is:
 
 ```bash
-nrdocs deploy
+nrdocs deploy --new
 nrdocs publish ./docs
 ```
 
@@ -63,7 +63,7 @@ On a machine with a resolvable administrative instance and no publisher token fo
 - `site` manages serving destinations and reader access.
 - `token` manages server-side publishing credentials.
 - `instance` manages local administrative targeting.
-- `deploy` provisions a new instance.
+- `deploy` without `--new` upgrades the selected instance. `deploy --new` provisions a new instance.
 
 ### 5. No Hidden Mutations
 
@@ -175,7 +175,7 @@ nrdocs credentials remove <site-id>
 ### Administrative commands
 
 ```text
-nrdocs deploy [--domain <hostname>] [--instance <instance-id>]
+nrdocs deploy [--new] [--domain <hostname>] [--instance <instance-id>]
 
 nrdocs instance list
 nrdocs instance show [instance-id]

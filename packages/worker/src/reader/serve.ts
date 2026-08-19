@@ -8,9 +8,11 @@ import {
 } from '@nrdocs/persistence';
 import {
   foldSlugInput,
-  parseManifestV1,
+  isManifestV2,
+  parseManifest,
   parseSlug,
   type ManifestV1,
+  type ManifestV2,
   type RequestId,
 } from '@nrdocs/contracts';
 import { ApiError } from '../http.js';
@@ -68,17 +70,17 @@ export function siteIsReadable(site: SiteRow | null): site is SiteRow {
   return Boolean(site && site.enabled && site.current_artifact_id);
 }
 
-async function loadCurrentManifest(
+export async function loadCurrentManifest(
   store: ArtifactObjectStore,
   site: SiteRow,
-): Promise<ManifestV1 | 'missing' | 'invalid'> {
+): Promise<ManifestV1 | ManifestV2 | 'missing' | 'invalid'> {
   if (!site.current_artifact_id) return 'missing';
   const key = artifactObjectKey(site.id, site.current_artifact_id, 'nrdocs-manifest.json');
   const bytes = await store.get(key);
   if (!bytes) return 'missing';
   try {
     const raw = JSON.parse(new TextDecoder().decode(bytes)) as unknown;
-    return await parseManifestV1(raw, { verifyArtifactDigest: false });
+    return await parseManifest(raw, { verifyArtifactDigest: false });
   } catch {
     return 'invalid';
   }
@@ -105,7 +107,7 @@ function normalizeSitePath(pathname: string, slug: string): string | null {
   return hadTrailingSlash ? `${joined}/` : joined;
 }
 
-async function authorizedForPasswordSite(
+export async function authorizedForPasswordSite(
   ctx: ReaderContext,
   site: SiteRow,
   request: Request,
@@ -139,19 +141,30 @@ export async function redirectToPassword(
 async function serveObject(
   ctx: ReaderContext,
   site: SiteRow,
-  manifest: ManifestV1,
+  manifest: ManifestV1 | ManifestV2,
   siteRelativePath: string,
   method: string,
+  authorized: boolean,
 ): Promise<Response> {
   const lang = siteLang(site);
+  const pageSchema = isManifestV2(manifest) ? 2 : 1;
 
   for (const page of manifest.pages) {
     if (page.route === siteRelativePath) {
-      const key = artifactObjectKey(site.id, site.current_artifact_id!, page.object);
+      const object = isManifestV2(manifest)
+        ? (page as ManifestV2['pages'][number]).html.object
+        : (page as ManifestV1['pages'][number]).object;
+      const key = artifactObjectKey(site.id, site.current_artifact_id!, object);
       const bytes = await ctx.store.get(key);
       if (!bytes)
         return htmlResponse(unavailablePage(ctx.requestId, lang), 503, { hsts: ctx.hsts });
-      const headers = new Headers(htmlSecurityHeaders({ hsts: ctx.hsts }));
+      const headers = new Headers(htmlSecurityHeaders({ hsts: ctx.hsts, pageSchema }));
+      if (isManifestV2(manifest) && (site.access_mode === 'public' || authorized)) {
+        headers.set(
+          'link',
+          `</_nrdocs/agent/${site.slug}/index.md>; rel="alternate"; type="text/markdown"`,
+        );
+      }
       if (method === 'HEAD') return new Response(null, { status: 200, headers });
       return new Response(Uint8Array.from(bytes), { status: 200, headers });
     }
@@ -262,7 +275,9 @@ async function handleSiteContentInner(
     });
   }
 
-  return serveObject(ctx, site, manifest, sitePath, method);
+  const authorized =
+    site.access_mode === 'public' || (await authorizedForPasswordSite(ctx, site, request));
+  return serveObject(ctx, site, manifest, sitePath, method, authorized);
 }
 
 export async function handleSiteContent(

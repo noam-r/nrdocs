@@ -66,9 +66,10 @@ describe('Phase 4 render + pack', () => {
         const home = artifact.files.find((f) => f.objectPath === 'pages/index.html')!;
         const html = new TextDecoder().decode(home.bytes);
         expect(html.startsWith('<!doctype html>\n<html lang="en" dir="ltr">')).toBe(true);
-        expect(html).toContain('href="/_nrdocs/v1/reader.css"');
-        expect(html).toContain('href="/_nrdocs/v1/logo.svg"');
-        expect(html).toContain('src="/_nrdocs/v1/reader.js"');
+        expect(html).toContain('href="/_nrdocs/v2/reader.css"');
+        expect(html).toContain('href="/_nrdocs/v2/logo.svg"');
+        expect(html).toContain('src="/_nrdocs/v2/reader.js"');
+        expect(html).toContain('class="nr-ai-share nr-icon-btn"');
         expect(html).toContain('href="overview/"');
         expect(html).toContain('class="language-javascript"');
         expect(html).not.toContain('site_');
@@ -80,10 +81,11 @@ describe('Phase 4 render + pack', () => {
         expect(ohtml).toContain('data-nr-mermaid');
         expect(ohtml).toContain('../images/a.png');
 
+        expect(artifact.manifest.schema_version).toBe(2);
         expect(artifact.manifest.artifact.digest).toBe(digest);
         expect(artifact.manifest.pages).toHaveLength(2);
         expect(artifact.manifest.assets).toHaveLength(1);
-        expect(artifact.files.some((f) => f.objectPath.endsWith('.md'))).toBe(false);
+        expect(artifact.files.some((f) => f.objectPath === 'agent/index.md')).toBe(true);
         expect(artifact.files.some((f) => f.objectPath === 'nrdocs.yml')).toBe(false);
       },
     );

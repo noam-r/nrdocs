@@ -83,6 +83,7 @@ async function withWorker(
     ARTIFACTS: store,
     NRDOCS_INSTANCE_ID: INST,
     NRDOCS_PACKAGE_VERSION: '2.0.0',
+    NRDOCS_CANONICAL_ORIGIN: 'https://docs.example.com',
     __artifactStore: store,
     __clientIp: '203.0.113.10',
   };
@@ -134,6 +135,7 @@ describe('publisher API', () => {
       const data = parseProtocolVersionData(await res.json());
       expect(data.product).toBe('nrdocs');
       expect(data.api_versions).toEqual([1]);
+      expect(data.artifact_schema_versions).toEqual([1, 2]);
     });
   });
 

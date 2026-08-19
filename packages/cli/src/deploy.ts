@@ -19,6 +19,7 @@ import { CliError, usageError } from './errors.js';
 import { presentHumanSuccess } from './present.js';
 import { requireInteractiveTerminal, type Terminal } from './terminal.js';
 import {
+  listInstanceDescriptors,
   readActiveInstanceId,
   readInstanceDescriptor,
   writeActiveInstanceId,
@@ -335,27 +336,25 @@ export async function runDeployCommand(
     presentHumanSuccess(
       ctx.runtime,
       [
-        'nrdocs deploy [--domain <hostname>] [--instance <instance-id>]',
+        'nrdocs deploy [--new] [--domain <hostname>] [--instance <instance-id>]',
         '',
-        'Provisions a Cloudflare instance (Worker + D1 + R2) that hosts documentation',
-        'sites. It does not upload Markdown; use site create, connect, and publish after.',
+        'Upgrades the selected instance, or provisions a new Cloudflare instance',
+        '(Worker + D1 + R2) when you pass --new. It does not upload Markdown;',
+        'use site create, connect, and publish after.',
         '',
-        'Without --domain, you choose workers.dev or a custom domain interactively.',
-        'With --domain, that hostname becomes the only canonical origin.',
+        'Bare deploy upgrades the active instance. --instance upgrades that local',
+        'instance. --new creates a new instance. --domain is only valid with --new.',
+        'Without --domain, a new instance chooses workers.dev or a custom domain',
+        'interactively.',
       ].join('\n') + '\n',
     );
     return;
   }
   if (ctx.json) throw usageError('deploy does not support --json.');
-  requireInteractiveTerminal(ctx.runtime, 'deploy');
-
-  if (!options.cloudflare) {
-    const { createDefaultDeployOptions } = await import('./deploy/production.js');
-    options = { ...(await createDefaultDeployOptions(ctx.runtime)), ...options };
-  }
 
   const { flags, positionals } = parseFlags(args, {
     string: ['--domain', '--instance'],
+    boolean: ['--new'],
   });
   if (positionals.length > 0) throw usageError('deploy does not take positional arguments.');
   if (ctx.instance !== undefined && flags['--instance'] !== undefined) {
@@ -364,8 +363,78 @@ export async function runDeployCommand(
   const instanceFlag =
     (typeof flags['--instance'] === 'string' ? flags['--instance'] : undefined) ?? ctx.instance;
   const domainFlag = typeof flags['--domain'] === 'string' ? flags['--domain'] : undefined;
+  const wantNew = flags['--new'] === true;
   if (domainFlag !== undefined) {
     requireCanonicalHostname(domainFlag, '--domain');
+  }
+  if (wantNew && instanceFlag) {
+    throw usageError('--new cannot be combined with --instance.');
+  }
+  if (domainFlag !== undefined && !wantNew) {
+    throw usageError(
+      '--domain is only valid with --new.\nCreate a new instance with:\n  nrdocs deploy --new --domain <hostname>',
+    );
+  }
+
+  const known = await listInstanceDescriptors(ctx.runtime);
+  const active = await readActiveInstanceId(ctx.runtime);
+
+  let descriptor: InstanceDescriptor | undefined;
+  let isNew = false;
+
+  if (instanceFlag) {
+    const id = parseInstanceId(instanceFlag);
+    if (!id) throw usageError('--instance requires a valid opaque instance ID.');
+    descriptor = await readInstanceDescriptor(ctx.runtime, id);
+  } else if (wantNew) {
+    isNew = true;
+  } else if (active) {
+    descriptor = await readInstanceDescriptor(ctx.runtime, active);
+  } else {
+    throw usageError(
+      [
+        'nrdocs deploy does not create a new Cloudflare instance unless you pass --new.',
+        ...(known.length === 0
+          ? []
+          : [
+              '',
+              'Local instances:',
+              ...known.map((d) => `  ${d.instance_id}  ${d.display_name}`),
+              '',
+              'Select one, then upgrade it:',
+              '  nrdocs instance use <instance-id>',
+              '  nrdocs deploy',
+              'Or upgrade a specific instance:',
+              '  nrdocs deploy --instance <instance-id>',
+            ]),
+        '',
+        'To provision a new instance (Worker, D1, and R2):',
+        '  nrdocs deploy --new',
+      ].join('\n'),
+    );
+  }
+
+  requireInteractiveTerminal(ctx.runtime, 'deploy');
+
+  if (isNew && known.length > 0) {
+    presentHumanSuccess(
+      ctx.runtime,
+      [
+        'This will provision a new Cloudflare instance (Worker, D1, and R2).',
+        'It will not upgrade an existing instance:',
+        ...known.map(
+          (d) =>
+            `  ${d.display_name}  ${d.instance_id}${d.canonical_origin ? `  ${d.canonical_origin}` : ''}`,
+        ),
+      ].join('\n'),
+    );
+    const confirmed = await promptYesNo(ctx.terminal, 'Create a new instance? [y/N]');
+    if (!confirmed) throw usageError('Deploy cancelled.');
+  }
+
+  if (!options.cloudflare) {
+    const { createDefaultDeployOptions } = await import('./deploy/production.js');
+    options = { ...(await createDefaultDeployOptions(ctx.runtime)), ...options };
   }
 
   if (!options.cloudflare) {
@@ -385,104 +454,113 @@ export async function runDeployCommand(
   // Snapshot invocation directory contents to prove no durable files are written there.
   const cwdBefore = await snapshotDir(ctx.runtime.cwd, ctx);
 
-  let descriptor: InstanceDescriptor;
-  let isNew = false;
+  if (isNew) {
+    presentHumanSuccess(
+      ctx.runtime,
+      [
+        'nrdocs deploy --new creates a Cloudflare instance that will host your documentation.',
+        'Markdown is published later with: nrdocs site create → connect → publish.',
+        '',
+        'Each site will be available at:',
+        '  <instance-origin>/<slug>/',
+      ].join('\n'),
+    );
 
-  if (instanceFlag) {
-    const id = parseInstanceId(instanceFlag);
-    if (!id) throw usageError('--instance requires a valid opaque instance ID.');
-    descriptor = await readInstanceDescriptor(ctx.runtime, id);
-  } else {
-    const active = await readActiveInstanceId(ctx.runtime);
-    if (active) {
-      descriptor = await readInstanceDescriptor(ctx.runtime, active);
+    const displayRaw = await ctx.terminal.promptLine('Instance name (label only):');
+    const display_name = normalizeDisplayName(displayRaw);
+    if (!display_name) throw usageError('Invalid instance name.');
+
+    // Auth + account before origin choice (needed for zones / workers.dev subdomain).
+    const tempDir = options.mkdtemp ? await options.mkdtemp() : await createNeutralTemp();
+    try {
+      if (options.runCommand) {
+        await resolveCloudflareCredential(ctx.runtime, options.runCommand, tempDir);
+      }
+    } finally {
+      if (options.rmTemp) await options.rmTemp(tempDir);
+    }
+
+    const accounts = await cf.listAccounts().catch(mapCfError);
+    let account_id: string;
+    const pinned = await resolveCloudflareAccountId(ctx.runtime);
+    if (pinned) {
+      if (!accounts.some((a) => a.id === pinned)) {
+        throw authorityError('CLOUDFLARE_ACCOUNT_ID is not accessible to this credential.');
+      }
+      account_id = pinned;
+    } else if (accounts.length === 1) {
+      account_id = accounts[0]!.id;
+    } else if (accounts.length === 0) {
+      throw authorityError('No Cloudflare accounts are accessible.');
     } else {
-      isNew = true;
       presentHumanSuccess(
         ctx.runtime,
-        [
-          'nrdocs deploy creates a Cloudflare instance that will host your documentation.',
-          'Markdown is published later with: nrdocs site create → connect → publish.',
-          '',
-          'Each site will be available at:',
-          '  <instance-origin>/<slug>/',
-        ].join('\n'),
+        accounts.map((a, i) => `  [${i + 1}] ${a.name} (${a.id})`).join('\n'),
       );
-
-      const displayRaw = await ctx.terminal.promptLine('Instance name (label only):');
-      const display_name = normalizeDisplayName(displayRaw);
-      if (!display_name) throw usageError('Invalid instance name.');
-
-      // Auth + account before origin choice (needed for zones / workers.dev subdomain).
-      const tempDir = options.mkdtemp ? await options.mkdtemp() : await createNeutralTemp();
-      try {
-        if (options.runCommand) {
-          await resolveCloudflareCredential(ctx.runtime, options.runCommand, tempDir);
-        }
-      } finally {
-        if (options.rmTemp) await options.rmTemp(tempDir);
+      const choice = Number((await ctx.terminal.promptLine('Account number:')).trim());
+      if (!Number.isInteger(choice) || choice < 1 || choice > accounts.length) {
+        throw usageError('Invalid account selection.');
       }
-
-      const accounts = await cf.listAccounts().catch(mapCfError);
-      let account_id: string;
-      const pinned = await resolveCloudflareAccountId(ctx.runtime);
-      if (pinned) {
-        if (!accounts.some((a) => a.id === pinned)) {
-          throw authorityError('CLOUDFLARE_ACCOUNT_ID is not accessible to this credential.');
-        }
-        account_id = pinned;
-      } else if (accounts.length === 1) {
-        account_id = accounts[0]!.id;
-      } else if (accounts.length === 0) {
-        throw authorityError('No Cloudflare accounts are accessible.');
-      } else {
-        presentHumanSuccess(
-          ctx.runtime,
-          accounts.map((a, i) => `  [${i + 1}] ${a.name} (${a.id})`).join('\n'),
-        );
-        const choice = Number((await ctx.terminal.promptLine('Account number:')).trim());
-        if (!Number.isInteger(choice) || choice < 1 || choice > accounts.length) {
-          throw usageError('Invalid account selection.');
-        }
-        account_id = accounts[choice - 1]!.id;
-      }
-
-      const suffix = generateResourceSuffix(randomBytes(16));
-      const names = plannedResourceNames(account_id, suffix);
-      const instance_id = generateInstanceId(randomBytes(16));
-      const accountSubdomain = await cf.getWorkersDevSubdomain(account_id).catch(mapCfError);
-      const plannedWorkersDevOrigin = workersDevOrigin(names.worker_name, accountSubdomain);
-
-      const custom_hostname = await promptPublishOrigin(
-        ctx,
-        cf,
-        account_id,
-        plannedWorkersDevOrigin,
-        domainFlag,
-      );
-
-      descriptor = {
-        instance_id,
-        display_name,
-        canonical_origin: '',
-        custom_hostname,
-        account_id,
-        resource_suffix: suffix,
-        database_id: '',
-        bucket_name: names.bucket_name,
-        worker_name: names.worker_name,
-        status: 'provisioning',
-        deployed_version: packageVersion,
-        reconciliation: {
-          completed_steps: [],
-          resume_hint: `nrdocs deploy --instance ${instance_id}`,
-        },
-      };
-      await writeInstanceDescriptor(ctx.runtime, descriptor);
+      account_id = accounts[choice - 1]!.id;
     }
+
+    const suffix = generateResourceSuffix(randomBytes(16));
+    const names = plannedResourceNames(account_id, suffix);
+    const instance_id = generateInstanceId(randomBytes(16));
+    const accountSubdomain = await cf.getWorkersDevSubdomain(account_id).catch(mapCfError);
+    const plannedWorkersDevOrigin = workersDevOrigin(names.worker_name, accountSubdomain);
+
+    const custom_hostname = await promptPublishOrigin(
+      ctx,
+      cf,
+      account_id,
+      plannedWorkersDevOrigin,
+      domainFlag,
+    );
+
+    descriptor = {
+      instance_id,
+      display_name,
+      canonical_origin: '',
+      custom_hostname,
+      account_id,
+      resource_suffix: suffix,
+      database_id: '',
+      bucket_name: names.bucket_name,
+      worker_name: names.worker_name,
+      status: 'provisioning',
+      deployed_version: packageVersion,
+      reconciliation: {
+        completed_steps: [],
+        resume_hint: `nrdocs deploy --instance ${instance_id}`,
+      },
+    };
+    await writeInstanceDescriptor(ctx.runtime, descriptor);
+  } else if (descriptor) {
+    presentHumanSuccess(
+      ctx.runtime,
+      [
+        'Updating existing instance (not creating a new one):',
+        `  Name:      ${descriptor.display_name}`,
+        `  Instance:  ${descriptor.instance_id}`,
+        ...(descriptor.canonical_origin ? [`  Origin:    ${descriptor.canonical_origin}`] : []),
+      ].join('\n'),
+    );
   }
 
-  presentHumanSuccess(ctx.runtime, 'Creating Cloudflare resources...');
+  if (!descriptor) {
+    throw new CliError({
+      code: 'internal',
+      phase: 'internal',
+      exit_code: ExitCode.InternalSoftware,
+      safe_message: 'Deploy is missing an instance descriptor.',
+    });
+  }
+
+  presentHumanSuccess(
+    ctx.runtime,
+    isNew ? 'Creating Cloudflare resources...' : 'Updating Cloudflare resources...',
+  );
 
   try {
     descriptor = await reconcileInstance(ctx, cf, descriptor, {
@@ -740,6 +818,10 @@ async function reconcileInstance(
       }
       customDomainZone = { id: zone.id, name: zone.name };
     }
+    const plannedOrigin = desc.custom_hostname
+      ? `https://${desc.custom_hostname}`
+      : desc.canonical_origin ||
+        workersDevOrigin(names.worker_name, await cf.getWorkersDevSubdomain(desc.account_id));
     const result = await cf.deployWorker({
       accountId: desc.account_id,
       workerName: names.worker_name,
@@ -755,6 +837,7 @@ async function reconcileInstance(
       ...(preserveSessionKey ? {} : { sessionKeyBytes: options.randomBytes(32) }),
       workersDev: desc.custom_hostname === null,
       customDomain: desc.custom_hostname,
+      canonicalOrigin: plannedOrigin.replace(/\/$/, ''),
       ...(customDomainZone
         ? {
             customDomainZoneId: customDomainZone.id,

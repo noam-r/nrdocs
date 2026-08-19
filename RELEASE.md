@@ -31,6 +31,10 @@ pnpm verify
 Runs format, lint, build, typecheck, unit/integration tests, local e2e smoke,
 and `pack:check`.
 
+New publications use artifact schema v2 (HTML plus stored agent Markdown). The
+Worker still serves live schema v1 artifacts. Share-with-LLM uses HMAC grants,
+not a D1 table.
+
 ---
 
 ## 2. Store the Cloudflare API token
@@ -147,7 +151,7 @@ reachable, then deletes only those resources.
 
 ---
 
-## Appendix: custom domain (`nrdocs deploy --domain`)
+## Appendix: custom domain (`nrdocs deploy --new --domain`)
 
 Same file and account permissions as §2, plus two Zone rows on the Cloudflare
 token:

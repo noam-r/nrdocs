@@ -157,6 +157,14 @@ exactly `access` or `logout`, `iat` is an integer Unix second, and `nonce` is
 unpadded base64url for exactly 16 random bytes. Duplicate, missing, unknown, or
 wrongly typed fields are rejected.
 
+Agent-share POSTs use the same token encoding with `action` exactly `agent-share`.
+That payload binds `site_id`, `generation`, `iat`, and `nonce` and must not
+include `return_path`. Access and logout tokens cannot mint grants. The POST
+`Origin` must equal the `NRDOCS_CANONICAL_ORIGIN` Worker binding. JSON bodies are
+at most 4 KiB and contain exactly `site`, `duration`, and `csrf`. Allowed
+durations are 1 hour, 24 hours, and 7 days. Grants are HMAC tokens with payload
+`{ v, site_id, generation, iat, exp, nonce }` and are not stored in D1.
+
 ## Rate Limiting
 
 Worker Rate Limiting bindings are an abuse-control layer, not an accounting or
@@ -171,6 +179,8 @@ value; plaintext IP addresses and tokens are not stored in keys or logs.
 | Resolve-target requests per valid token                    | 120 per 60 seconds |
 | Publish requests per site and valid token                  |  10 per 60 seconds |
 | Publication API requests per instance                      | 300 per 60 seconds |
+| Agent-share POSTs per site and source IP                   |  20 per 60 seconds |
+| Agent-share POSTs per instance                             | 200 per 60 seconds |
 
 Exceeding any applicable limit returns HTTP 429, code `rate_limited`, and
 `Retry-After: 60`. Cloudflare's rate-limiting counters may be locally scoped and
@@ -201,25 +211,28 @@ ownership. A request can never renew or release another request's lock.
 The CLI prechecks these values; the Worker independently enforces them. Crossing
 any limit fails the publication before promotion.
 
-| Resource                          |                               Maximum |
-| --------------------------------- | ------------------------------------: |
-| Compressed publication request    |                                25 MiB |
-| Total uncompressed artifact bytes |                               100 MiB |
-| Uncompressed-to-compressed ratio  |                                  20:1 |
-| Manifest document                 |                                 1 MiB |
-| Files declared by the manifest    |                                 1,000 |
-| Published pages                   |                                   500 |
-| Published assets                  |                                   500 |
-| Published attachments             |                                   200 |
-| One source Markdown file          |                                 1 MiB |
-| One complete page HTML document   |                                 2 MiB |
-| One raster image                  |                                10 MiB |
-| One attachment                    |                                25 MiB |
-| Mermaid blocks per page           |                                    50 |
-| Mermaid source per block          |                                64 KiB |
-| Archive path in UTF-8             |                             512 bytes |
-| One archive path segment in UTF-8 |                             128 bytes |
-| Attachment display filename       | 160 scalar values and 255 UTF-8 bytes |
+| Resource                             |                               Maximum |
+| ------------------------------------ | ------------------------------------: |
+| Compressed publication request       |                                25 MiB |
+| Total uncompressed artifact bytes    |                               100 MiB |
+| Uncompressed-to-compressed ratio     |                                  20:1 |
+| Manifest document                    |                                 1 MiB |
+| Files declared by the manifest       |                                 1,000 |
+| Published pages                      |                                   500 |
+| Published assets                     |                                   500 |
+| Published attachments                |                                   200 |
+| One source Markdown file             |                                 1 MiB |
+| One complete page HTML document      |                                 2 MiB |
+| One normalized agent page Markdown   |                                 1 MiB |
+| Agent index.md / agent manifest.json |                                 1 MiB |
+| Combined agent all.md                |                                 5 MiB |
+| One raster image                     |                                10 MiB |
+| One attachment                       |                                25 MiB |
+| Mermaid blocks per page              |                                    50 |
+| Mermaid source per block             |                                64 KiB |
+| Archive path in UTF-8                |                             512 bytes |
+| One archive path segment in UTF-8    |                             128 bytes |
+| Attachment display filename          | 160 scalar values and 255 UTF-8 bytes |
 
 The archive contains only regular files. Directories are implicit. Symlinks,
 hard links, devices, FIFOs, sparse entries, absolute paths, backslashes, empty
@@ -252,10 +265,13 @@ Logs must redact or omit:
 - reader passwords and password verifiers;
 - Cloudflare credentials and the session signing key;
 - request and response bodies; and
-- URL query strings.
+- URL query strings; and
+- complete agent grant tokens and grant URL path segments.
 
 Before emitting any free text, the logger replaces strings matching the
-publishing-token pattern with `[REDACTED_TOKEN]`. Safe request IDs, opaque site
+publishing-token pattern with `[REDACTED_TOKEN]` and replaces
+`/_nrdocs/agent/share/{grant}/` path segments with
+`/_nrdocs/agent/share/[REDACTED_GRANT]/`. Safe request IDs, opaque site
 and artifact IDs, status codes, durations, byte counts, and validation codes may
 be logged. Public errors never contain stack traces, SQL, object keys, verifier
 material, parser internals, or platform credentials.

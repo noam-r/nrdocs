@@ -100,8 +100,10 @@ Fixed Worker bindings are:
 - `NRDOCS_INSTANCE_ID` and `NRDOCS_PACKAGE_VERSION` as non-secret text
   bindings;
 - `PASSWORD_IP_LIMIT`, `PASSWORD_SITE_LIMIT`, `INVALID_TOKEN_LIMIT`,
-  `TOKEN_RESOLVE_LIMIT`, `TOKEN_PUBLISH_LIMIT`, and `INSTANCE_API_LIMIT` for
-  rate limiting; and
+  `TOKEN_RESOLVE_LIMIT`, `TOKEN_PUBLISH_LIMIT`, `INSTANCE_API_LIMIT`,
+  `AGENT_SHARE_IP_LIMIT`, and `AGENT_SHARE_INSTANCE_LIMIT` for rate limiting;
+- `NRDOCS_CANONICAL_ORIGIN` as the HTTPS origin used for grant URLs and
+  agent-share Origin checks; and
 - `PLATFORM_ASSETS` for versioned Worker static assets.
 
 ## Ownership Markers
@@ -120,13 +122,16 @@ or delete it.
 ## Command Semantics
 
 ```text
-nrdocs deploy [--domain <hostname>] [--instance <instance-id>]
+nrdocs deploy [--new] [--domain <hostname>] [--instance <instance-id>]
 ```
 
-Without `--instance`, deploy creates a new local instance identity and begins a
-new deployment. With `--instance`, it resumes, reconciles, or upgrades that
-known instance. `--instance` must resolve through the local descriptor store;
-arbitrary remote resource names are not accepted.
+`--new` provisions a new local instance identity and begins a first
+deployment. Without `--new`, deploy upgrades the selected instance: the
+`--instance` value when given, otherwise the active administrative instance.
+If neither is selected, deploy refuses rather than creating Cloudflare
+resources. `--instance` must resolve through the local descriptor store;
+arbitrary remote resource names are not accepted. `--domain` is valid only
+with `--new`.
 
 Before the first Cloudflare mutation, deploy atomically writes a descriptor with
 status `provisioning`. On interruption or failure it records completed safe

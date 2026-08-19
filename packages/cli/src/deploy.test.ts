@@ -152,7 +152,7 @@ describe('nrdocs deploy', () => {
       const before = await fs.readdir(cwd);
       const { client, state } = createFakeCloudflare();
       const terminal = promptTerminal(['company-docs', '1']);
-      const code = await main(['deploy'], {
+      const code = await main(['deploy', '--new'], {
         runtime,
         terminal,
         deploy: {
@@ -191,7 +191,7 @@ describe('nrdocs deploy', () => {
       const { client, state } = createFakeCloudflare();
       const terminal = promptTerminal(['company-docs', '1']);
       expect(
-        await main(['deploy'], {
+        await main(['deploy', '--new'], {
           runtime,
           terminal,
           deploy: {
@@ -253,7 +253,7 @@ describe('nrdocs deploy', () => {
     await withTemp(async (runtime, cap) => {
       const { client, state } = createFakeCloudflare();
       expect(
-        await main(['deploy'], {
+        await main(['deploy', '--new'], {
           runtime,
           terminal: promptTerminal(['company-docs', '1']),
           deploy: {
@@ -285,11 +285,124 @@ describe('nrdocs deploy', () => {
     });
   });
 
+  it('refuses to create a new instance without --new', async () => {
+    await withTemp(async (runtime, cap) => {
+      const { client, state } = createFakeCloudflare();
+      expect(
+        await main(['deploy'], {
+          runtime,
+          terminal: promptTerminal(['rogue', '1']),
+          deploy: { cloudflare: client, openD1: stableOpenD1() },
+        }),
+      ).toBe(ExitCode.Usage);
+      expect(cap.stderr).toMatch(/pass --new/i);
+      expect(state.deployedWorkers).toHaveLength(0);
+      expect(state.workers.size).toBe(0);
+    });
+  });
+
+  it('lists local instances when --new is omitted and none is active', async () => {
+    await withTemp(async (runtime, cap) => {
+      const { client, state } = createFakeCloudflare();
+      expect(
+        await main(['deploy', '--new'], {
+          runtime,
+          terminal: promptTerminal(['company-docs', '1']),
+          deploy: {
+            cloudflare: client,
+            openD1: stableOpenD1(),
+            randomBytes: (n) => new Uint8Array(n).map((_, i) => (i + 19) & 0xff),
+          },
+        }),
+      ).toBe(ExitCode.Success);
+      const active = (await readActiveInstanceId(runtime))!;
+      await fs.unlink(path.join(runtime.homeDir, '.nrdocs', 'active-instance'));
+      const deployedBefore = state.deployedWorkers.length;
+
+      expect(
+        await main(['deploy'], {
+          runtime,
+          terminal: promptTerminal(['other', '1']),
+          deploy: { cloudflare: client, openD1: stableOpenD1() },
+        }),
+      ).toBe(ExitCode.Usage);
+      expect(cap.stderr).toContain(active);
+      expect(cap.stderr).toMatch(/nrdocs deploy --new/);
+      expect(state.deployedWorkers).toHaveLength(deployedBefore);
+    });
+  });
+
+  it('rejects --new combined with --instance and --domain without --new', async () => {
+    await withTemp(async (runtime, cap) => {
+      const { client } = createFakeCloudflare();
+      expect(
+        await main(['deploy', '--new'], {
+          runtime,
+          terminal: promptTerminal(['company-docs', '1']),
+          deploy: {
+            cloudflare: client,
+            openD1: stableOpenD1(),
+            randomBytes: (n) => new Uint8Array(n).map((_, i) => (i + 21) & 0xff),
+          },
+        }),
+      ).toBe(ExitCode.Success);
+      const active = (await readActiveInstanceId(runtime))!;
+
+      expect(
+        await main(['deploy', '--new', '--instance', active], {
+          runtime,
+          terminal: createRejectingTerminal(),
+          deploy: { cloudflare: client },
+        }),
+      ).toBe(ExitCode.Usage);
+      expect(cap.stderr).toMatch(/cannot be combined/i);
+
+      expect(
+        await main(['deploy', '--domain', 'docs.example.com'], {
+          runtime,
+          terminal: createRejectingTerminal(),
+          deploy: { cloudflare: client },
+        }),
+      ).toBe(ExitCode.Usage);
+      expect(cap.stderr).toMatch(/--domain is only valid with --new/i);
+    });
+  });
+
+  it('does not create a second instance when --new is declined', async () => {
+    await withTemp(async (runtime, cap) => {
+      const { client, state } = createFakeCloudflare();
+      expect(
+        await main(['deploy', '--new'], {
+          runtime,
+          terminal: promptTerminal(['company-docs', '1']),
+          deploy: {
+            cloudflare: client,
+            openD1: stableOpenD1(),
+            randomBytes: (n) => new Uint8Array(n).map((_, i) => (i + 23) & 0xff),
+          },
+        }),
+      ).toBe(ExitCode.Success);
+      const active = await readActiveInstanceId(runtime);
+      const deployedBefore = state.deployedWorkers.length;
+
+      expect(
+        await main(['deploy', '--new'], {
+          runtime,
+          terminal: promptTerminal(['n']),
+          deploy: { cloudflare: client, openD1: stableOpenD1() },
+        }),
+      ).toBe(ExitCode.Usage);
+      expect(cap.stderr).toMatch(/cancelled/i);
+      expect(state.deployedWorkers).toHaveLength(deployedBefore);
+      expect(await readActiveInstanceId(runtime)).toBe(active);
+    });
+  });
+
   it('redeploys an active instance without re-running D1 batch migrations', async () => {
     await withTemp(async (runtime) => {
       const { client, state } = createFakeCloudflare();
       expect(
-        await main(['deploy'], {
+        await main(['deploy', '--new'], {
           runtime,
           terminal: promptTerminal(['company-docs', '1']),
           deploy: {
@@ -322,7 +435,7 @@ describe('nrdocs deploy', () => {
     await withTemp(async (runtime) => {
       const { client } = createFakeCloudflare();
       expect(
-        await main(['deploy'], {
+        await main(['deploy', '--new'], {
           runtime,
           terminal: promptTerminal(['company-docs', '1']),
           deploy: {
@@ -390,7 +503,7 @@ describe('nrdocs deploy', () => {
     await withTemp(async (runtime, cap) => {
       const { client } = createFakeCloudflare({ failStep: 'permission' });
       expect(
-        await main(['deploy'], {
+        await main(['deploy', '--new'], {
           runtime,
           terminal: promptTerminal(['x', '1']),
           deploy: { cloudflare: client },
@@ -401,7 +514,7 @@ describe('nrdocs deploy', () => {
 
     await withTemp(
       async (runtime, cap) => {
-        expect(await main(['deploy'], { runtime })).toBe(ExitCode.Usage);
+        expect(await main(['deploy', '--new'], { runtime })).toBe(ExitCode.Usage);
         expect(cap.stderr).toMatch(/interactive/i);
       },
       { tty: false },
@@ -418,7 +531,7 @@ describe('nrdocs deploy', () => {
   it('records provisioning and resume hint when a mid-deploy step fails', async () => {
     await withTemp(async (runtime, cap) => {
       const { client } = createFakeCloudflare({ failStep: 'worker' });
-      const code = await main(['deploy'], {
+      const code = await main(['deploy', '--new'], {
         runtime,
         terminal: promptTerminal(['broken', '1']),
         deploy: {
@@ -451,7 +564,7 @@ describe('nrdocs deploy', () => {
       const { client, state } = createFakeCloudflare({
         zones: [{ id: 'zone1', name: 'example.com', status: 'active' }],
       });
-      const code = await main(['deploy'], {
+      const code = await main(['deploy', '--new'], {
         runtime,
         terminal: promptTerminal(['docs-prod', '2', '1', 'docs.example.com', 'y']),
         deploy: {
@@ -483,7 +596,7 @@ describe('nrdocs deploy', () => {
       const { client, state } = createFakeCloudflare({
         zones: [{ id: 'zone1', name: 'quinovi.com', status: 'active' }],
       });
-      const code = await main(['deploy'], {
+      const code = await main(['deploy', '--new'], {
         runtime,
         terminal: promptTerminal(['nrdocs-v2', '2', '1', 'nrdocs-v2', 'y']),
         deploy: {
@@ -503,7 +616,7 @@ describe('nrdocs deploy', () => {
       const { client } = createFakeCloudflare({
         zones: [{ id: 'zone1', name: 'quinovi.com', status: 'active' }],
       });
-      const code = await main(['deploy'], {
+      const code = await main(['deploy', '--new'], {
         runtime,
         terminal: promptTerminal(['x', '2', '1', 'not a host!!!']),
         deploy: { cloudflare: client, openD1: stableOpenD1() },

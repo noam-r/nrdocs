@@ -14,8 +14,8 @@ Publisher commands:
   nrdocs credentials remove <site-id>
 
 Administrative commands:
-  nrdocs deploy [--domain <hostname>] [--instance <instance-id>]
-      Provision a Cloudflare instance (choose workers.dev or a custom domain)
+  nrdocs deploy [--new] [--domain <hostname>] [--instance <instance-id>]
+      Upgrade the selected instance, or provision a new one with --new
   nrdocs instance list
   nrdocs instance show [instance-id]
   nrdocs instance use <instance-id>

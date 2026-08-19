@@ -47,8 +47,8 @@ Operator flow (interactive TTY required for deploy, first admin publish, site, a
 # Credentials: ~/.nrdocs/cloudflare.env (mode 0600) — see ../../RELEASE.md
 unset CLOUDFLARE_API_TOKEN CLOUDFLARE_ACCOUNT_ID
 
-nrdocs deploy
-# Explains that deploy only creates the instance, then asks:
+nrdocs deploy --new
+# Creates a new Cloudflare instance. Later upgrades use: nrdocs deploy
 #   Instance name (label only)
 #   Publish location [1] workers.dev (shows exact origin) or [2] custom domain
 #   For [2]: lists Cloudflare zones → pick zone → enter hostname → confirm
@@ -72,10 +72,10 @@ Public site URL: `https://<origin>/<slug>/`.
 Non-interactive custom domain (skips the location menu):
 
 ```bash
-nrdocs deploy --domain docs.example.com
+nrdocs deploy --new --domain docs.example.com
 ```
 
-(`--domain` only for a new instance in 2.0; changing domain later is out of scope.)
+(`--domain` only with `--new`; changing domain later is out of scope.)
 
 ## Commands
 
@@ -89,7 +89,7 @@ Publisher:
 
 Administration:
 
-- `nrdocs deploy` — provision or reconcile a Cloudflare instance
+- `nrdocs deploy` — upgrade the selected instance; `nrdocs deploy --new` provisions a new one
 - `nrdocs instance list|show|use|delete` — select or tear down local instance descriptors
   (`delete` removes owned Worker + D1 + R2 after exact instance-ID confirmation)
 - `nrdocs site …` — create, list, access mode, password, enable/disable, rename, delete

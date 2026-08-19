@@ -32,7 +32,8 @@ function assertSafePath(path: string): void {
     top !== 'nrdocs-manifest.json' &&
     top !== 'pages' &&
     top !== 'assets' &&
-    top !== 'attachments'
+    top !== 'attachments' &&
+    top !== 'agent'
   ) {
     throw new ApiError(
       PublisherApiErrorCode.InvalidArtifact,

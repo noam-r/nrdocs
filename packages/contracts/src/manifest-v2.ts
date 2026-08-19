@@ -1,6 +1,5 @@
 import type { CanonicalJson } from './canonical-json.js';
 import { artifactDigestFromDescriptor, parseSha256Digest } from './digest.js';
-import { parseManifestV2, type ManifestV2 } from './manifest-v2.js';
 import {
   isAttachmentExtension,
   isForbiddenWebExtension,
@@ -12,44 +11,75 @@ import { parseSiteId, type SiteId } from './ids.js';
 import { assertDirection, assertLanguage, type Direction } from './language.js';
 import { findPathCollisions, type PathEntry } from './path-collision.js';
 import { assertTitle } from './title.js';
+import type {
+  ManifestArtifact,
+  ManifestAttachment,
+  ManifestAsset,
+  ManifestRoot,
+} from './manifest.js';
+import type { ParseManifestOptions } from './manifest.js';
+import {
+  AGENT_ALL_MD_MAX_BYTES,
+  AGENT_INDEX_MAX_BYTES,
+  AGENT_MANIFEST_JSON_MAX_BYTES,
+  AGENT_PAGE_MARKDOWN_MAX_BYTES,
+} from './agent-limits.js';
+import {
+  assertAgentRelativeRoute,
+  findAgentIdCollisions,
+  findAgentRouteCollisions,
+  isAgentHexId,
+} from './agent-ids.js';
 
-export const MANIFEST_SCHEMA_VERSION = 1 as const;
+export const MANIFEST_SCHEMA_VERSION_V2 = 2 as const;
+export const PAGE_SCHEMA_VERSION_V2 = 2 as const;
+export const AGENT_DESCRIPTOR_SCHEMA_VERSION = 1 as const;
 
-export type ManifestRoot = { kind: 'page'; route: '/' } | { kind: 'redirect'; route: string };
-
-export type ManifestPage = {
+export type AgentMediaReference = {
+  id: string;
   route: string;
-  object: string;
+};
+
+export type ManifestAssetV2 = ManifestAsset & {
+  agent: AgentMediaReference;
+};
+
+export type ManifestAttachmentV2 = ManifestAttachment & {
+  agent: AgentMediaReference;
+};
+
+export type ManifestPageV2 = {
+  id: string;
+  route: string;
   title: string;
-  size: number;
-  sha256: string;
+  html: {
+    object: string;
+    size: number;
+    sha256: string;
+  };
+  markdown: {
+    object: string;
+    size: number;
+    sha256: string;
+  };
 };
 
-export type ManifestAsset = {
-  path: string;
+export type ManifestAgentFile = {
   object: string;
-  media_type: string;
   size: number;
   sha256: string;
 };
 
-export type ManifestAttachment = {
-  path: string;
-  object: string;
-  media_type: string;
-  filename: string;
-  size: number;
-  sha256: string;
-};
-
-export type ManifestArtifact = {
-  digest: string;
-  file_count: number;
-  uncompressed_size: number;
-};
-
-export type ManifestV1 = {
+export type ManifestAgentV2 = {
   schema_version: 1;
+  index: ManifestAgentFile;
+  manifest: ManifestAgentFile;
+  all: null | ManifestAgentFile;
+};
+
+export type ManifestV2 = {
+  schema_version: 2;
+  page_schema_version: 2;
   site_id: SiteId;
   generator: { name: 'nrdocs'; version: string };
   site: {
@@ -58,20 +88,23 @@ export type ManifestV1 = {
     direction: Direction;
     root: ManifestRoot;
   };
-  pages: ManifestPage[];
-  assets: ManifestAsset[];
-  attachments: ManifestAttachment[];
+  pages: ManifestPageV2[];
+  assets: ManifestAssetV2[];
+  attachments: ManifestAttachmentV2[];
+  agent: ManifestAgentV2;
   artifact: ManifestArtifact;
 };
 
 const TOP_LEVEL = new Set([
   'schema_version',
+  'page_schema_version',
   'site_id',
   'generator',
   'site',
   'pages',
   'assets',
   'attachments',
+  'agent',
   'artifact',
 ]);
 
@@ -134,25 +167,27 @@ function assertSemver(version: unknown): string {
   return version;
 }
 
-export type ParseManifestOptions = {
-  /** When false, skip recomputing and comparing artifact.digest. Default true. */
-  verifyArtifactDigest?: boolean;
-};
-
-export async function parseManifest(
-  raw: unknown,
-  options: ParseManifestOptions = {},
-): Promise<ManifestV1 | ManifestV2> {
-  if (!isPlainObject(raw)) throw new Error('manifest must be a JSON object');
-  if (raw.schema_version === 1) return parseManifestV1(raw, options);
-  if (raw.schema_version === 2) return parseManifestV2(raw, options);
-  throw new Error('unsupported manifest schema_version');
+function parseAgentFile(raw: unknown, expectedObject: string, maxBytes: number): ManifestAgentFile {
+  if (!isPlainObject(raw)) throw new Error('agent file must be an object');
+  for (const key of Object.keys(raw)) {
+    if (!['object', 'size', 'sha256'].includes(key)) throw new Error('unknown agent file field');
+  }
+  if (typeof raw.object !== 'string' || raw.object !== expectedObject) {
+    throw new Error(`agent object must be ${expectedObject}`);
+  }
+  const size = assertNonNegInt(raw.size, 'agent file size');
+  if (size > maxBytes) throw new Error('agent file exceeds size limit');
+  return {
+    object: raw.object,
+    size,
+    sha256: assertHexSha256(raw.sha256, 'agent file sha256'),
+  };
 }
 
-export async function parseManifestV1(
+export async function parseManifestV2(
   raw: unknown,
   options: ParseManifestOptions = {},
-): Promise<ManifestV1> {
+): Promise<ManifestV2> {
   if (!isPlainObject(raw)) throw new Error('manifest must be a JSON object');
   for (const key of Object.keys(raw)) {
     if (!TOP_LEVEL.has(key)) throw new Error(`unknown manifest field: ${key}`);
@@ -161,7 +196,8 @@ export async function parseManifestV1(
     if (!(key in raw)) throw new Error(`missing manifest field: ${key}`);
   }
 
-  if (raw.schema_version !== 1) throw new Error('unsupported manifest schema_version');
+  if (raw.schema_version !== 2) throw new Error('unsupported manifest schema_version');
+  if (raw.page_schema_version !== 2) throw new Error('unsupported page_schema_version');
   const site_id = parseSiteId(raw.site_id);
   if (!site_id) throw new Error('invalid site_id');
 
@@ -200,35 +236,83 @@ export async function parseManifestV1(
     throw new Error('site.root.kind must be page or redirect');
   }
 
-  if (!Array.isArray(raw.pages)) throw new Error('pages must be an array');
-  if (!Array.isArray(raw.assets)) throw new Error('assets must be an array');
-  if (!Array.isArray(raw.attachments)) throw new Error('attachments must be an array');
+  if (!Array.isArray(raw.pages) || !Array.isArray(raw.assets) || !Array.isArray(raw.attachments)) {
+    throw new Error('pages, assets, and attachments must be arrays');
+  }
 
-  const pages: ManifestPage[] = raw.pages.map((p, i) => {
+  const pages: ManifestPageV2[] = raw.pages.map((p, i) => {
     if (!isPlainObject(p)) throw new Error(`pages[${i}] must be an object`);
     for (const key of Object.keys(p)) {
-      if (!['route', 'object', 'title', 'size', 'sha256'].includes(key)) {
+      if (!['id', 'route', 'title', 'html', 'markdown'].includes(key)) {
         throw new Error(`unknown pages[${i}] field: ${key}`);
       }
     }
-    if (typeof p.route !== 'string' || typeof p.object !== 'string') {
-      throw new Error(`pages[${i}] route/object invalid`);
+    if (!isAgentHexId(p.id) || typeof p.route !== 'string') {
+      throw new Error(`pages[${i}] id/route invalid`);
     }
     assertPublicRoute(p.route);
-    assertSafeObjectPath(p.object, 'pages/');
+    if (!isPlainObject(p.html) || !isPlainObject(p.markdown)) {
+      throw new Error(`pages[${i}] html/markdown invalid`);
+    }
+    for (const key of Object.keys(p.html)) {
+      if (!['object', 'size', 'sha256'].includes(key)) throw new Error('unknown html field');
+    }
+    for (const key of Object.keys(p.markdown)) {
+      if (!['object', 'size', 'sha256'].includes(key)) throw new Error('unknown markdown field');
+    }
+    if (typeof p.html.object !== 'string' || typeof p.markdown.object !== 'string') {
+      throw new Error(`pages[${i}] object paths invalid`);
+    }
+    assertSafeObjectPath(p.html.object, 'pages/');
+    if (p.markdown.object !== `agent/pages/${p.id}.md`) {
+      throw new Error(`pages[${i}] markdown object path invalid`);
+    }
+    const mdSize = assertNonNegInt(p.markdown.size, `pages[${i}].markdown.size`);
+    if (mdSize > AGENT_PAGE_MARKDOWN_MAX_BYTES)
+      throw new Error(`pages[${i}] markdown exceeds 1 MiB`);
     return {
+      id: p.id,
       route: p.route,
-      object: p.object,
       title: assertTitle(p.title),
-      size: assertNonNegInt(p.size, `pages[${i}].size`),
-      sha256: assertHexSha256(p.sha256, `pages[${i}].sha256`),
+      html: {
+        object: p.html.object,
+        size: assertNonNegInt(p.html.size, `pages[${i}].html.size`),
+        sha256: assertHexSha256(p.html.sha256, `pages[${i}].html.sha256`),
+      },
+      markdown: {
+        object: p.markdown.object,
+        size: mdSize,
+        sha256: assertHexSha256(p.markdown.sha256, `pages[${i}].markdown.sha256`),
+      },
     };
   });
 
-  const assets: ManifestAsset[] = raw.assets.map((a, i) => {
+  if (findAgentIdCollisions(pages.map((p) => p.id)).length > 0) {
+    throw new Error('duplicate page id');
+  }
+
+  const parseAgentRef = (
+    rawAgent: unknown,
+    kind: 'assets' | 'attachments',
+  ): AgentMediaReference => {
+    if (!isPlainObject(rawAgent)) throw new Error('agent reference must be an object');
+    for (const key of Object.keys(rawAgent)) {
+      if (!['id', 'route'].includes(key)) throw new Error('unknown agent reference field');
+    }
+    if (!isAgentHexId(rawAgent.id) || typeof rawAgent.route !== 'string') {
+      throw new Error('agent reference invalid');
+    }
+    assertAgentRelativeRoute(rawAgent.route, kind);
+    if (!rawAgent.route.startsWith(`${kind}/${rawAgent.id}/`)) {
+      throw new Error('agent route id mismatch');
+    }
+    return { id: rawAgent.id, route: rawAgent.route };
+  };
+
+  const assets: ManifestAssetV2[] = raw.assets.map((a, i) => {
     if (!isPlainObject(a)) throw new Error(`assets[${i}] must be an object`);
     for (const key of Object.keys(a)) {
-      if (!['path', 'object', 'media_type', 'size', 'sha256'].includes(key)) {
+      if (!['path', 'object', 'media_type', 'size', 'sha256', 'agent'].includes(key)) {
         throw new Error(`unknown assets[${i}] field: ${key}`);
       }
     }
@@ -245,8 +329,7 @@ export async function parseManifestV1(
     if (!ext || !isImageExtension(ext) || isForbiddenWebExtension(ext)) {
       throw new Error(`assets[${i}] extension not allowed`);
     }
-    const expected = mediaTypeForExtension(ext);
-    if (a.media_type !== expected) {
+    if (a.media_type !== mediaTypeForExtension(ext)) {
       throw new Error(`assets[${i}] media_type mismatch`);
     }
     return {
@@ -255,13 +338,14 @@ export async function parseManifestV1(
       media_type: a.media_type,
       size: assertNonNegInt(a.size, `assets[${i}].size`),
       sha256: assertHexSha256(a.sha256, `assets[${i}].sha256`),
+      agent: parseAgentRef(a.agent, 'assets'),
     };
   });
 
-  const attachments: ManifestAttachment[] = raw.attachments.map((a, i) => {
+  const attachments: ManifestAttachmentV2[] = raw.attachments.map((a, i) => {
     if (!isPlainObject(a)) throw new Error(`attachments[${i}] must be an object`);
     for (const key of Object.keys(a)) {
-      if (!['path', 'object', 'media_type', 'filename', 'size', 'sha256'].includes(key)) {
+      if (!['path', 'object', 'media_type', 'filename', 'size', 'sha256', 'agent'].includes(key)) {
         throw new Error(`unknown attachments[${i}] field: ${key}`);
       }
     }
@@ -282,8 +366,7 @@ export async function parseManifestV1(
     if (!ext || !isAttachmentExtension(ext) || isForbiddenWebExtension(ext)) {
       throw new Error(`attachments[${i}] extension not allowed`);
     }
-    const expected = mediaTypeForExtension(ext);
-    if (a.media_type !== expected) {
+    if (a.media_type !== mediaTypeForExtension(ext)) {
       throw new Error(`attachments[${i}] media_type mismatch`);
     }
     return {
@@ -293,8 +376,35 @@ export async function parseManifestV1(
       filename: a.filename,
       size: assertNonNegInt(a.size, `attachments[${i}].size`),
       sha256: assertHexSha256(a.sha256, `attachments[${i}].sha256`),
+      agent: parseAgentRef(a.agent, 'attachments'),
     };
   });
+
+  const mediaIds = [...assets.map((a) => a.agent.id), ...attachments.map((a) => a.agent.id)];
+  if (findAgentIdCollisions(mediaIds).length > 0) throw new Error('duplicate agent media id');
+  const agentRoutes = [
+    ...assets.map((a) => a.agent.route),
+    ...attachments.map((a) => a.agent.route),
+  ];
+  if (findAgentRouteCollisions(agentRoutes).length > 0) throw new Error('agent route collision');
+
+  if (!isPlainObject(raw.agent)) throw new Error('agent must be an object');
+  for (const key of Object.keys(raw.agent)) {
+    if (!['schema_version', 'index', 'manifest', 'all'].includes(key)) {
+      throw new Error(`unknown agent field: ${key}`);
+    }
+  }
+  if (raw.agent.schema_version !== 1) throw new Error('unsupported agent schema_version');
+  const index = parseAgentFile(raw.agent.index, 'agent/index.md', AGENT_INDEX_MAX_BYTES);
+  const agentManifest = parseAgentFile(
+    raw.agent.manifest,
+    'agent/manifest.json',
+    AGENT_MANIFEST_JSON_MAX_BYTES,
+  );
+  let all: ManifestAgentFile | null = null;
+  if (raw.agent.all !== null) {
+    all = parseAgentFile(raw.agent.all, 'agent/all.md', AGENT_ALL_MD_MAX_BYTES);
+  }
 
   if (!isPlainObject(raw.artifact)) throw new Error('artifact must be an object');
   for (const key of Object.keys(raw.artifact)) {
@@ -310,14 +420,18 @@ export async function parseManifestV1(
     'artifact.uncompressed_size',
   );
 
-  const expectedCount = pages.length + assets.length + attachments.length;
+  const extraAgentFiles = 2 + (all ? 1 : 0);
+  const expectedCount = pages.length * 2 + assets.length + attachments.length + extraAgentFiles;
   if (file_count !== expectedCount) {
     throw new Error('artifact.file_count does not match payload entries');
   }
   const expectedSize =
-    pages.reduce((s, p) => s + p.size, 0) +
+    pages.reduce((s, p) => s + p.html.size + p.markdown.size, 0) +
     assets.reduce((s, a) => s + a.size, 0) +
-    attachments.reduce((s, a) => s + a.size, 0);
+    attachments.reduce((s, a) => s + a.size, 0) +
+    index.size +
+    agentManifest.size +
+    (all ? all.size : 0);
   if (uncompressed_size !== expectedSize) {
     throw new Error('artifact.uncompressed_size does not match payload sizes');
   }
@@ -336,9 +450,13 @@ export async function parseManifestV1(
     ...attachments.map((a) => ({ collection: 'attachments' as const, path: a.path })),
   ];
   const objectEntries: PathEntry[] = [
-    ...pages.map((p) => ({ collection: 'pages' as const, path: p.object })),
+    ...pages.map((p) => ({ collection: 'pages' as const, path: p.html.object })),
+    ...pages.map((p) => ({ collection: 'pages' as const, path: p.markdown.object })),
     ...assets.map((a) => ({ collection: 'assets' as const, path: a.object })),
     ...attachments.map((a) => ({ collection: 'attachments' as const, path: a.object })),
+    { collection: 'pages', path: index.object },
+    { collection: 'pages', path: agentManifest.object },
+    ...(all ? [{ collection: 'pages' as const, path: all.object }] : []),
   ];
   if (findPathCollisions(publicEntries).length > 0) {
     throw new Error('manifest public path collision');
@@ -347,29 +465,31 @@ export async function parseManifestV1(
     throw new Error('manifest object path collision');
   }
 
-  const manifest: ManifestV1 = {
-    schema_version: 1,
+  const manifest: ManifestV2 = {
+    schema_version: 2,
+    page_schema_version: 2,
     site_id,
     generator,
     site: { title, language, direction, root },
     pages,
     assets,
     attachments,
+    agent: { schema_version: 1, index, manifest: agentManifest, all },
     artifact: { digest, file_count, uncompressed_size },
   };
 
   if (options.verifyArtifactDigest !== false) {
-    const expected = await computeArtifactDigest(manifest);
+    const expected = await computeArtifactDigestV2(manifest);
     if (expected !== digest) throw new Error('artifact.digest mismatch');
   }
 
   return manifest;
 }
 
-/** Manifest JSON shape with artifact.digest omitted for hashing. */
-export function manifestDescriptorWithoutDigest(manifest: ManifestV1): CanonicalJson {
+export function manifestV2DescriptorWithoutDigest(manifest: ManifestV2): CanonicalJson {
   return {
     schema_version: manifest.schema_version,
+    page_schema_version: manifest.page_schema_version,
     site_id: manifest.site_id,
     generator: { ...manifest.generator },
     site: {
@@ -378,9 +498,36 @@ export function manifestDescriptorWithoutDigest(manifest: ManifestV1): Canonical
       direction: manifest.site.direction,
       root: { ...manifest.site.root },
     },
-    pages: manifest.pages.map((p) => ({ ...p })),
-    assets: manifest.assets.map((a) => ({ ...a })),
-    attachments: manifest.attachments.map((a) => ({ ...a })),
+    pages: manifest.pages.map((p) => ({
+      id: p.id,
+      route: p.route,
+      title: p.title,
+      html: { ...p.html },
+      markdown: { ...p.markdown },
+    })),
+    assets: manifest.assets.map((a) => ({
+      path: a.path,
+      object: a.object,
+      media_type: a.media_type,
+      size: a.size,
+      sha256: a.sha256,
+      agent: { ...a.agent },
+    })),
+    attachments: manifest.attachments.map((a) => ({
+      path: a.path,
+      object: a.object,
+      media_type: a.media_type,
+      filename: a.filename,
+      size: a.size,
+      sha256: a.sha256,
+      agent: { ...a.agent },
+    })),
+    agent: {
+      schema_version: manifest.agent.schema_version,
+      index: { ...manifest.agent.index },
+      manifest: { ...manifest.agent.manifest },
+      all: manifest.agent.all ? { ...manifest.agent.all } : null,
+    },
     artifact: {
       file_count: manifest.artifact.file_count,
       uncompressed_size: manifest.artifact.uncompressed_size,
@@ -388,34 +535,24 @@ export function manifestDescriptorWithoutDigest(manifest: ManifestV1): Canonical
   };
 }
 
-export async function computeArtifactDigest(manifest: ManifestV1): Promise<string> {
-  return artifactDigestFromDescriptor(manifestDescriptorWithoutDigest(manifest));
+export async function computeArtifactDigestV2(manifest: ManifestV2): Promise<string> {
+  return artifactDigestFromDescriptor(manifestV2DescriptorWithoutDigest(manifest));
 }
 
-export type ManifestDraft = Omit<ManifestV1, 'artifact'> & {
+export type ManifestDraftV2 = Omit<ManifestV2, 'artifact'> & {
   artifact: Omit<ManifestArtifact, 'digest'>;
 };
 
-export async function sealManifest(draft: ManifestDraft): Promise<ManifestV1> {
-  const descriptor: CanonicalJson = {
-    schema_version: draft.schema_version,
-    site_id: draft.site_id,
-    generator: { ...draft.generator },
-    site: {
-      title: draft.site.title,
-      language: draft.site.language,
-      direction: draft.site.direction,
-      root: { ...draft.site.root },
-    },
-    pages: draft.pages.map((p) => ({ ...p })),
-    assets: draft.assets.map((a) => ({ ...a })),
-    attachments: draft.attachments.map((a) => ({ ...a })),
+export async function sealManifestV2(draft: ManifestDraftV2): Promise<ManifestV2> {
+  const withPlaceholder: ManifestV2 = {
+    ...draft,
     artifact: {
+      digest: 'sha256:' + '0'.repeat(64),
       file_count: draft.artifact.file_count,
       uncompressed_size: draft.artifact.uncompressed_size,
     },
   };
-  const digest = await artifactDigestFromDescriptor(descriptor);
+  const digest = await computeArtifactDigestV2(withPlaceholder);
   return {
     ...draft,
     artifact: {
@@ -424,4 +561,8 @@ export async function sealManifest(draft: ManifestDraft): Promise<ManifestV1> {
       uncompressed_size: draft.artifact.uncompressed_size,
     },
   };
+}
+
+export function isManifestV2(manifest: { schema_version: number }): manifest is ManifestV2 {
+  return manifest.schema_version === 2;
 }

@@ -29,6 +29,8 @@ const RATE_LIMIT_SPECS = [
   { name: 'TOKEN_RESOLVE_LIMIT', limit: 120, period: 60 },
   { name: 'TOKEN_PUBLISH_LIMIT', limit: 10, period: 60 },
   { name: 'INSTANCE_API_LIMIT', limit: 300, period: 60 },
+  { name: 'AGENT_SHARE_IP_LIMIT', limit: 20, period: 60 },
+  { name: 'AGENT_SHARE_INSTANCE_LIMIT', limit: 200, period: 60 },
 ] as const;
 
 /** Derive a positive integer namespace_id unique per instance + binding name. */
@@ -116,6 +118,7 @@ async function deployWorkerScript(
     { type: 'r2_bucket', name: 'ARTIFACTS', bucket_name: input.bucketName },
     { type: 'plain_text', name: 'NRDOCS_INSTANCE_ID', text: input.instanceId },
     { type: 'plain_text', name: 'NRDOCS_PACKAGE_VERSION', text: input.packageVersion },
+    { type: 'plain_text', name: 'NRDOCS_CANONICAL_ORIGIN', text: input.canonicalOrigin },
   ];
 
   // Include the session secret in the same script upload. A separate /secrets PUT

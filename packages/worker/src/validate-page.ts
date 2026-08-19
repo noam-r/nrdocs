@@ -1,8 +1,8 @@
 import { parseHTML } from 'linkedom';
-import type { ManifestV1 } from '@nrdocs/contracts';
+import type { ManifestV1, ManifestV2 } from '@nrdocs/contracts';
 import { ApiError } from './http.js';
 import { PublisherApiErrorCode } from '@nrdocs/contracts';
-import { LIMITS, PLATFORM_ASSETS } from './limits.js';
+import { LIMITS, PLATFORM_ASSETS, PLATFORM_ASSETS_V2 } from './limits.js';
 import { routeRelativeHref } from './relative-href.js';
 
 const ALLOWED_TAGS = new Set([
@@ -367,6 +367,43 @@ function walkNav(node: Node, pageRoute: string, pageTargets: ReadonlySet<string>
   for (const child of Array.from(el.childNodes)) walkNav(child, pageRoute, pageTargets);
 }
 
+function validateNavToggle(el: Element): void {
+  if (
+    el.tagName !== 'BUTTON' ||
+    el.getAttribute('class') !== 'nr-nav-toggle' ||
+    el.getAttribute('type') !== 'button' ||
+    el.getAttribute('aria-controls') !== 'nr-nav' ||
+    el.getAttribute('aria-expanded') !== 'false'
+  ) {
+    fail('Nav toggle button is invalid.');
+  }
+  requireAttrs(el, new Set(['class', 'type', 'aria-controls', 'aria-expanded']));
+}
+
+function validateSiteTitle(el: Element, pageRoute: string, pageTargets: ReadonlySet<string>): void {
+  if (
+    el.tagName !== 'A' ||
+    el.getAttribute('class') !== 'nr-site-title' ||
+    !el.getAttribute('href')
+  ) {
+    fail('Site title link is invalid.');
+  }
+  requireAttrs(el, new Set(['class', 'href']));
+  validateHref(el.getAttribute('href')!, pageRoute, pageTargets, { allowExternal: false });
+}
+
+function validateThemeToggle(el: Element): void {
+  if (
+    el.tagName !== 'BUTTON' ||
+    el.getAttribute('class') !== 'nr-theme-toggle' ||
+    el.getAttribute('type') !== 'button' ||
+    el.getAttribute('aria-label') !== 'Change color theme'
+  ) {
+    fail('Theme toggle button is invalid.');
+  }
+  requireAttrs(el, new Set(['class', 'type', 'aria-label']));
+}
+
 /**
  * Validate one complete fixed-shell HTML page against the Phase 9 page schema.
  */
@@ -374,7 +411,8 @@ export function validateStoredPage(
   htmlBytes: Uint8Array,
   options: {
     pageRoute: string;
-    manifest: ManifestV1;
+    manifest: ManifestV1 | ManifestV2;
+    pageSchema?: 1 | 2;
   },
 ): void {
   if (htmlBytes.byteLength > LIMITS.maxPageHtmlBytes) {
@@ -422,10 +460,11 @@ export function validateStoredPage(
   requireAttrs(metaViewport!, new Set(['name', 'content']));
   if (titleEl!.tagName !== 'TITLE') fail('Third head element must be title.');
   requireAttrs(titleEl!, new Set());
+  const assets = options.pageSchema === 2 ? PLATFORM_ASSETS_V2 : PLATFORM_ASSETS;
   if (
     linkIcon!.tagName !== 'LINK' ||
     linkIcon!.getAttribute('rel') !== 'icon' ||
-    linkIcon!.getAttribute('href') !== PLATFORM_ASSETS[3] ||
+    linkIcon!.getAttribute('href') !== assets[3] ||
     linkIcon!.getAttribute('type') !== 'image/svg+xml'
   ) {
     fail('Icon must be the fixed platform logo.svg.');
@@ -434,7 +473,7 @@ export function validateStoredPage(
   if (
     linkCss!.tagName !== 'LINK' ||
     linkCss!.getAttribute('rel') !== 'stylesheet' ||
-    linkCss!.getAttribute('href') !== PLATFORM_ASSETS[0]
+    linkCss!.getAttribute('href') !== assets[0]
   ) {
     fail('Stylesheet must be the fixed platform reader.css.');
   }
@@ -442,7 +481,7 @@ export function validateStoredPage(
   if (
     scriptJs!.tagName !== 'SCRIPT' ||
     scriptJs!.getAttribute('type') !== 'module' ||
-    scriptJs!.getAttribute('src') !== PLATFORM_ASSETS[1]
+    scriptJs!.getAttribute('src') !== assets[1]
   ) {
     fail('Script must be the fixed platform reader.js module.');
   }
@@ -474,38 +513,30 @@ export function validateStoredPage(
   }
   requireAttrs(header!, new Set(['class']));
   const headerChildren = Array.from(header!.children);
-  if (headerChildren.length !== 3) fail('Header must contain three controls.');
-  const [navToggle, siteTitle, themeToggle] = headerChildren as Element[];
-  if (
-    navToggle!.tagName !== 'BUTTON' ||
-    navToggle!.getAttribute('class') !== 'nr-nav-toggle' ||
-    navToggle!.getAttribute('type') !== 'button' ||
-    navToggle!.getAttribute('aria-controls') !== 'nr-nav' ||
-    navToggle!.getAttribute('aria-expanded') !== 'false'
-  ) {
-    fail('Nav toggle button is invalid.');
+  if (options.pageSchema === 2) {
+    if (headerChildren.length !== 4) fail('Header must contain four controls.');
+    const [navToggle, siteTitle, shareBtn, themeToggle] = headerChildren as Element[];
+    validateNavToggle(navToggle!);
+    validateSiteTitle(siteTitle!, options.pageRoute, pageTargets);
+    if (
+      shareBtn!.tagName !== 'BUTTON' ||
+      shareBtn!.getAttribute('class') !== 'nr-ai-share nr-icon-btn' ||
+      shareBtn!.getAttribute('type') !== 'button' ||
+      shareBtn!.getAttribute('aria-label') !== 'Copy a prompt for an AI' ||
+      shareBtn!.getAttribute('title') !== 'Copy a prompt for an AI' ||
+      (shareBtn!.textContent ?? '').trim() !== 'Copy a prompt for an AI'
+    ) {
+      fail('Copy a prompt for an AI button is invalid.');
+    }
+    requireAttrs(shareBtn!, new Set(['class', 'type', 'aria-label', 'title']));
+    validateThemeToggle(themeToggle!);
+  } else {
+    if (headerChildren.length !== 3) fail('Header must contain three controls.');
+    const [navToggle, siteTitle, themeToggle] = headerChildren as Element[];
+    validateNavToggle(navToggle!);
+    validateSiteTitle(siteTitle!, options.pageRoute, pageTargets);
+    validateThemeToggle(themeToggle!);
   }
-  requireAttrs(navToggle!, new Set(['class', 'type', 'aria-controls', 'aria-expanded']));
-  if (
-    siteTitle!.tagName !== 'A' ||
-    siteTitle!.getAttribute('class') !== 'nr-site-title' ||
-    !siteTitle!.getAttribute('href')
-  ) {
-    fail('Site title link is invalid.');
-  }
-  requireAttrs(siteTitle!, new Set(['class', 'href']));
-  validateHref(siteTitle!.getAttribute('href')!, options.pageRoute, pageTargets, {
-    allowExternal: false,
-  });
-  if (
-    themeToggle!.tagName !== 'BUTTON' ||
-    themeToggle!.getAttribute('class') !== 'nr-theme-toggle' ||
-    themeToggle!.getAttribute('type') !== 'button' ||
-    themeToggle!.getAttribute('aria-label') !== 'Change color theme'
-  ) {
-    fail('Theme toggle button is invalid.');
-  }
-  requireAttrs(themeToggle!, new Set(['class', 'type', 'aria-label']));
 
   if (layout!.tagName !== 'DIV' || layout!.getAttribute('class') !== 'nr-layout') {
     fail('Layout shell is invalid.');

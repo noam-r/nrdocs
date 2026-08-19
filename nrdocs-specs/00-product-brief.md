@@ -50,7 +50,7 @@ nrdocs publish ./docs
 The administrator workflow is:
 
 ```bash
-nrdocs deploy
+nrdocs deploy --new
 nrdocs site create product-handbook
 ```
 
@@ -205,7 +205,7 @@ Publishers cannot upload or configure arbitrary HTML, JavaScript, CSS, templates
 
 Published pages come from navigation. Published assets come from references in those pages.
 
-nrdocs does not copy the source directory wholesale and does not automatically expose original Markdown or generated source archives.
+nrdocs does not copy the source directory wholesale and does not serve publisher source files. New publications also store a normalized Markdown representation generated from the same document tree as the HTML reader, served only under reserved `/_nrdocs/agent/` routes. That representation is not a copy of the original files.
 
 Publication inputs are ordinary files and directories, never symbolic links. nrdocs applies one portable case-and-Unicode collision policy so the same selected content is accepted or rejected on Linux and macOS.
 
@@ -260,6 +260,7 @@ Invariants:
 - Changing or removing a password invalidates existing reader sessions.
 - Reader sessions are scoped to one site.
 - Access to one site never grants access to another site.
+- HTML pages for schema v2 publications include a Share with LLM control that copies instructions for a machine-readable entry URL. Public sites use a non-expiring clean agent URL. Password-protected sites mint a time-limited grant signed with the existing session key; password change and disablement invalidate grants the same way they invalidate reader sessions. Rename does not invalidate grants.
 
 Unknown, deleted, disabled, and enabled-without-content sites return 404.
 
@@ -408,6 +409,7 @@ nrdocs 2.0 must support:
 12. Provider-neutral local and CI publication.
 13. Site enablement, disablement, rename, and permanent deletion.
 14. Generic, non-discoverable instance homepage behavior.
+15. Machine-readable agent access for the current publication, including Share with LLM.
 
 ## Non-Goals
 

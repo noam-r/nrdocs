@@ -129,14 +129,15 @@ This endpoint requires no credential and returns only protocol compatibility:
   "product": "nrdocs",
   "package_version": "2.0.0",
   "api_versions": [1],
-  "artifact_schema_versions": [1]
+  "artifact_schema_versions": [1, 2]
 }
 ```
 
 It uses `Cache-Control: no-store` and the common safe response headers. Deploy
 uses it for the canonical-origin smoke test. `connect` and `publish` call it
 before an authenticated endpoint and stop with an upgrade/downgrade instruction
-unless API v1 and artifact schema v1 are both advertised. Unknown fields are
+unless API v1 and artifact schema v2 are both advertised. The Worker continues
+to accept already-stored schema v1 artifacts for human serving. Unknown fields are
 ignored; the four shown fields and their types are required.
 
 ### 1. Resolve Publication Target
@@ -300,6 +301,7 @@ nrdocs-manifest.json
 pages/
 assets/       # omitted when empty
 attachments/  # omitted when empty
+agent/        # schema v2: normalized Markdown, agent manifest, optional all.md
 ```
 
 Example:
@@ -311,15 +313,18 @@ pages/getting-started/index.html
 pages/guides/deploy/index.html
 assets/images/architecture.png
 attachments/files/checklist.pdf
+agent/index.md
+agent/manifest.json
+agent/pages/<page-id>.md
 ```
 
-The archive contains rendered HTML and referenced files only. It must not contain source Markdown, `nrdocs.yml`, Git data, unreferenced files, build caches, source maps, or arbitrary web assets.
+The archive contains renderer output and referenced files only. It must not contain publisher source Markdown, `nrdocs.yml`, Git data, unreferenced files, build caches, source maps, or arbitrary web assets. Schema v2 stores a separately generated Markdown tree under `agent/`; those bytes are not a copy of the publication directory.
 
 HTML under `pages/` is fixed-renderer output, not a publisher HTML escape hatch. The Worker parses each page and validates it against the nrdocs page schema before promotion. It rejects publisher-controlled scripts and styles, event handlers, active embeds, forms, unsafe URLs, meta refresh, and any structure or attribute outside the fixed renderer contract. Platform JavaScript and CSS are referenced only from reserved `/_nrdocs/` resources controlled by the deployment.
 
 ### Complete page document contract
 
-Every object under `pages/` is one complete UTF-8 HTML5 document. Page fragments, server-side templates, and client-side shell assembly are not part of artifact schema version 1.
+Every object under `pages/` is one complete UTF-8 HTML5 document. Page fragments, server-side templates, and client-side shell assembly are not part of artifact schema version 1 or 2.
 
 The renderer owns the complete outer document and emits, at minimum:
 
@@ -394,7 +399,7 @@ The digest must not depend on gzip timestamp, tar metadata, or compression-level
 
 ### Canonical JSON
 
-Artifact schema version 1 canonical JSON uses:
+Artifact schema versions 1 and 2 share the same canonical JSON rules:
 
 - UTF-8 without a byte-order mark;
 - object keys sorted lexicographically by Unicode code point;
@@ -468,7 +473,7 @@ The example abbreviates digest values and page entries. Actual values must use t
 
 #### `schema_version`
 
-Must be exactly `1` for this contract. Unknown major artifact schemas are rejected.
+Must be exactly `1` or `2`. Unknown major artifact schemas are rejected. New publications use schema 2. Schema 1 remains valid for already-stored artifacts.
 
 #### `site_id`
 
@@ -724,7 +729,7 @@ Unknown, deleted, disabled, and empty sites return 404. These cases need not be 
 
 - Page routes end in `/`.
 - Requests for an unambiguous page route without the trailing slash redirect to the canonical route.
-- Source `.md` paths and generated `index.html` object paths are never public routes.
+- Source `.md` paths and generated `index.html` object paths are never public human routes. Agent Markdown is served only under `/_nrdocs/agent/`.
 - Numeric navigation prefixes are absent from generated routes.
 - Directory listing is never enabled.
 - An unknown route returns 404 rather than falling back to the site root.
@@ -753,6 +758,19 @@ The session contains enough signed state to verify:
 Password change or removal increments `session_generation`, invalidating all earlier sessions. Disabling or renaming a site does not require rewriting session records because no session records exist.
 
 Exact cookie attributes, signing algorithms, password hashing, rate limiting, and session lifetime are defined in the security specification.
+
+### Agent access routes
+
+```http
+GET  /_nrdocs/agent-share?site={slug}
+POST /_nrdocs/agent-share
+GET  /_nrdocs/agent/{slug}/{agent-object}
+HEAD /_nrdocs/agent/{slug}/{agent-object}
+GET  /_nrdocs/agent/share/{grant}/{agent-object}
+HEAD /_nrdocs/agent/share/{grant}/{agent-object}
+```
+
+These routes serve stored schema v2 agent objects without rewriting links. Clean slug routes follow site access (public anonymous; password requires a reader session and otherwise 404). Grant routes resolve the site by immutable ID and never redirect to a slug. Schema v1 artifacts, unknown IDs, and invalid grants return the same non-disclosing HTML 404 as other missing reader routes.
 
 ### File responses
 
@@ -791,8 +809,8 @@ An unlisted or missing Markdown page link is a local diagnostic. Preview still s
 ## Resource-Limit Contract
 
 Every exact byte, count, path, expansion, Mermaid, and processing-time limit is
-defined in `07-security-and-resource-limits.md`. The values are part of artifact
-schema version 1 and are enforced both before upload and by the Worker.
+defined in `07-security-and-resource-limits.md`. The values are part of the
+artifact contract and are enforced both before upload and by the Worker.
 
 The CLI should enforce the same published limits before upload. The Worker remains authoritative.
 
@@ -808,9 +826,7 @@ Backward-compatible response fields may be added only where clients are required
 
 ### Artifact schema
 
-Artifact schema version 1 is strict. A future schema uses an explicit new version and media-type parameter.
-
-Supporting a new artifact schema must not introduce repository coupling, source builds, executable publisher content, or publication history.
+Artifact schema version 1 remains byte-compatible for stored publications. Schema version 2 adds declared `agent/` objects and page Markdown metadata. The transport content type stays `application/vnd.nrdocs.artifact+gzip; version=1`. Supporting schema 2 must not introduce repository coupling, source builds, executable publisher content, or publication history.
 
 ### nrdocs 1.x
 
