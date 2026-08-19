@@ -28,6 +28,8 @@ export const RATE_LIMITS = {
   apiPerInstance: { limit: 300, windowMs: 60_000 },
   passwordPerSiteIp: { limit: 10, windowMs: 60_000 },
   passwordPerSite: { limit: 100, windowMs: 60_000 },
+  agentSharePerSiteIp: { limit: 20, windowMs: 60_000 },
+  agentSharePerInstance: { limit: 200, windowMs: 60_000 },
   retryAfterSeconds: 60,
 } as const;
 
@@ -36,4 +38,11 @@ export const PLATFORM_ASSETS = Object.freeze([
   '/_nrdocs/v1/reader.js',
   '/_nrdocs/v1/mermaid.js',
   '/_nrdocs/v1/logo.svg',
+] as const);
+
+export const PLATFORM_ASSETS_V2 = Object.freeze([
+  '/_nrdocs/v2/reader.css',
+  '/_nrdocs/v2/reader.js',
+  '/_nrdocs/v2/mermaid.js',
+  '/_nrdocs/v2/logo.svg',
 ] as const);

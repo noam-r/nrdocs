@@ -1312,3 +1312,14 @@ nrdocs 2.0 is ready for release only when:
 13. All security, deployment, resource-limit, cache, and serving decisions are locked and tested.
 14. Every numbered acceptance criterion is traceable to passing tests.
 15. The packed CLI and bundled Worker pass the disposable-instance release suite.
+
+## Post-2.0 phase: AI-agent access
+
+After the 2.0 publication and reader contract, new artifacts use schema version 2.
+The renderer emits HTML plus a stored normalized Markdown tree under `agent/`. The
+Worker still serves schema v1 artifacts for humans and returns non-disclosing 404
+for agent routes until the site is republished. The current CLI requires
+`artifact_schema_versions` to include `2`. Readers copy Share-with-LLM
+instructions; password sites mint HMAC grants with `NRDOCS_SESSION_KEY`. Grants
+are not persisted in D1. Agent IDs are 32 lowercase hex digits from SHA-256 of
+NFC UTF-8 of the canonical route or path.

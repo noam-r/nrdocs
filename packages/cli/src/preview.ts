@@ -78,6 +78,7 @@ export async function runPreviewCommand(
       summarizeManifest(built.artifact.manifest),
       '',
       `URL: ${server.url}`,
+      `Agent: ${server.url.replace(/\/$/, '')}/_nrdocs/agent/index.md`,
     ].join('\n'),
   );
 

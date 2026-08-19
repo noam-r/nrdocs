@@ -72,6 +72,8 @@ export type RateLimitBindingEnv = {
   TOKEN_RESOLVE_LIMIT?: CfRateLimitBinding;
   TOKEN_PUBLISH_LIMIT?: CfRateLimitBinding;
   INSTANCE_API_LIMIT?: CfRateLimitBinding;
+  AGENT_SHARE_IP_LIMIT?: CfRateLimitBinding;
+  AGENT_SHARE_INSTANCE_LIMIT?: CfRateLimitBinding;
 };
 
 /** Map each rate-limit operation to its Cloudflare binding, with memory fallback. */
@@ -87,6 +89,8 @@ export function createCompositeRateLimiter(env: RateLimitBindingEnv): RateLimite
       resolve: wrap(env.TOKEN_RESOLVE_LIMIT),
       publish: wrap(env.TOKEN_PUBLISH_LIMIT),
       api: wrap(env.INSTANCE_API_LIMIT),
+      'agent-share-ip': wrap(env.AGENT_SHARE_IP_LIMIT),
+      'agent-share-instance': wrap(env.AGENT_SHARE_INSTANCE_LIMIT),
     },
     memory,
   );

@@ -160,6 +160,7 @@ async function withPublisherWorld(
     ARTIFACTS: store,
     NRDOCS_INSTANCE_ID: INST,
     NRDOCS_PACKAGE_VERSION: '2.0.0',
+    NRDOCS_CANONICAL_ORIGIN: canonicalOrigin,
     __artifactStore: store,
     __clientIp: '203.0.113.10',
     __sessionKey: SESSION_KEY,

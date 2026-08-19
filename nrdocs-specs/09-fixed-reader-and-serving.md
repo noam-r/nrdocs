@@ -30,6 +30,11 @@ Page schema version 1 uses exactly:
 /_nrdocs/v1/logo.svg
 ```
 
+Page schema version 2 uses the same four filenames under `/_nrdocs/v2/`. Live
+schema v1 artifacts keep `/v1/` bytes unchanged. Schema v2 pages add a Share with
+LLM control between the site title and the theme toggle. `reader.js` v2 may
+`fetch` `/_nrdocs/agent-share` on the same origin.
+
 The first two appear on every content page. `reader.js` imports `mermaid.js`
 only when a Mermaid block exists. Every content page also references `logo.svg`
 as the favicon. The same image is painted as a flat header mark beside the site
@@ -76,6 +81,10 @@ shape; values shown as placeholders are escaped validated data:
 </body>
 </html>
 ```
+
+Schema v2 pages reference `/_nrdocs/v2/` assets and insert
+`<button class="nr-ai-share nr-icon-btn" type="button" aria-label="Copy a prompt for an AI" title="Copy a prompt for an AI">Copy a prompt for an AI</button>` between the
+site title and the theme toggle. Schema v1 pages keep the skeleton above.
 
 The validator requires the doctype, element order, single occurrences, exact
 fixed text, asset URLs, and shell attributes. It rejects additional head or
@@ -314,6 +323,13 @@ Cross-Origin-Opener-Policy: same-origin
 Cross-Origin-Resource-Policy: same-origin
 X-Frame-Options: DENY
 ```
+
+Schema v1 HTML uses `connect-src 'none'`. Schema v2 HTML uses `connect-src 'self'`
+so the Copy a prompt for an AI control can call `/_nrdocs/agent-share`. Agent Markdown and
+JSON responses use `Cache-Control: private, no-store`, `Referrer-Policy:
+no-referrer`, `X-Content-Type-Options: nosniff`, and
+`Cross-Origin-Resource-Policy: same-origin`. They do not use ETag, 304, Range, or
+the Cache API.
 
 `'unsafe-inline'` is limited to styles because the trusted Mermaid runtime may
 generate SVG style attributes; the stored-document validator still prohibits

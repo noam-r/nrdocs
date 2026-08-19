@@ -154,6 +154,30 @@ describe('nrdocs preview', () => {
           const logo = await fetch(new URL('/_nrdocs/v1/logo.svg', server.url));
           expect(logo.status).toBe(200);
           expect(await logo.text()).toContain('<svg');
+          const agent = await fetch(new URL('/_nrdocs/agent/index.md', server.url));
+          expect(agent.status).toBe(200);
+          expect(await agent.text()).toContain('machine-readable');
+          const v2css = await fetch(new URL('/_nrdocs/v2/reader.css', server.url));
+          expect(v2css.status).toBe(200);
+          const v2js = await fetch(new URL('/_nrdocs/v2/reader.js', server.url));
+          expect(await v2js.text()).toContain('Copy a prompt for an AI');
+          const share = await fetch(new URL('/_nrdocs/agent-share', server.url));
+          expect(share.status).toBe(200);
+          const shareJson = (await share.json()) as {
+            access_mode: string;
+            entry_url: string;
+            expires_at: null;
+            instructions: string;
+          };
+          expect(shareJson.access_mode).toBe('public');
+          expect(shareJson.expires_at).toBeNull();
+          expect(shareJson.entry_url).toBe(
+            `${server.url.replace(/\/$/, '')}/_nrdocs/agent/index.md`,
+          );
+          expect(shareJson.instructions).toContain(shareJson.entry_url);
+          expect(
+            (await fetch(new URL('/_nrdocs/agent-share', server.url), { method: 'POST' })).status,
+          ).toBe(404);
 
           ac.abort();
         },
@@ -161,6 +185,7 @@ describe('nrdocs preview', () => {
 
       expect(cap.stdout).toContain('Preview ready.');
       expect(cap.stdout).toMatch(/URL: http:\/\/127\.0\.0\.1:\d+\//);
+      expect(cap.stdout).toMatch(/Agent: http:\/\/127\.0\.0\.1:\d+\/_nrdocs\/agent\/index.md/);
       expect(cap.stdout).toMatch(/Pages:\s+2/);
       expect(cap.stdout).toMatch(/Images:\s+1/);
       expect(cap.stdout).toMatch(/Attachments:\s+1/);

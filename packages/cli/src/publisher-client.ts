@@ -142,13 +142,22 @@ export async function fetchProtocolVersion(
         'This CLI is incompatible with the nrdocs instance protocol.\nUpgrade or downgrade the CLI to match the instance.',
     });
   }
-  if (!data.api_versions.includes(1) || !data.artifact_schema_versions.includes(1)) {
+  if (!data.api_versions.includes(1)) {
     throw new CliError({
       code: 'unsupported_protocol',
       phase: 'credential',
       exit_code: ExitCode.CompatibilityOrProtocol,
       safe_message:
         'This CLI is incompatible with the nrdocs instance protocol.\nUpgrade or downgrade the CLI to match the instance.',
+    });
+  }
+  if (!data.artifact_schema_versions.includes(2)) {
+    throw new CliError({
+      code: 'unsupported_protocol',
+      phase: 'credential',
+      exit_code: ExitCode.CompatibilityOrProtocol,
+      safe_message:
+        'This CLI requires a Worker that accepts artifact schema 2.\nRedeploy the instance, then retry:\n  nrdocs deploy --instance <instance-id>',
     });
   }
 }

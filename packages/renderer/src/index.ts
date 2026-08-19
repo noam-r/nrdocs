@@ -20,7 +20,7 @@ export { decodeMarkdownSource } from './utf8.js';
 export { extractFirstH1, loadAndNormalizeMarkdown, collectLinks } from './markdown-scan.js';
 export { routeRelativeHref, pageObjectPath, mediaObjectPath } from './relative-href.js';
 export { highlightCode, normalizeHighlightLanguage } from './highlight.js';
-export { assemblePageDocument, flattenNavigablePages } from './shell.js';
+export { assemblePageDocument, assemblePageDocumentV2, flattenNavigablePages } from './shell.js';
 export {
   renderPublication,
   type InMemoryArtifact,

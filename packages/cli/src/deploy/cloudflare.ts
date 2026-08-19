@@ -47,6 +47,8 @@ export type DeployWorkerInput = {
   /** Required when attaching a Worker custom domain. */
   customDomainZoneId?: string;
   customDomainZoneName?: string;
+  /** Exact HTTPS origin for agent share URLs. */
+  canonicalOrigin: string;
 };
 
 export type D1QueryResult = {

@@ -55,8 +55,7 @@ function renderPagination(
   return `<nav class="nr-pagination" aria-label="Page navigation">\n${parts.join('\n')}\n</nav>`;
 }
 
-/** Assemble a complete fixed-shell HTML5 document with LF and two-space indentation. */
-export function assemblePageDocument(input: ShellInput): string {
+function assemblePageDocumentWithAssets(input: ShellInput, assetVersion: 'v1' | 'v2'): string {
   const title = `${input.pageTitle} · ${input.siteTitle}`;
   const siteRootHref = routeRelativeHref(input.pageRoute, '/');
   const nav = renderNavList(input.navTree, input.pageRoute, input.pageRoute);
@@ -76,15 +75,20 @@ export function assemblePageDocument(input: ShellInput): string {
     '  <meta charset="utf-8">',
     '  <meta name="viewport" content="width=device-width,initial-scale=1">',
     `  <title>${escapeHtml(title)}</title>`,
-    '  <link rel="icon" href="/_nrdocs/v1/logo.svg" type="image/svg+xml">',
-    '  <link rel="stylesheet" href="/_nrdocs/v1/reader.css">',
-    '  <script type="module" src="/_nrdocs/v1/reader.js"></script>',
+    `  <link rel="icon" href="/_nrdocs/${assetVersion}/logo.svg" type="image/svg+xml">`,
+    `  <link rel="stylesheet" href="/_nrdocs/${assetVersion}/reader.css">`,
+    `  <script type="module" src="/_nrdocs/${assetVersion}/reader.js"></script>`,
     '</head>',
     '<body>',
     '  <a class="nr-skip" href="#nr-content">Skip to content</a>',
     '  <header class="nr-header">',
     '    <button class="nr-nav-toggle" type="button" aria-controls="nr-nav" aria-expanded="false">Menu</button>',
     `    <a class="nr-site-title" href="${escapeAttr(siteRootHref)}">${escapeHtml(input.siteTitle)}</a>`,
+    ...(assetVersion === 'v2'
+      ? [
+          '    <button class="nr-ai-share nr-icon-btn" type="button" aria-label="Copy a prompt for an AI" title="Copy a prompt for an AI">Copy a prompt for an AI</button>',
+        ]
+      : []),
     '    <button class="nr-theme-toggle" type="button" aria-label="Change color theme">Theme</button>',
     '  </header>',
     '  <div class="nr-layout">',
@@ -114,6 +118,16 @@ export function assemblePageDocument(input: ShellInput): string {
     '',
   ];
   return lines.join('\n');
+}
+
+/** Assemble a complete fixed-shell HTML5 document with LF and two-space indentation. */
+export function assemblePageDocument(input: ShellInput): string {
+  return assemblePageDocumentWithAssets(input, 'v1');
+}
+
+/** Page schema v2: /v2/ assets and Copy a prompt for an AI control. */
+export function assemblePageDocumentV2(input: ShellInput): string {
+  return assemblePageDocumentWithAssets(input, 'v2');
 }
 
 /** Flatten navigable pages in nav order for prev/next. */

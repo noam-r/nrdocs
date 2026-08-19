@@ -1,5 +1,5 @@
 import { sha256Hex } from '@nrdocs/contracts';
-import { PLATFORM_ASSETS } from '../limits.js';
+import { PLATFORM_ASSETS, PLATFORM_ASSETS_V2 } from '../limits.js';
 import { baseSecurityHeaders, PLATFORM_CACHE } from './headers.js';
 import { PLATFORM_LOGO_SVG } from './logo.js';
 import { MERMAID_BUNDLE } from './mermaid-bundle.generated.js';
@@ -144,7 +144,7 @@ a:focus-visible,button:focus-visible,input:focus-visible{outline:2px solid var(-
   text-decoration:none;
 }
 .nr-icon-btn:hover,.nr-theme-toggle:hover{border-color:var(--nr-accent)}
-.nr-header .nr-sign-out,.nr-theme-toggle{margin-inline-start:0}
+.nr-header .nr-sign-out,.nr-theme-toggle,.nr-ai-share{margin-inline-start:0}
 .nr-theme-toggle::before{
   content:"";
   position:absolute;
@@ -676,6 +676,273 @@ export const PLATFORM_JS = `/* nrdocs platform reader.js v1 */
 })();
 `;
 
+export const PLATFORM_CSS_V2 = `${PLATFORM_CSS.replaceAll('/_nrdocs/v1/', '/_nrdocs/v2/')}
+/* v2 AI prompt control */
+.nr-ai-share.nr-icon-btn{flex:0 0 2.25rem}
+.nr-ai-share.nr-icon-btn::before{
+  content:"";
+  position:absolute;
+  inset:0;
+  margin:auto;
+  width:.16rem;
+  height:.78rem;
+  background:var(--nr-fg);
+}
+.nr-ai-share.nr-icon-btn::after{
+  content:"";
+  position:absolute;
+  inset:0;
+  margin:auto;
+  width:.78rem;
+  height:.16rem;
+  background:var(--nr-fg);
+}
+.nr-ai-dialog{
+  max-width:32rem;
+  width:calc(100% - 2rem);
+  border:1px solid var(--nr-border);
+  border-radius:var(--nr-radius);
+  background:var(--nr-header);
+  color:var(--nr-fg);
+  box-shadow:var(--nr-shadow);
+  padding:1.35rem 1.4rem 1.2rem;
+  font:inherit;
+}
+.nr-ai-dialog::backdrop{background:rgb(16 24 40 / .45)}
+.nr-ai-dialog h2{margin:0 0 .65rem;font-size:1.2rem;line-height:1.3;font-weight:650;color:var(--nr-fg)}
+.nr-ai-dialog p{margin:0 0 .8rem;color:var(--nr-muted);line-height:1.45}
+.nr-ai-lead{color:var(--nr-fg)}
+.nr-ai-dialog fieldset{border:0;padding:0;margin:0 0 1rem}
+.nr-ai-dialog legend{font-weight:650;color:var(--nr-fg);margin:0 0 .45rem}
+.nr-ai-choice{
+  display:flex;
+  align-items:center;
+  gap:.6rem;
+  margin:0 0 .4rem;
+  padding:.55rem .7rem;
+  border:1px solid var(--nr-border);
+  border-radius:.5rem;
+  background:var(--nr-bg);
+  color:var(--nr-fg);
+  cursor:pointer;
+  font:inherit;
+}
+.nr-ai-choice:has(input:checked){
+  border-color:var(--nr-accent);
+  box-shadow:inset 3px 0 0 var(--nr-accent);
+}
+.nr-ai-choice input{
+  flex:0 0 auto;
+  accent-color:var(--nr-accent);
+  width:1rem;
+  height:1rem;
+  margin:0;
+}
+.nr-ai-actions{display:flex;gap:.5rem;flex-wrap:wrap;justify-content:flex-end;margin-top:.25rem}
+.nr-ai-btn{
+  font:inherit;
+  font-weight:650;
+  border-radius:.5rem;
+  padding:.65rem .95rem;
+  cursor:pointer;
+}
+.nr-ai-btn-primary{
+  border:0;
+  background:var(--nr-accent);
+  color:#fff;
+}
+.nr-ai-btn-primary:hover{filter:brightness(1.06)}
+.nr-ai-btn-secondary{
+  border:1px solid var(--nr-border);
+  background:var(--nr-bg);
+  color:var(--nr-fg);
+}
+.nr-ai-btn-secondary:hover{border-color:var(--nr-accent)}
+.nr-ai-status{color:var(--nr-fg);font-weight:650}
+.nr-ai-error{color:var(--nr-danger)}
+.nr-ai-fallback{
+  display:block;
+  width:100%;
+  min-height:8rem;
+  margin:0 0 .85rem;
+  padding:.7rem .8rem;
+  border:1px solid var(--nr-border);
+  border-radius:.5rem;
+  background:var(--nr-bg);
+  color:var(--nr-fg);
+  font:inherit;
+  font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  font-size:.86em;
+  line-height:1.4;
+  resize:vertical;
+}
+@media (prefers-reduced-motion:reduce){
+  .nr-ai-dialog{transition:none}
+}
+`;
+
+export const PLATFORM_JS_V2 = `${PLATFORM_JS.replaceAll('/_nrdocs/v1/', '/_nrdocs/v2/')}
+(() => {
+  const button = document.querySelector('.nr-ai-share');
+  if (!button || !(button instanceof HTMLButtonElement)) return;
+  const siteMatch = location.pathname.match(/^\\/([^/]+)/);
+  const siteSlug = siteMatch ? siteMatch[1] : '';
+  let dialog = null;
+  let lastActive = null;
+
+  const closeDialog = () => {
+    if (!dialog) return;
+    const box = dialog.querySelector('textarea');
+    if (box) { box.value = ''; box.remove(); }
+    dialog.close();
+    dialog.remove();
+    dialog = null;
+    if (lastActive) lastActive.focus();
+  };
+
+  const trap = (event) => {
+    if (!dialog || event.key !== 'Tab') return;
+    const focusable = [...dialog.querySelectorAll('button, input, textarea, [href]')].filter((el) => !el.disabled);
+    if (focusable.length === 0) return;
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    if (event.shiftKey && document.activeElement === first) {
+      event.preventDefault();
+      last.focus();
+    } else if (!event.shiftKey && document.activeElement === last) {
+      event.preventDefault();
+      first.focus();
+    }
+  };
+
+  const showError = (msg) => {
+    if (!dialog) return;
+    let err = dialog.querySelector('.nr-ai-error');
+    if (!err) {
+      err = document.createElement('p');
+      err.className = 'nr-ai-error';
+      dialog.insertBefore(err, dialog.querySelector('.nr-ai-actions'));
+    }
+    err.textContent = msg;
+  };
+
+  const copyText = async (text) => {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      await navigator.clipboard.writeText(text);
+      return true;
+    }
+    throw new Error('clipboard unavailable');
+  };
+
+  const showFallback = (text) => {
+    if (!dialog) return;
+    showError('Clipboard copy failed. The box below is the AI prompt — not the explanation above. Select it and copy.');
+    let area = dialog.querySelector('textarea');
+    if (!area) {
+      area = document.createElement('textarea');
+      area.className = 'nr-ai-fallback';
+      area.readOnly = true;
+      area.setAttribute('aria-label', 'AI prompt to paste into a chat');
+      dialog.insertBefore(area, dialog.querySelector('.nr-ai-actions'));
+    }
+    area.value = text;
+    area.focus();
+    area.select();
+  };
+
+  const openDialog = async () => {
+    lastActive = button;
+    dialog = document.createElement('dialog');
+    dialog.className = 'nr-ai-dialog';
+    dialog.setAttribute('aria-labelledby', 'nr-ai-share-title');
+    dialog.innerHTML = '<h2 id="nr-ai-share-title">Copy a prompt for an AI</h2>' +
+      '<p class="nr-ai-lead">This window is for you. None of the sentences here are copied to the clipboard.</p>' +
+      '<p>The Copy AI prompt button puts a <strong>different</strong> message on the clipboard: a prompt that tells the model to fetch the Markdown edition of this site (not this web page) and how to read it. After it copies, paste that prompt into ChatGPT, Claude, or another assistant.</p>' +
+      '<p>The publication may change while a copied link remains valid.</p>' +
+      '<div class="nr-ai-durations" hidden></div>' +
+      '<p class="nr-ai-public" hidden>This site is public. The AI prompt includes a link that does not expire.</p>' +
+      '<p class="nr-ai-protected" hidden>This site is password-protected. The AI prompt includes a temporary access link. Anyone who receives that prompt can read the site until the link expires. Choose how long the link should work, then copy.</p>' +
+      '<div class="nr-ai-actions"><button type="button" class="nr-ai-copy nr-ai-btn nr-ai-btn-primary">Copy AI prompt</button>' +
+      '<button type="button" class="nr-ai-cancel nr-ai-btn nr-ai-btn-secondary">Cancel</button></div>';
+    document.body.appendChild(dialog);
+    dialog.addEventListener('cancel', (e) => { e.preventDefault(); closeDialog(); });
+    dialog.querySelector('.nr-ai-cancel').addEventListener('click', closeDialog);
+    document.addEventListener('keydown', trap);
+    dialog.addEventListener('close', () => document.removeEventListener('keydown', trap));
+    try {
+      dialog.showModal();
+    } catch {
+      dialog.setAttribute('open', '');
+    }
+    dialog.querySelector('.nr-ai-copy').focus();
+
+    let publicPayload = null;
+    let shareMeta = null;
+    try {
+      const res = await fetch('/_nrdocs/agent-share?site=' + encodeURIComponent(siteSlug), {
+        credentials: 'same-origin',
+        headers: { accept: 'application/json' },
+      });
+      if (!res.ok) throw new Error('unavailable');
+      const data = await res.json();
+      if (data.access_mode === 'public') {
+        publicPayload = data;
+        dialog.querySelector('.nr-ai-public').hidden = false;
+      } else {
+        shareMeta = data;
+        dialog.querySelector('.nr-ai-protected').hidden = false;
+        const box = dialog.querySelector('.nr-ai-durations');
+        box.hidden = false;
+        box.innerHTML = '<fieldset><legend>How long the AI’s link should work</legend>' +
+          '<label class="nr-ai-choice"><input type="radio" name="nr-ai-dur" value="1h"> 1 hour</label>' +
+          '<label class="nr-ai-choice"><input type="radio" name="nr-ai-dur" value="24h" checked> 24 hours</label>' +
+          '<label class="nr-ai-choice"><input type="radio" name="nr-ai-dur" value="7d"> 7 days</label></fieldset>';
+      }
+    } catch {
+      showError('Unable to prepare the AI prompt.');
+    }
+
+    dialog.querySelector('.nr-ai-copy').addEventListener('click', async () => {
+      try {
+        let text = '';
+        if (publicPayload) {
+          text = publicPayload.instructions;
+        } else if (shareMeta) {
+          const chosen = dialog.querySelector('input[name="nr-ai-dur"]:checked');
+          const duration = chosen ? chosen.value : '24h';
+          const res = await fetch('/_nrdocs/agent-share', {
+            method: 'POST',
+            credentials: 'same-origin',
+            headers: { 'content-type': 'application/json; charset=utf-8', accept: 'application/json' },
+            body: JSON.stringify({ site: siteSlug, duration, csrf: shareMeta.csrf }),
+          });
+          if (!res.ok) throw new Error('create failed');
+          const created = await res.json();
+          text = created.instructions;
+        } else {
+          throw new Error('not ready');
+        }
+        try {
+          await copyText(text);
+          text = '';
+          showError('');
+          const note = dialog.querySelector('.nr-ai-error') || document.createElement('p');
+          note.className = 'nr-ai-error nr-ai-status';
+          note.textContent = 'Copied the AI prompt. Paste it into the chat with the model.';
+          if (!note.parentNode) dialog.insertBefore(note, dialog.querySelector('.nr-ai-actions'));
+        } catch {
+          showFallback(text);
+        }
+      } catch {
+        showError('Unable to create the AI prompt.');
+      }
+    });
+  };
+
+  button.addEventListener('click', () => { void openDialog(); });
+})();
+`;
+
 /** Served at `/_nrdocs/v1/mermaid.js`. Stub in unit tests; real bundle from release build. */
 export const PLATFORM_MERMAID = MERMAID_BUNDLE;
 
@@ -687,6 +954,13 @@ const ASSETS: Record<string, { body: string; mediaType: string }> = {
     mediaType: 'text/javascript; charset=utf-8',
   },
   [PLATFORM_ASSETS[3]]: { body: PLATFORM_LOGO_SVG, mediaType: 'image/svg+xml; charset=utf-8' },
+  [PLATFORM_ASSETS_V2[0]]: { body: PLATFORM_CSS_V2, mediaType: 'text/css; charset=utf-8' },
+  [PLATFORM_ASSETS_V2[1]]: { body: PLATFORM_JS_V2, mediaType: 'text/javascript; charset=utf-8' },
+  [PLATFORM_ASSETS_V2[2]]: {
+    body: PLATFORM_MERMAID,
+    mediaType: 'text/javascript; charset=utf-8',
+  },
+  [PLATFORM_ASSETS_V2[3]]: { body: PLATFORM_LOGO_SVG, mediaType: 'image/svg+xml; charset=utf-8' },
 };
 
 export async function servePlatformAsset(

@@ -95,7 +95,7 @@ Create an operational nrdocs instance without creating a deployment repository o
 ### Command
 
 ```bash
-nrdocs deploy
+nrdocs deploy --new
 ```
 
 ### Preconditions
@@ -105,7 +105,7 @@ nrdocs deploy
 
 ### Interaction
 
-The CLI asks only for deployment-level choices, including the instance name and optional custom hostname.
+The CLI asks only for deployment-level choices, including the instance name and optional custom hostname. Creating Cloudflare resources requires the `--new` flag. A later `nrdocs deploy` without `--new` upgrades the selected instance and does not provision another Worker, D1 database, or R2 bucket.
 
 Example:
 
@@ -569,7 +569,8 @@ GET /product-handbook/
 - If `index.md` exists, serve it as the site root.
 - Otherwise, redirect to the first navigable page.
 - Serve only pages and assets included in the current publication.
-- Do not expose original Markdown or a site archive.
+- Do not expose publisher source files or a downloadable site archive.
+- For a schema v2 publication, successful HTML responses for authorized readers include a `Link` alternate to the machine-readable index, and `/_nrdocs/agent/{slug}/` serves stored Markdown and media by declared agent routes.
 
 ## Journey 13: Read a Password-Protected Site
 
@@ -626,6 +627,7 @@ nrdocs site password change product-handbook
 - The previous password is not required.
 - The previous hash is replaced atomically.
 - All existing reader sessions are invalidated.
+- Existing agent-share grants become indistinguishable 404s because they bind the current access generation.
 - The plaintext password is never stored or displayed.
 
 ## Journey 16: Issue and Revoke Publishing Tokens
@@ -695,6 +697,7 @@ nrdocs site rename product-handbook engineering-handbook
 - The immutable site ID, current content, publishing tokens, password, and local credential references remain unchanged.
 - The old slug immediately returns 404.
 - No redirect or alias is retained.
+- Outstanding agent grants continue to resolve by site ID; clean agent URLs that used the old slug return 404.
 
 ## Journey 19: Delete a Site
 
@@ -757,6 +760,18 @@ GET /
 ### Required behavior
 
 The root displays a fixed generic nrdocs message. It does not list public, protected, disabled, empty, or recently published sites and does not expose administrative links.
+
+## Journey 22: Share a Publication with an LLM
+
+### Goal
+
+Copy a prompt that tells an AI to fetch the current machine-readable publication.
+
+### Required behavior
+
+Schema v2 HTML pages include an icon control that opens a dialog explaining the human-facing steps. The on-screen explanation is not copied. Copying puts a separate prompt on the clipboard that tells the model to start at the machine-readable entry URL. The dialog also discloses that the publication may change while a copied link remains valid. A password-protected site additionally discloses that anyone who receives the prompt can read the site until the grant expires.
+
+A public site copies a non-expiring clean entry URL under `/_nrdocs/agent/{slug}/index.md`. A password-protected site requires an existing reader session, lets the reader choose 1 hour, 24 hours (default), or 7 days, and only then mints a grant URL under `/_nrdocs/agent/share/{grant}/`. There is no CLI command for grants.
 
 ## Global Journey Invariants
 

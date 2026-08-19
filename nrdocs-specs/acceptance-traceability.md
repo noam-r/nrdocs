@@ -22,6 +22,9 @@ behavior. Recorded results: latest green `pnpm verify` on this branch.
 | `09` |  1–4 | Page schema, highlight, Mermaid, shell                 | `validate-page.test.ts`, renderer, `reader.test.ts`            |
 | `09` |  5–7 | Routes, headers, storage inconsistency                 | `reader.test.ts`                                               |
 | `09` |    — | Logout GET form + Sign out control                     | `reader.test.ts`, platform `reader.js`                         |
+| `05` |    — | Artifact schema v2 + agent routes                      | `packages/worker/src/agent.test.ts`, renderer Markdown tests   |
+| `09` |    — | Copy-prompt dialog; v1 assets unchanged                | `share-ui.test.ts`, `platform-assets.ts`                       |
+| `07` |    — | Agent grants, CSRF, rate limits, grant redaction       | `grant.test.ts`, `agent.test.ts`, `rate-limit.ts`              |
 
 ## Release gate
 

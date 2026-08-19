@@ -368,6 +368,8 @@ describe('admin interactive gate and confirmations', () => {
       expect(await main(['site', 'create', 'x'], { runtime })).toBe(ExitCode.Usage);
       expect(cap.stderr).toMatch(/interactive terminal/i);
       expect(await main(['deploy'], { runtime })).toBe(ExitCode.Usage);
+      expect(cap.stderr).toMatch(/pass --new/i);
+      expect(await main(['deploy', '--new'], { runtime })).toBe(ExitCode.Usage);
     });
   });
 
