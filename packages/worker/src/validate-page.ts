@@ -56,7 +56,7 @@ const ALLOWED_TAGS = new Set([
 const HEADING_ID_RE = /^nr-h-[0-9a-f]{16}$/;
 const ALIGN_CLASS = new Set(['nr-align-left', 'nr-align-center', 'nr-align-right']);
 const LANGUAGE_CLASS_RE = /^language-[a-z0-9+-]+$/;
-const HLJS_CLASS_RE = /^hljs(-[a-z0-9-]+)?$/;
+const HLJS_CLASS_RE = /^hljs(-[a-z0-9_-]+)?$/;
 const NAV_SECTION_CLASS = 'nr-nav-section';
 
 const SHELL_SKIP = { tag: 'A', className: 'nr-skip', href: '#nr-content' } as const;

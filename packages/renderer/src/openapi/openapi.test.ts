@@ -88,7 +88,7 @@ components:
     expect(op.articleHtml).toContain('>cURL</button>');
     expect(op.articleHtml).toContain('>JavaScript</button>');
     expect(op.articleHtml).toContain('>HTTP</button>');
-    expect(op.articleHtml).toContain('hljs-title function_">fetch</span>');
+    expect(op.articleHtml).toContain('hljs-title">fetch</span>');
     expect(op.articleHtml).toContain('GET');
     expect(op.articleHtml).toContain('/pets');
     expect(op.markdownText).toContain('listPets');

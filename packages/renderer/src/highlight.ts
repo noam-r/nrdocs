@@ -65,6 +65,24 @@ const ALIASES: Record<string, string> = {
   py: 'python',
 };
 
+/** Matches Worker page-schema allowlist for highlight spans (spec 09). */
+const HLJS_CLASS_RE = /^hljs(-[a-z0-9_-]+)?$/;
+
+/**
+ * highlight.js may attach secondary scope classes (e.g. `function_`) alongside
+ * `hljs-*`. The page schema allows only `hljs-*` classes — strip the rest.
+ */
+function sanitizeHighlightHtml(html: string): string {
+  return html.replace(/\sclass="([^"]*)"/g, (_match, raw: string) => {
+    const kept = raw
+      .split(/\s+/)
+      .filter(Boolean)
+      .filter((c) => HLJS_CLASS_RE.test(c));
+    if (kept.length === 0) return '';
+    return ` class="${kept.join(' ')}"`;
+  });
+}
+
 const SUPPORTED = new Set([
   'plaintext',
   'bash',
@@ -112,7 +130,7 @@ export function highlightCode(
   }
   try {
     const result = hljs.highlight(code, { language, ignoreIllegals: true });
-    return { language, innerHtml: result.value };
+    return { language, innerHtml: sanitizeHighlightHtml(result.value) };
   } catch {
     return { language: 'plaintext', innerHtml: escapeHtml(code) };
   }
