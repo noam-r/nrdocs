@@ -55,7 +55,10 @@ function renderPagination(
   return `<nav class="nr-pagination" aria-label="Page navigation">\n${parts.join('\n')}\n</nav>`;
 }
 
-function assemblePageDocumentWithAssets(input: ShellInput, assetVersion: 'v1' | 'v2'): string {
+function assemblePageDocumentWithAssets(
+  input: ShellInput,
+  assetVersion: 'v1' | 'v2' | 'v3',
+): string {
   const title = `${input.pageTitle} · ${input.siteTitle}`;
   const siteRootHref = routeRelativeHref(input.pageRoute, '/');
   const nav = renderNavList(input.navTree, input.pageRoute, input.pageRoute);
@@ -67,6 +70,8 @@ function assemblePageDocumentWithAssets(input: ShellInput, assetVersion: 'v1' | 
     .split('\n')
     .map((line) => (line.length ? `        ${line}` : ''))
     .join('\n');
+
+  const includeShare = assetVersion === 'v2' || assetVersion === 'v3';
 
   const lines = [
     '<!doctype html>',
@@ -84,7 +89,7 @@ function assemblePageDocumentWithAssets(input: ShellInput, assetVersion: 'v1' | 
     '  <header class="nr-header">',
     '    <button class="nr-nav-toggle" type="button" aria-controls="nr-nav" aria-expanded="false">Menu</button>',
     `    <a class="nr-site-title" href="${escapeAttr(siteRootHref)}">${escapeHtml(input.siteTitle)}</a>`,
-    ...(assetVersion === 'v2'
+    ...(includeShare
       ? [
           '    <button class="nr-ai-share nr-icon-btn" type="button" aria-label="Copy a prompt for an AI" title="Copy a prompt for an AI">Copy a prompt for an AI</button>',
         ]
@@ -128,6 +133,11 @@ export function assemblePageDocument(input: ShellInput): string {
 /** Page schema v2: /v2/ assets and Copy a prompt for an AI control. */
 export function assemblePageDocumentV2(input: ShellInput): string {
   return assemblePageDocumentWithAssets(input, 'v2');
+}
+
+/** Page schema v3: /v3/ assets, Share with LLM, and API Reference markup. */
+export function assemblePageDocumentV3(input: ShellInput): string {
+  return assemblePageDocumentWithAssets(input, 'v3');
 }
 
 /** Flatten navigable pages in nav order for prev/next. */

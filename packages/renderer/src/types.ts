@@ -1,6 +1,7 @@
 import type { Direction, NavigationEntry } from '@nrdocs/contracts';
 
 export const MAX_PUBLISHED_PAGES = 500;
+export const MAX_PUBLISHED_PAGES_WITH_API = 800;
 export const MAX_MARKDOWN_BYTES = 1024 * 1024;
 export const MAX_NAV_DEPTH = 8;
 
@@ -28,6 +29,10 @@ export type PublicationPage = {
   route: SiteRoute;
   title: string;
   markdownText: string;
+  /** When set, distinguishes generated API pages from authored Markdown. */
+  origin?: 'markdown' | 'openapi';
+  /** When set, render-publication uses this HTML fragment instead of mdast HTML. */
+  articleHtml?: string;
 };
 
 export type PublicationAsset = {
@@ -62,6 +67,16 @@ export type NormalizedPublicationGraph = {
   assets: PublicationAsset[];
   attachments: PublicationAttachment[];
   diagnostics: PublicationDiagnostic[];
+  openapi?: {
+    sourcePaths: Set<string>;
+    bundledJson: Uint8Array;
+    download: {
+      route: '/api-reference/openapi.json';
+      object: 'openapi/openapi.json';
+      mediaType: 'application/vnd.nrdocs.openapi+json';
+      filename: 'openapi.json';
+    };
+  };
 };
 
 export function formatPublicationDiagnostics(diagnostics: PublicationDiagnostic[]): string {

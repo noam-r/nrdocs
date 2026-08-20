@@ -1,8 +1,9 @@
 import { parseHTML } from 'linkedom';
-import type { ManifestV1, ManifestV2 } from '@nrdocs/contracts';
+import type { ManifestV1, ManifestV2, ManifestV3 } from '@nrdocs/contracts';
+import { isManifestV3 } from '@nrdocs/contracts';
 import { ApiError } from './http.js';
 import { PublisherApiErrorCode } from '@nrdocs/contracts';
-import { LIMITS, PLATFORM_ASSETS, PLATFORM_ASSETS_V2 } from './limits.js';
+import { LIMITS, PLATFORM_ASSETS, PLATFORM_ASSETS_V2, PLATFORM_ASSETS_V3 } from './limits.js';
 import { routeRelativeHref } from './relative-href.js';
 
 const ALLOWED_TAGS = new Set([
@@ -153,19 +154,22 @@ function validateImgSrc(src: string, pageRoute: string, assetTargets: ReadonlySe
   if (!matched) fail('Image src does not resolve to a declared asset.');
 }
 
+const API_LAYOUT_CLASS_RE =
+  /^(nr-api-[a-z0-9-]+|nr-tabs|nr-tab|nr-tab-list|nr-tab-panel|nr-tab-active|nr-tab-panel-active|nr-code-block)$/;
+
 function contentClassesOk(
   classes: string[],
-  kind: 'generic' | 'pre' | 'code' | 'span' | 'align',
+  kind: 'generic' | 'pre' | 'code' | 'span' | 'align' | 'api',
 ): boolean {
   for (const c of classes) {
     if (kind === 'align' && ALIGN_CLASS.has(c)) continue;
+    if (kind === 'api' && API_LAYOUT_CLASS_RE.test(c)) continue;
     if (c === 'nr-mermaid') continue;
     if (c === 'nr-broken-link') continue;
     if (LANGUAGE_CLASS_RE.test(c)) continue;
     if (HLJS_CLASS_RE.test(c)) continue;
     if (c === NAV_SECTION_CLASS) continue;
     if (c.startsWith('nr-')) {
-      // only specific nr-* content classes above
       if (c === 'nr-mermaid') continue;
       return false;
     }
@@ -181,6 +185,7 @@ function walkContent(
     pageTargets: ReadonlySet<string>;
     assetTargets: ReadonlySet<string>;
     mermaidCount: { n: number };
+    pageSchema: 1 | 2 | 3;
   },
 ): void {
   if (node.nodeType === 8 /* COMMENT */) fail('HTML comments are not allowed.');
@@ -206,7 +211,7 @@ function walkContent(
     tag === 'aside' ||
     tag === 'main' ||
     tag === 'footer' ||
-    tag === 'button'
+    (tag === 'button' && ctx.pageSchema !== 3)
   ) {
     fail(`Disallowed element <${tag}> in article content.`);
   }
@@ -297,7 +302,41 @@ function walkContent(
         break;
       }
       if (attrs.has('title')) fail('title is only allowed on broken links.');
-      if (!contentClassesOk(cls, tag === 'code' ? 'code' : 'span')) fail(`Invalid ${tag} class.`);
+      if (ctx.pageSchema === 3) {
+        if (
+          !contentClassesOk(cls, tag === 'code' ? 'code' : 'api') &&
+          !contentClassesOk(cls, 'span')
+        ) {
+          // allow api badge classes on span/code
+          if (
+            !cls.every(
+              (c) =>
+                API_LAYOUT_CLASS_RE.test(c) || LANGUAGE_CLASS_RE.test(c) || HLJS_CLASS_RE.test(c),
+            )
+          ) {
+            fail(`Invalid ${tag} class.`);
+          }
+        }
+      } else if (!contentClassesOk(cls, tag === 'code' ? 'code' : 'span')) {
+        fail(`Invalid ${tag} class.`);
+      }
+      break;
+    }
+    case 'button': {
+      if (ctx.pageSchema !== 3) fail('Disallowed element <button> in article content.');
+      const attrs = requireAttrs(el, new Set(['class', 'type', 'aria-label']));
+      if (attrs.get('type') !== 'button') fail('Content button must be type=button.');
+      const cls = (attrs.get('class') ?? '').split(/\s+/).filter(Boolean);
+      const isCopy = cls.includes('nr-copy') && cls.every((c) => c === 'nr-copy');
+      const isTab =
+        cls.every((c) => c === 'nr-tab' || c === 'nr-tab-active') && cls.includes('nr-tab');
+      if (!isCopy && !isTab) fail('Invalid content button class.');
+      if (isCopy && attrs.get('aria-label') !== 'Copy') {
+        fail('Copy button aria-label must be Copy.');
+      }
+      if (isTab && attrs.has('aria-label')) {
+        fail('Tab buttons must not set aria-label.');
+      }
       break;
     }
     case 'li': {
@@ -314,13 +353,22 @@ function walkContent(
     case 'div':
     case 'section':
     case 'p':
+    case 'table': {
+      if (ctx.pageSchema === 3) {
+        const attrs = requireAttrs(el, new Set(['class']));
+        const cls = (attrs.get('class') ?? '').split(/\s+/).filter(Boolean);
+        if (cls.length > 0 && !contentClassesOk(cls, 'api')) fail(`Invalid ${tag} class.`);
+        break;
+      }
+      requireAttrs(el, new Set());
+      break;
+    }
     case 'blockquote':
     case 'strong':
     case 'em':
     case 'del':
     case 'hr':
     case 'br':
-    case 'table':
     case 'thead':
     case 'tbody':
     case 'tr': {
@@ -411,8 +459,8 @@ export function validateStoredPage(
   htmlBytes: Uint8Array,
   options: {
     pageRoute: string;
-    manifest: ManifestV1 | ManifestV2;
-    pageSchema?: 1 | 2;
+    manifest: ManifestV1 | ManifestV2 | ManifestV3;
+    pageSchema?: 1 | 2 | 3;
   },
 ): void {
   if (htmlBytes.byteLength > LIMITS.maxPageHtmlBytes) {
@@ -460,7 +508,9 @@ export function validateStoredPage(
   requireAttrs(metaViewport!, new Set(['name', 'content']));
   if (titleEl!.tagName !== 'TITLE') fail('Third head element must be title.');
   requireAttrs(titleEl!, new Set());
-  const assets = options.pageSchema === 2 ? PLATFORM_ASSETS_V2 : PLATFORM_ASSETS;
+  const pageSchema = options.pageSchema ?? 1;
+  const assets =
+    pageSchema === 3 ? PLATFORM_ASSETS_V3 : pageSchema === 2 ? PLATFORM_ASSETS_V2 : PLATFORM_ASSETS;
   if (
     linkIcon!.tagName !== 'LINK' ||
     linkIcon!.getAttribute('rel') !== 'icon' ||
@@ -494,6 +544,9 @@ export function validateStoredPage(
     ...options.manifest.assets.map((a) => a.path),
     ...options.manifest.attachments.map((a) => a.path),
   ]);
+  if (isManifestV3(options.manifest)) {
+    assetTargets.add(options.manifest.openapi_download.route);
+  }
 
   const bodyChildren = Array.from(body.children);
   if (bodyChildren.length !== 4) fail('Body shell structure is invalid.');
@@ -513,7 +566,7 @@ export function validateStoredPage(
   }
   requireAttrs(header!, new Set(['class']));
   const headerChildren = Array.from(header!.children);
-  if (options.pageSchema === 2) {
+  if (pageSchema === 2 || pageSchema === 3) {
     if (headerChildren.length !== 4) fail('Header must contain four controls.');
     const [navToggle, siteTitle, shareBtn, themeToggle] = headerChildren as Element[];
     validateNavToggle(navToggle!);
@@ -600,6 +653,7 @@ export function validateStoredPage(
       pageTargets,
       assetTargets,
       mermaidCount,
+      pageSchema,
     });
   }
 

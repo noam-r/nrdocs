@@ -84,7 +84,7 @@ export function versionResponse(packageVersion: string): Response {
       product: 'nrdocs',
       package_version: packageVersion,
       api_versions: [1],
-      artifact_schema_versions: [1, 2],
+      artifact_schema_versions: [1, 2, 3],
     }),
     {
       status: 200,

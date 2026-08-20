@@ -129,16 +129,17 @@ This endpoint requires no credential and returns only protocol compatibility:
   "product": "nrdocs",
   "package_version": "2.0.0",
   "api_versions": [1],
-  "artifact_schema_versions": [1, 2]
+  "artifact_schema_versions": [1, 2, 3]
 }
 ```
 
 It uses `Cache-Control: no-store` and the common safe response headers. Deploy
 uses it for the canonical-origin smoke test. `connect` and `publish` call it
 before an authenticated endpoint and stop with an upgrade/downgrade instruction
-unless API v1 and artifact schema v2 are both advertised. The Worker continues
-to accept already-stored schema v1 artifacts for human serving. Unknown fields are
-ignored; the four shown fields and their types are required.
+unless API v1 and a mutually supported artifact schema are both advertised.
+OpenAPI-enabled publications require artifact schema v3. The Worker continues
+to accept already-stored schema v1 and v2 artifacts for human serving. Unknown
+fields are ignored; the four shown fields and their types are required.
 
 ### 1. Resolve Publication Target
 
@@ -301,7 +302,8 @@ nrdocs-manifest.json
 pages/
 assets/       # omitted when empty
 attachments/  # omitted when empty
-agent/        # schema v2: normalized Markdown, agent manifest, optional all.md
+agent/        # schema v2+: normalized Markdown, agent manifest, optional all.md
+openapi/      # schema v3 with api: bundled openapi.json only
 ```
 
 Example:
@@ -310,21 +312,23 @@ Example:
 nrdocs-manifest.json
 pages/index.html
 pages/getting-started/index.html
-pages/guides/deploy/index.html
+pages/api-reference/index.html
+pages/api-reference/operations/listItems/index.html
 assets/images/architecture.png
 attachments/files/checklist.pdf
 agent/index.md
 agent/manifest.json
 agent/pages/<page-id>.md
+openapi/openapi.json
 ```
 
-The archive contains renderer output and referenced files only. It must not contain publisher source Markdown, `nrdocs.yml`, Git data, unreferenced files, build caches, source maps, or arbitrary web assets. Schema v2 stores a separately generated Markdown tree under `agent/`; those bytes are not a copy of the publication directory.
+The archive contains renderer output and referenced files only. It must not contain publisher source Markdown, publisher OpenAPI source files, `nrdocs.yml`, Git data, unreferenced files, build caches, source maps, or arbitrary web assets. Schema v2+ stores a separately generated Markdown tree under `agent/`; those bytes are not a copy of the publication directory. Schema v3 OpenAPI-enabled publications store one bundled OpenAPI JSON under `openapi/`; that object is a processed representation, not a source archive.
 
 HTML under `pages/` is fixed-renderer output, not a publisher HTML escape hatch. The Worker parses each page and validates it against the nrdocs page schema before promotion. It rejects publisher-controlled scripts and styles, event handlers, active embeds, forms, unsafe URLs, meta refresh, and any structure or attribute outside the fixed renderer contract. Platform JavaScript and CSS are referenced only from reserved `/_nrdocs/` resources controlled by the deployment.
 
 ### Complete page document contract
 
-Every object under `pages/` is one complete UTF-8 HTML5 document. Page fragments, server-side templates, and client-side shell assembly are not part of artifact schema version 1 or 2.
+Every object under `pages/` is one complete UTF-8 HTML5 document. Page fragments, server-side templates, and client-side shell assembly are not part of artifact schema version 1, 2, or 3.
 
 The renderer owns the complete outer document and emits, at minimum:
 
@@ -473,7 +477,10 @@ The example abbreviates digest values and page entries. Actual values must use t
 
 #### `schema_version`
 
-Must be exactly `1` or `2`. Unknown major artifact schemas are rejected. New publications use schema 2. Schema 1 remains valid for already-stored artifacts.
+Must be exactly `1`, `2`, or `3`. Unknown major artifact schemas are rejected.
+New Markdown-only publications use schema 2 unless the release train has moved
+the default to 3. OpenAPI-enabled publications (`api` block) must use schema 3.
+Schema 1 and 2 remain valid for already-stored artifacts.
 
 #### `site_id`
 
@@ -513,17 +520,25 @@ A redirect target must name the first navigable page in the validated navigation
 
 #### `pages`
 
-Lists every and only rendered Markdown page selected by navigation.
+Lists every rendered Markdown page selected by navigation and, for schema v3
+OpenAPI-enabled publications, every generated API Reference page (landing,
+operations, schemas).
 
 Each page has:
 
 - one canonical route;
 - one unique archive object path under `pages/`;
-- a navigation-derived title satisfying the same normalized 1–160-scalar title contract;
+- a navigation-derived or platform-generated title satisfying the same normalized 1–160-scalar title contract;
 - an exact byte size; and
 - a content digest.
 
 Routes use leading and trailing slashes. They do not expose `.md`, numeric ordering prefixes, `index.html`, or source filenames.
+
+#### `openapi_download`
+
+Present only for schema v3 publications with `api`. Declares the bundled
+OpenAPI JSON object as specified in document 12. It is not an attachment and
+must not appear in `attachments`.
 
 #### `assets`
 
@@ -535,7 +550,7 @@ Lists every and only referenced linked download. Its media type and extension mu
 
 #### `artifact`
 
-Declares the canonical digest, exact payload-file count, and total uncompressed payload bytes. Payload means the page, asset, and attachment files declared by the manifest; it excludes `nrdocs-manifest.json` itself.
+Declares the canonical digest, exact payload-file count, and total uncompressed payload bytes. Payload means the page, asset, attachment, and (when present) `openapi_download` files declared by the manifest; it excludes `nrdocs-manifest.json` itself.
 
 To compute `artifact.digest`:
 
@@ -583,8 +598,9 @@ The Worker must verify at least:
 13. allowed file extensions and media types;
 14. a valid root page or redirect target; and
 15. canonical manifest language and exact `ltr`, `rtl`, or `auto` direction;
-16. conformance of every rendered page to the fixed safe page schema, including exact `lang` and `dir` equality with the manifest; and
-17. absence of prohibited publisher-controlled web assets.
+16. conformance of every rendered page to the fixed safe page schema, including exact `lang` and `dir` equality with the manifest;
+17. absence of prohibited publisher-controlled web assets; and
+18. when `openapi_download` is declared, exact object presence, digest, media type, and route consistency per document 12.
 
 A failure at any step prevents promotion.
 
@@ -719,9 +735,17 @@ GET  /{slug}/{page-route}/
 HEAD /{slug}/{page-route}/
 GET  /{slug}/{referenced-file-path}
 HEAD /{slug}/{referenced-file-path}
+GET  /{slug}/api-reference/openapi.json
+HEAD /{slug}/api-reference/openapi.json
 ```
 
 The Worker resolves the current slug in D1, checks enabled/content/access state, and serves only an object declared by the current artifact manifest.
+
+For schema v3 OpenAPI-enabled publications, `/{slug}/api-reference/openapi.json`
+serves the manifest `openapi_download` object with media type
+`application/vnd.nrdocs.openapi+json`, attachment disposition,
+`Cache-Control: private, no-store`, and no Range/304/Cache API behavior, as
+specified in document 12.
 
 Unknown, deleted, disabled, and empty sites return 404. These cases need not be distinguishable to unauthenticated readers.
 

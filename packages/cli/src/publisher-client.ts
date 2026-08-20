@@ -9,6 +9,7 @@ import {
   parsePublishTargetData,
   PUBLISHER_HEADERS,
   PublisherApiErrorCode,
+  type ProtocolVersionData,
   type PublishResultData,
   type PublishTargetData,
   type SiteId,
@@ -99,7 +100,7 @@ function originUrl(server: string, pathname: string): string {
 export async function fetchProtocolVersion(
   server: string,
   options: PublisherClientOptions = {},
-): Promise<void> {
+): Promise<ProtocolVersionData> {
   let response: Response;
   try {
     response = await fetchImpl(options)(originUrl(server, '/_nrdocs/api/version'), {
@@ -160,6 +161,7 @@ export async function fetchProtocolVersion(
         'This CLI requires a Worker that accepts artifact schema 2.\nRedeploy the instance, then retry:\n  nrdocs deploy --instance <instance-id>',
     });
   }
+  return data;
 }
 
 export async function fetchPublishTarget(

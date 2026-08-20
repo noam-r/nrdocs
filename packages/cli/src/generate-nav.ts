@@ -129,6 +129,7 @@ export async function runGenerateNavCommand(
       direction,
       navigation: entries,
       ...(publish ? { publish } : {}),
+      ...(existing?.api ? { api: existing.api } : {}),
     },
     entries,
   );

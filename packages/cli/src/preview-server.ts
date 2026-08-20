@@ -1,135 +1,31 @@
 import http from 'node:http';
 import type { AddressInfo } from 'node:net';
-import type { ManifestV1, ManifestV2 } from '@nrdocs/contracts';
-import { shareInstructions } from '@nrdocs/contracts';
+import type { ManifestV1, ManifestV2, ManifestV3 } from '@nrdocs/contracts';
+import { isManifestV3, shareInstructions } from '@nrdocs/contracts';
 import type { InMemoryArtifact } from '@nrdocs/renderer';
+import {
+  BUNDLED_PLATFORM_CSS,
+  BUNDLED_PLATFORM_CSS_V2,
+  BUNDLED_PLATFORM_CSS_V3,
+  BUNDLED_PLATFORM_JS,
+  BUNDLED_PLATFORM_JS_V2,
+  BUNDLED_PLATFORM_JS_V3,
+  BUNDLED_PLATFORM_MERMAID,
+} from './deploy/worker-bundle.js';
 import { ioError } from './errors.js';
 import { PLATFORM_LOGO_SVG } from './platform-logo.js';
 
 export const PREVIEW_PORT_START = 4173;
 export const PREVIEW_PORT_END = 4273;
 
-const PLATFORM_CSS = `/* nrdocs preview stub reader.css */
-.nr-header{display:flex;align-items:center;gap:.65rem;padding:.6rem 1rem;border-bottom:1px solid #e2e2e2;background:#fff}
-.nr-site-title{flex:1}
-.nr-site-title{display:flex;align-items:center;gap:.55rem;color:inherit;text-decoration:none;font-weight:650}
-.nr-site-title::before{content:"";flex:0 0 auto;width:3.02rem;height:1.65rem;background-color:currentColor;-webkit-mask:url("/_nrdocs/v1/logo.svg") center / contain no-repeat;mask:url("/_nrdocs/v1/logo.svg") center / contain no-repeat;mask-mode:alpha}
-.nr-broken-link{color:#b3261e;text-decoration:line-through;cursor:help}
-.nr-broken-link::after{content:" \\26D4";text-decoration:none}
-.nr-ai-share.nr-icon-btn{
-  position:relative;flex:0 0 2.25rem;width:2.25rem;height:2.25rem;margin:0;padding:0;
-  border:1px solid #ccc;border-radius:.55rem;background:#fff;color:transparent;
-  overflow:hidden;text-indent:2.5rem;white-space:nowrap;cursor:pointer
-}
-.nr-ai-share.nr-icon-btn::before{content:"";position:absolute;inset:0;margin:auto;width:.16rem;height:.78rem;background:#1a1a1a}
-.nr-ai-share.nr-icon-btn::after{content:"";position:absolute;inset:0;margin:auto;width:.78rem;height:.16rem;background:#1a1a1a}
-.nr-ai-dialog{max-width:32rem;padding:1.35rem 1.4rem;font-family:system-ui,sans-serif;border:1px solid #e2e2e2;border-radius:.75rem;background:#fff;color:#1a1a1a}
-.nr-ai-dialog h2{margin:0 0 .65rem;font-size:1.2rem}
-.nr-ai-dialog p{margin:0 0 .8rem;color:#5a5a5a;line-height:1.45}
-.nr-ai-lead{color:#1a1a1a}
-.nr-ai-actions{display:flex;gap:.5rem;justify-content:flex-end;margin-top:.25rem}
-.nr-ai-btn{font:inherit;font-weight:650;border-radius:.5rem;padding:.65rem .95rem;cursor:pointer}
-.nr-ai-btn-primary{border:0;background:#0b57d0;color:#fff}
-.nr-ai-btn-secondary{border:1px solid #e2e2e2;background:#fafafa;color:#1a1a1a}
-.nr-ai-error{color:#b3261e}
-.nr-ai-status{color:#1a1a1a;font-weight:650}
-.nr-ai-choice{display:flex;align-items:center;gap:.6rem;margin:0 0 .4rem;padding:.55rem .7rem;border:1px solid #e2e2e2;border-radius:.5rem;cursor:pointer;font:inherit}
-.nr-ai-choice input{accent-color:#0b57d0;margin:0}
-`;
-const PLATFORM_JS = `/* nrdocs preview stub reader.js */\n`;
-const PLATFORM_JS_V2 = `${PLATFORM_JS}
-(() => {
-  const button = document.querySelector('.nr-ai-share');
-  if (!button || !(button instanceof HTMLButtonElement)) return;
-  let dialog = null;
-  let lastActive = null;
-  const closeDialog = () => {
-    if (!dialog) return;
-    const box = dialog.querySelector('textarea');
-    if (box) { box.value = ''; box.remove(); }
-    if (typeof dialog.close === 'function') dialog.close();
-    dialog.remove();
-    dialog = null;
-    if (lastActive) lastActive.focus();
-  };
-  const showError = (msg) => {
-    if (!dialog) return;
-    let err = dialog.querySelector('.nr-ai-error');
-    if (!err) {
-      err = document.createElement('p');
-      err.className = 'nr-ai-error';
-      dialog.insertBefore(err, dialog.querySelector('.nr-ai-actions'));
-    }
-    err.textContent = msg;
-  };
-  const copyText = async (text) => {
-    if (navigator.clipboard && navigator.clipboard.writeText) {
-      await navigator.clipboard.writeText(text);
-      return true;
-    }
-    throw new Error('clipboard unavailable');
-  };
-  const showFallback = (text) => {
-    if (!dialog) return;
-    showError('Clipboard copy failed. The box below is the AI prompt — not the explanation above. Select it and copy.');
-    let area = dialog.querySelector('textarea');
-    if (!area) {
-      area = document.createElement('textarea');
-      area.className = 'nr-ai-fallback';
-      area.readOnly = true;
-      area.setAttribute('aria-label', 'AI prompt to paste into a chat');
-      dialog.insertBefore(area, dialog.querySelector('.nr-ai-actions'));
-    }
-    area.value = text;
-    area.focus();
-    area.select();
-  };
-  const openDialog = async () => {
-    lastActive = button;
-    dialog = document.createElement('dialog');
-    dialog.className = 'nr-ai-dialog';
-    dialog.setAttribute('aria-labelledby', 'nr-ai-share-title');
-    dialog.innerHTML = '<h2 id="nr-ai-share-title">Copy a prompt for an AI</h2>' +
-      '<p class="nr-ai-lead">This window is for you. None of the sentences here are copied to the clipboard.</p>' +
-      '<p>The Copy AI prompt button puts a <strong>different</strong> message on the clipboard: a prompt that tells the model to fetch the Markdown edition of this site (not this web page) and how to read it. After it copies, paste that prompt into ChatGPT, Claude, or another assistant.</p>' +
-      '<p class="nr-ai-public">This preview is public. The AI prompt includes a link that does not expire.</p>' +
-      '<div class="nr-ai-actions"><button type="button" class="nr-ai-copy nr-ai-btn nr-ai-btn-primary">Copy AI prompt</button>' +
-      '<button type="button" class="nr-ai-cancel nr-ai-btn nr-ai-btn-secondary">Cancel</button></div>';
-    document.body.appendChild(dialog);
-    dialog.addEventListener('cancel', (e) => { e.preventDefault(); closeDialog(); });
-    dialog.querySelector('.nr-ai-cancel').addEventListener('click', closeDialog);
-    try { dialog.showModal(); } catch { dialog.setAttribute('open', ''); }
-    dialog.querySelector('.nr-ai-copy').focus();
-    let instructions = '';
-    try {
-      const res = await fetch('/_nrdocs/agent-share', { headers: { accept: 'application/json' } });
-      if (!res.ok) throw new Error('unavailable');
-      const data = await res.json();
-      instructions = data.instructions || '';
-    } catch {
-      showError('Unable to prepare the AI prompt.');
-    }
-    dialog.querySelector('.nr-ai-copy').addEventListener('click', async () => {
-      if (!instructions) {
-        showError('Unable to prepare the AI prompt.');
-        return;
-      }
-      try {
-        await copyText(instructions);
-        showError('');
-        const note = dialog.querySelector('.nr-ai-error') || document.createElement('p');
-        note.className = 'nr-ai-error nr-ai-status';
-        note.textContent = 'Copied the AI prompt. Paste it into the chat with the model.';
-        if (!note.parentNode) dialog.insertBefore(note, dialog.querySelector('.nr-ai-actions'));
-      } catch {
-        showFallback(instructions);
-      }
-    });
-  };
-  button.addEventListener('click', () => { void openDialog(); });
-})();
-`;
-const PLATFORM_MERMAID = `/* nrdocs preview stub mermaid.js */\nexport default {};\n`;
+/** Same fixed platform assets as deploy/Worker — not preview stubs. */
+const PLATFORM_CSS = BUNDLED_PLATFORM_CSS;
+const PLATFORM_JS = BUNDLED_PLATFORM_JS;
+const PLATFORM_CSS_V2 = BUNDLED_PLATFORM_CSS_V2;
+const PLATFORM_JS_V2 = BUNDLED_PLATFORM_JS_V2;
+const PLATFORM_CSS_V3 = BUNDLED_PLATFORM_CSS_V3;
+const PLATFORM_JS_V3 = BUNDLED_PLATFORM_JS_V3;
+const PLATFORM_MERMAID = BUNDLED_PLATFORM_MERMAID;
 
 const CACHE_NO_STORE = 'private, no-store';
 
@@ -248,11 +144,7 @@ function buildRouteTable(artifact: InMemoryArtifact): {
     enc.encode(PLATFORM_LOGO_SVG),
     'image/svg+xml; charset=utf-8',
   );
-  putPlatform(
-    '/_nrdocs/v2/reader.css',
-    enc.encode(PLATFORM_CSS.replaceAll('/v1/', '/v2/')),
-    'text/css; charset=utf-8',
-  );
+  putPlatform('/_nrdocs/v2/reader.css', enc.encode(PLATFORM_CSS_V2), 'text/css; charset=utf-8');
   putPlatform(
     '/_nrdocs/v2/reader.js',
     enc.encode(PLATFORM_JS_V2),
@@ -268,7 +160,35 @@ function buildRouteTable(artifact: InMemoryArtifact): {
     enc.encode(PLATFORM_LOGO_SVG),
     'image/svg+xml; charset=utf-8',
   );
+  putPlatform('/_nrdocs/v3/reader.css', enc.encode(PLATFORM_CSS_V3), 'text/css; charset=utf-8');
+  putPlatform(
+    '/_nrdocs/v3/reader.js',
+    enc.encode(PLATFORM_JS_V3),
+    'text/javascript; charset=utf-8',
+  );
+  putPlatform(
+    '/_nrdocs/v3/mermaid.js',
+    enc.encode(PLATFORM_MERMAID),
+    'text/javascript; charset=utf-8',
+  );
+  putPlatform(
+    '/_nrdocs/v3/logo.svg',
+    enc.encode(PLATFORM_LOGO_SVG),
+    'image/svg+xml; charset=utf-8',
+  );
   putPlatform('/favicon.ico', enc.encode(PLATFORM_LOGO_SVG), 'image/svg+xml; charset=utf-8');
+
+  if (isManifestV3(artifact.manifest)) {
+    const bytes = byObject.get(artifact.manifest.openapi_download.object);
+    if (bytes) {
+      routes.set(artifact.manifest.openapi_download.route, {
+        kind: 'attachment',
+        bytes,
+        mediaType: artifact.manifest.openapi_download.media_type,
+        filename: artifact.manifest.openapi_download.filename,
+      });
+    }
+  }
 
   const md = (object: string, mediaType: string) => {
     const bytes = byObject.get(object);
@@ -479,10 +399,14 @@ function bindLoopback(
   });
 }
 
-export function summarizeManifest(manifest: ManifestV1 | ManifestV2): string {
-  return [
+export function summarizeManifest(manifest: ManifestV1 | ManifestV2 | ManifestV3): string {
+  const lines = [
     `Pages:       ${String(manifest.pages.length).padStart(2)}`,
     `Images:      ${String(manifest.assets.length).padStart(2)}`,
     `Attachments: ${String(manifest.attachments.length).padStart(2)}`,
-  ].join('\n');
+  ];
+  if (isManifestV3(manifest)) {
+    lines.push('OpenAPI:            1');
+  }
+  return lines.join('\n');
 }

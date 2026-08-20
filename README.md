@@ -20,8 +20,10 @@ nrdocs --help
 
 Start with [`nrdocs-specs/README.md`](./nrdocs-specs/README.md).
 
-- [`11-readiness-assessment.md`](./nrdocs-specs/11-readiness-assessment.md) — go/no-go
+- [`11-readiness-assessment.md`](./nrdocs-specs/11-readiness-assessment.md) — go/no-go (core 2.0)
 - [`06-implementation-plan.md`](./nrdocs-specs/06-implementation-plan.md) — phases
+- [`12-openapi-reference-extension.md`](./nrdocs-specs/12-openapi-reference-extension.md) — additive OpenAPI reference
+- [`13-openapi-extension-readiness.md`](./nrdocs-specs/13-openapi-extension-readiness.md) — OpenAPI extension gates
 - [`acceptance-traceability.md`](./nrdocs-specs/acceptance-traceability.md) — criteria → tests
 - [`RELEASE.md`](./RELEASE.md) — RC and tagging process
 

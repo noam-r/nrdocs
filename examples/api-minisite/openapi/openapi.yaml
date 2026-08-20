@@ -1,0 +1,220 @@
+openapi: 3.1.0
+info:
+  title: Petstore API
+  version: 1.2.0
+  description: |
+    HTTP API for the Petstore demo.
+
+    Guides live alongside this reference — see [Getting started](/getting-started/)
+    and [Errors](/errors/).
+  contact:
+    name: Petstore Docs
+    url: https://example.com/support
+    email: docs@example.com
+  license:
+    name: Apache 2.0
+    url: https://www.apache.org/licenses/LICENSE-2.0.html
+  termsOfService: https://example.com/terms
+  externalDocs:
+    description: Product overview
+    url: https://example.com/petstore
+servers:
+  - url: https://api.example.com
+    description: Production
+  - url: https://sandbox.api.example.com
+    description: Sandbox
+tags:
+  - name: pets
+    description: Pet inventory
+  - name: store
+    description: Store helpers
+security:
+  - ApiKeyAuth: []
+paths:
+  /pets:
+    get:
+      operationId: listPets
+      tags: [pets]
+      summary: List pets
+      description: |
+        Returns pets visible to the caller.
+
+        Related guide: [Getting started](/getting-started/).
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - name: tag
+          in: query
+          description: Filter by tag
+          schema:
+            type: string
+      responses:
+        '200':
+          description: A page of pets
+          headers:
+            X-Request-Id:
+              description: Correlation id
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Pets'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+      x-nrdocs-cost:
+        type: free
+    post:
+      operationId: createPet
+      tags: [pets]
+      summary: Create a pet
+      description: Creates a pet and returns the stored record.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/NewPet'
+            examples:
+              demo:
+                summary: Demo pet
+                value:
+                  name: Ada
+                  tag: demo
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Pet'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+      x-nrdocs-cost:
+        type: fixed
+        amount: 0.01
+        unit: USD
+      x-codeSamples:
+        - lang: javascript
+          source: |
+            await fetch('https://api.example.com/pets', {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'X-API-Key': 'YOUR_KEY',
+              },
+              body: JSON.stringify({ name: 'Ada', tag: 'demo' }),
+            });
+  /pets/{petId}:
+    get:
+      operationId: getPet
+      tags: [pets]
+      summary: Get a pet
+      parameters:
+        - $ref: '#/components/parameters/PetId'
+      responses:
+        '200':
+          description: The pet
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Pet'
+        '404':
+          description: Missing pet
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      externalDocs:
+        description: Pet resource notes
+        url: https://example.com/docs/pets
+      x-nrdocs-cost:
+        type: free
+  /store/inventory:
+    get:
+      operationId: getInventory
+      tags: [store]
+      summary: Inventory counts
+      description: |
+        Returns counts by status.
+
+        Cost varies with warehouse size — see pricing for details.
+      security: []
+      responses:
+        '200':
+          description: Inventory map
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties:
+                  type: integer
+      x-nrdocs-cost:
+        type: variable
+        description: Depends on warehouse size and refresh interval.
+        pricingUrl: https://example.com/pricing
+components:
+  securitySchemes:
+    ApiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-API-Key
+      description: Publishable API key for the Petstore.
+  parameters:
+    Limit:
+      name: limit
+      in: query
+      description: Maximum number of pets to return
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
+        default: 20
+    PetId:
+      name: petId
+      in: path
+      required: true
+      description: Pet identifier
+      schema:
+        $ref: '#/components/schemas/PetId'
+  responses:
+    BadRequest:
+      description: Invalid request
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+  schemas:
+    PetId:
+      type: integer
+      format: int64
+      minimum: 1
+    NewPet:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+          minLength: 1
+        tag:
+          type: string
+    Pet:
+      allOf:
+        - $ref: '#/components/schemas/NewPet'
+        - type: object
+          required: [id]
+          properties:
+            id:
+              $ref: '#/components/schemas/PetId'
+    Pets:
+      type: array
+      items:
+        $ref: '#/components/schemas/Pet'
+    Error:
+      type: object
+      required: [code, message]
+      properties:
+        code:
+          type: string
+          enum: [bad_request, not_found, unauthorized]
+        message:
+          type: string

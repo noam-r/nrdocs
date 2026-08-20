@@ -10,7 +10,7 @@ import {
 import { assertDirection, assertLanguage, type Direction } from './language.js';
 import { assertTitle } from './title.js';
 import {
-  AGENT_ALL_MD_MAX_BYTES,
+  AGENT_ALL_MD_MAX_BYTES_V3,
   AGENT_INDEX_MAX_BYTES,
   AGENT_MANIFEST_JSON_MAX_BYTES,
   AGENT_PAGE_MARKDOWN_MAX_BYTES,
@@ -269,7 +269,7 @@ export async function parseAgentManifestV1(
   let all_markdown_size: number | null;
   if (raw.publication.has_all_markdown) {
     all_markdown_size = assertNonNegInt(raw.publication.all_markdown_size, 'all_markdown_size');
-    if (all_markdown_size > AGENT_ALL_MD_MAX_BYTES) throw new Error('all.md exceeds 5 MiB');
+    if (all_markdown_size > AGENT_ALL_MD_MAX_BYTES_V3) throw new Error('all.md exceeds size limit');
   } else {
     if (raw.publication.all_markdown_size !== null) {
       throw new Error('all_markdown_size must be null when has_all_markdown is false');

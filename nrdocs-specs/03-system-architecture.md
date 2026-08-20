@@ -412,10 +412,16 @@ validate route uniqueness
 decode and normalize UTF-8 Markdown input
 parse and validate Markdown
 resolve local links and assets
+when api is configured: resolve and validate OpenAPI, generate reference pages
 render HTML
 construct manifest
 package archive
 ```
+
+OpenAPI reference generation, when enabled, follows
+[`12-openapi-reference-extension.md`](./12-openapi-reference-extension.md).
+It remains a local CLI responsibility; the Worker never resolves OpenAPI
+dependencies at request time.
 
 The local pipeline never traverses symbolic-link directories or reads a symbolic-link publication root, configuration, selected page, referenced asset, or referenced attachment. Selected source paths and generated paths pass the shared exact and portable collision checks before rendering.
 

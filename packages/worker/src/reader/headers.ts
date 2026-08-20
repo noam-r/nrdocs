@@ -28,11 +28,12 @@ export function baseSecurityHeaders(opts?: { hsts?: boolean }): Record<string, s
 
 export function htmlSecurityHeaders(opts?: {
   hsts?: boolean;
-  pageSchema?: 1 | 2;
+  pageSchema?: 1 | 2 | 3;
 }): Record<string, string> {
   return {
     ...baseSecurityHeaders(opts),
-    'content-security-policy': opts?.pageSchema === 2 ? READER_CSP_V2 : READER_CSP,
+    'content-security-policy':
+      opts?.pageSchema === 2 || opts?.pageSchema === 3 ? READER_CSP_V2 : READER_CSP,
     'cache-control': NO_STORE,
     'content-type': 'text/html; charset=utf-8',
   };

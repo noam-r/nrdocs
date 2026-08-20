@@ -35,6 +35,15 @@ schema v1 artifacts keep `/v1/` bytes unchanged. Schema v2 pages add a Share wit
 LLM control between the site title and the theme toggle. `reader.js` v2 may
 `fetch` `/_nrdocs/agent-share` on the same origin.
 
+Page schema version 3 uses the same four filenames under `/_nrdocs/v3/`. Schema
+v3 is required for OpenAPI-enabled publications and may mix ordinary Markdown
+pages with API Reference pages in one artifact. Live schema v1 and v2 artifacts
+keep their original asset bytes unchanged. Schema v3 reader behavior and the
+additional stored-document allowlist for API articles are normative in
+[`12-openapi-reference-extension.md`](./12-openapi-reference-extension.md)
+§12. Share with LLM on v3 pages follows the schema v2 control and CSP
+`connect-src 'self'` rule when the control is present.
+
 The first two appear on every content page. `reader.js` imports `mermaid.js`
 only when a Mermaid block exists. Every content page also references `logo.svg`
 as the favicon. The same image is painted as a flat header mark beside the site
@@ -86,6 +95,13 @@ Schema v2 pages reference `/_nrdocs/v2/` assets and insert
 `<button class="nr-ai-share nr-icon-btn" type="button" aria-label="Copy a prompt for an AI" title="Copy a prompt for an AI">Copy a prompt for an AI</button>` between the
 site title and the theme toggle. Schema v1 pages keep the skeleton above.
 
+Schema v3 pages reference `/_nrdocs/v3/` assets. Markdown pages in a v3
+artifact use the same shell as v2 (including Share with LLM). API Reference
+pages use the same shell with article content that may include the v3-only
+`nr-api-*` layout regions, `nr-tabs` structure, and `button.nr-copy` controls
+defined in document 12. All tab panels remain present in the stored HTML so
+JavaScript-disabled readers see complete content.
+
 The validator requires the doctype, element order, single occurrences, exact
 fixed text, asset URLs, and shell attributes. It rejects additional head or
 shell nodes. The renderer produces stable two-space indentation and LF endings.
@@ -126,6 +142,13 @@ Shell elements accept only the attributes shown in the skeleton and the exact
 | `th`, `td`            | optional class `nr-align-left`, `nr-align-center`, or `nr-align-right`                        |
 | Task `input`          | exact `type="checkbox"`, `disabled`, optional `checked`                                       |
 | `pre`, `code`, `span` | renderer-owned language, highlighting, or Mermaid classes defined below                       |
+
+Schema v3 API article content may additionally use renderer-owned `nr-api-*`,
+`nr-tabs`, `nr-tab`, and `nr-tab-panel` classes on `div`/`section`/`span`, and
+`button.nr-copy` with `type="button"` and an optional fixed English
+`aria-label`. Tab panels must not rely on `hidden` as the only copy of content.
+The HTML `download` attribute remains rejected; OpenAPI download uses Worker
+`Content-Disposition` instead.
 
 All other attributes are rejected, including `style`, event handlers, `target`,
 `download`, arbitrary `id`, and arbitrary `data-*`. Text is valid UTF-8 and
@@ -290,6 +313,11 @@ the documented status/error contract.
 | `.ndjson`       | `application/x-ndjson`      |
 | `.zip`          | `application/zip`           |
 
+OpenAPI-enabled schema v3 publications also serve
+`application/vnd.nrdocs.openapi+json` for the manifest-declared
+`openapi_download` object only. That media type is not available for publisher
+attachments.
+
 HTML is `text/html; charset=utf-8`; platform CSS and JavaScript use their
 standard UTF-8 MIME types. Unknown extensions are not publishable.
 
@@ -325,11 +353,16 @@ X-Frame-Options: DENY
 ```
 
 Schema v1 HTML uses `connect-src 'none'`. Schema v2 HTML uses `connect-src 'self'`
-so the Copy a prompt for an AI control can call `/_nrdocs/agent-share`. Agent Markdown and
+so the Copy a prompt for an AI control can call `/_nrdocs/agent-share`. Schema v3
+Markdown pages with Share with LLM use the same `connect-src 'self'` rule.
+Schema v3 API pages that include the Share control likewise use
+`connect-src 'self'`; clipboard and tab enhancement require no network.
+Agent Markdown and
 JSON responses use `Cache-Control: private, no-store`, `Referrer-Policy:
 no-referrer`, `X-Content-Type-Options: nosniff`, and
 `Cross-Origin-Resource-Policy: same-origin`. They do not use ETag, 304, Range, or
-the Cache API.
+the Cache API. The OpenAPI download uses the same no-store and nosniff posture
+as attachments, plus attachment disposition, and never enters the Cache API.
 
 `'unsafe-inline'` is limited to styles because the trusted Mermaid runtime may
 generate SVG style attributes; the stored-document validator still prohibits

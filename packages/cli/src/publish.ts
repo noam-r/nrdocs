@@ -159,7 +159,7 @@ async function publishViaHttp(
 ): Promise<void> {
   await withPublishStatus(ctx, async (status) => {
     status.phase('Checking destination');
-    await fetchProtocolVersion(input.server, input.options);
+    const protocol = await fetchProtocolVersion(input.server, input.options);
 
     let target;
     try {
@@ -201,6 +201,18 @@ async function publishViaHttp(
       onProgress: reportRenderProgress(status),
       force: input.force,
     });
+    if (
+      built.artifact.manifest.schema_version === 3 &&
+      !protocol.artifact_schema_versions.includes(3)
+    ) {
+      throw new CliError({
+        code: 'unsupported_protocol',
+        phase: 'credential',
+        exit_code: ExitCode.CompatibilityOrProtocol,
+        safe_message:
+          'This publication requires a Worker that accepts artifact schema 3.\nRedeploy the instance, then retry:\n  nrdocs deploy --instance <instance-id>',
+      });
+    }
     status.phase('Uploading');
     const result = await uploadArtifact(
       input.server,

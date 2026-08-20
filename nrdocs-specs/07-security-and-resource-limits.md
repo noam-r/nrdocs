@@ -234,6 +234,12 @@ any limit fails the publication before promotion.
 | One archive path segment in UTF-8    |                             128 bytes |
 | Attachment display filename          | 160 scalar values and 255 UTF-8 bytes |
 
+When a publication configures the optional `api` block, the OpenAPI-specific
+limits and the raised shared page/file/`all.md` caps in
+[`12-openapi-reference-extension.md`](./12-openapi-reference-extension.md)
+§14 apply instead of the page, file, and `all.md` rows above for that
+publication only. All other rows remain as listed.
+
 The archive contains only regular files. Directories are implicit. Symlinks,
 hard links, devices, FIFOs, sparse entries, absolute paths, backslashes, empty
 segments, `.` segments, `..` segments, NUL, and portable-key collisions are

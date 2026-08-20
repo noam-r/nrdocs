@@ -72,6 +72,7 @@ export async function writeConnectedNrdocsYml(
     language,
     direction,
     navigation: navigation === undefined ? 'auto' : navigation,
+    ...(input.existing?.api ? { api: input.existing.api } : {}),
   };
 
   const yamlText = Array.isArray(nextConfig.navigation)

@@ -150,7 +150,10 @@ describe('nrdocs preview', () => {
 
           const css = await fetch(new URL('/_nrdocs/v1/reader.css', server.url));
           expect(css.status).toBe(200);
-          expect(await css.text()).toContain('url("/_nrdocs/v1/logo.svg")');
+          const cssText = await css.text();
+          expect(cssText).toContain('/* nrdocs platform reader.css v1 */');
+          expect(cssText).toContain('url("/_nrdocs/v1/logo.svg")');
+          expect(cssText).toContain('--nr-bg');
           const logo = await fetch(new URL('/_nrdocs/v1/logo.svg', server.url));
           expect(logo.status).toBe(200);
           expect(await logo.text()).toContain('<svg');
@@ -159,6 +162,7 @@ describe('nrdocs preview', () => {
           expect(await agent.text()).toContain('machine-readable');
           const v2css = await fetch(new URL('/_nrdocs/v2/reader.css', server.url));
           expect(v2css.status).toBe(200);
+          expect(await v2css.text()).toContain('--nr-bg');
           const v2js = await fetch(new URL('/_nrdocs/v2/reader.js', server.url));
           expect(await v2js.text()).toContain('Copy a prompt for an AI');
           const share = await fetch(new URL('/_nrdocs/agent-share', server.url));

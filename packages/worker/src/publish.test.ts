@@ -135,7 +135,7 @@ describe('publisher API', () => {
       const data = parseProtocolVersionData(await res.json());
       expect(data.product).toBe('nrdocs');
       expect(data.api_versions).toEqual([1]);
-      expect(data.artifact_schema_versions).toEqual([1, 2]);
+      expect(data.artifact_schema_versions).toEqual([1, 2, 3]);
     });
   });
 

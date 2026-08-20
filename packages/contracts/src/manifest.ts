@@ -1,6 +1,7 @@
 import type { CanonicalJson } from './canonical-json.js';
 import { artifactDigestFromDescriptor, parseSha256Digest } from './digest.js';
 import { parseManifestV2, type ManifestV2 } from './manifest-v2.js';
+import { parseManifestV3, type ManifestV3 } from './manifest-v3.js';
 import {
   isAttachmentExtension,
   isForbiddenWebExtension,
@@ -142,10 +143,11 @@ export type ParseManifestOptions = {
 export async function parseManifest(
   raw: unknown,
   options: ParseManifestOptions = {},
-): Promise<ManifestV1 | ManifestV2> {
+): Promise<ManifestV1 | ManifestV2 | ManifestV3> {
   if (!isPlainObject(raw)) throw new Error('manifest must be a JSON object');
   if (raw.schema_version === 1) return parseManifestV1(raw, options);
   if (raw.schema_version === 2) return parseManifestV2(raw, options);
+  if (raw.schema_version === 3) return parseManifestV3(raw, options);
   throw new Error('unsupported manifest schema_version');
 }
 

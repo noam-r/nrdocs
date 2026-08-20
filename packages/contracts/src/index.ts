@@ -25,6 +25,7 @@ export * from './credentials.js';
 export * from './instance.js';
 export * from './manifest.js';
 export * from './manifest-v2.js';
+export * from './manifest-v3.js';
 export * from './agent-limits.js';
 export * from './agent-ids.js';
 export * from './agent-nav.js';
