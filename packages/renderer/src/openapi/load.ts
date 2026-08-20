@@ -35,12 +35,7 @@ export type LoadedOpenApi = {
 };
 
 type HoistCategory =
-  | 'schemas'
-  | 'parameters'
-  | 'responses'
-  | 'requestBodies'
-  | 'headers'
-  | 'securitySchemes';
+  'schemas' | 'parameters' | 'responses' | 'requestBodies' | 'headers' | 'securitySchemes';
 
 type HoistRegistry = {
   /** Same `file#pointer` identity → same component placement. */
