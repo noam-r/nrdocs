@@ -1,5 +1,12 @@
 import { artifactObjectKey, getSiteById, getSiteBySlug, type SiteRow } from '@nrdocs/persistence';
-import { foldSlugInput, isManifestV2, parseSlug, type ManifestV2 } from '@nrdocs/contracts';
+import {
+  foldSlugInput,
+  isManifestV2,
+  isManifestV3,
+  parseSlug,
+  type ManifestV2,
+  type ManifestV3,
+} from '@nrdocs/contracts';
 import { sha256Hex } from '@nrdocs/contracts';
 import {
   agentContentHeaders,
@@ -68,7 +75,7 @@ async function serveDeclared(
 async function serveAgentRest(
   ctx: ReaderContext,
   site: SiteRow,
-  manifest: ManifestV2,
+  manifest: ManifestV2 | ManifestV3,
   rest: string,
   method: string,
 ): Promise<Response> {
@@ -172,7 +179,11 @@ export async function handleAgentGrantRoute(
   const site = await getSiteById(ctx.db, payload.site_id);
   if (!siteIsReadable(site) || site.session_generation !== payload.generation) return notFound(ctx);
   const manifest = await loadCurrentManifest(ctx.store, site);
-  if (manifest === 'missing' || manifest === 'invalid' || !isManifestV2(manifest)) {
+  if (
+    manifest === 'missing' ||
+    manifest === 'invalid' ||
+    !(isManifestV2(manifest) || isManifestV3(manifest))
+  ) {
     return notFound(ctx);
   }
   return serveAgentRest(ctx, site, manifest, rest, method);
@@ -210,7 +221,11 @@ export async function handleAgentCleanRoute(
     if (!ok) return notFound(ctx);
   }
   const manifest = await loadCurrentManifest(ctx.store, site);
-  if (manifest === 'missing' || manifest === 'invalid' || !isManifestV2(manifest)) {
+  if (
+    manifest === 'missing' ||
+    manifest === 'invalid' ||
+    !(isManifestV2(manifest) || isManifestV3(manifest))
+  ) {
     return notFound(ctx);
   }
   return serveAgentRest(ctx, site, manifest, rest, method);

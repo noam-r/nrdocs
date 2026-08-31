@@ -1,5 +1,5 @@
 import { sha256Hex } from '@nrdocs/contracts';
-import { PLATFORM_ASSETS, PLATFORM_ASSETS_V2 } from '../limits.js';
+import { PLATFORM_ASSETS, PLATFORM_ASSETS_V2, PLATFORM_ASSETS_V3 } from '../limits.js';
 import { baseSecurityHeaders, PLATFORM_CACHE } from './headers.js';
 import { PLATFORM_LOGO_SVG } from './logo.js';
 import { MERMAID_BUNDLE } from './mermaid-bundle.generated.js';
@@ -785,7 +785,7 @@ export const PLATFORM_JS_V2 = `${PLATFORM_JS.replaceAll('/_nrdocs/v1/', '/_nrdoc
 (() => {
   const button = document.querySelector('.nr-ai-share');
   if (!button || !(button instanceof HTMLButtonElement)) return;
-  const siteMatch = location.pathname.match(/^\\/([^/]+)/);
+  const siteMatch = location.pathname.match(new RegExp('^/([^/]+)'));
   const siteSlug = siteMatch ? siteMatch[1] : '';
   let dialog = null;
   let lastActive = null;
@@ -943,6 +943,159 @@ export const PLATFORM_JS_V2 = `${PLATFORM_JS.replaceAll('/_nrdocs/v1/', '/_nrdoc
 })();
 `;
 
+const PLATFORM_API_CSS = `
+/* v3 API reference — fill the main column (guides keep .nr-article max-width:46rem) */
+.nr-article:has(.nr-api-layout){max-width:none;width:100%}
+.nr-api-layout{display:grid;gap:1.75rem;width:100%}
+@media (min-width:64rem){
+  .nr-api-layout{grid-template-columns:minmax(0,1.35fr) minmax(20rem,.95fr);align-items:start;gap:1.75rem}
+  .nr-api-secondary{position:sticky;top:calc(var(--nr-header-height) + 1rem)}
+}
+.nr-api-primary,.nr-api-examples,.nr-api-secondary{min-width:0}
+.nr-api-secondary{display:flex;flex-direction:column;gap:1rem}
+.nr-api-method-path{display:flex;flex-wrap:wrap;align-items:center;gap:.5rem;margin:0 0 1rem}
+.nr-api-method{
+  display:inline-block;font:650 .75rem/1 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  letter-spacing:.04em;padding:.35rem .55rem;border-radius:.4rem;background:var(--nr-code-bg);color:var(--nr-fg)
+}
+.nr-api-method-get{background:#e7f0fe;color:#0b57d0}
+.nr-api-method-post{background:#e6f4ea;color:#137333}
+.nr-api-method-put,.nr-api-method-patch{background:#fef7e0;color:#8a5b00}
+.nr-api-method-delete{background:#fce8e6;color:#c5221f}
+:root:not([data-nr-theme="light"]) .nr-api-method-get,
+:root[data-nr-theme="dark"] .nr-api-method-get{background:#1a3050;color:#8ab4f8}
+:root:not([data-nr-theme="light"]) .nr-api-method-post,
+:root[data-nr-theme="dark"] .nr-api-method-post{background:#1a3a28;color:#81c995}
+:root:not([data-nr-theme="light"]) .nr-api-method-put,
+:root:not([data-nr-theme="light"]) .nr-api-method-patch,
+:root[data-nr-theme="dark"] .nr-api-method-put,
+:root[data-nr-theme="dark"] .nr-api-method-patch{background:#3a3010;color:#fdd663}
+:root:not([data-nr-theme="light"]) .nr-api-method-delete,
+:root[data-nr-theme="dark"] .nr-api-method-delete{background:#4a1e1a;color:#f28b82}
+.nr-api-path{font-size:.95em}
+.nr-api-cost{margin:0 0 1rem}
+.nr-api-cost-label{font-weight:650;margin-inline-end:.35rem}
+.nr-api-table{width:100%;border-collapse:collapse;margin:0 0 1rem;font-size:.95em}
+.nr-api-table th,.nr-api-table td{border:1px solid var(--nr-border);padding:.45rem .55rem;text-align:start;vertical-align:top}
+.nr-api-table th{background:var(--nr-code-bg);font-weight:650}
+
+/* Example cards (request / response) — inspired by reference API docs */
+.nr-api-panel{
+  border:1px solid var(--nr-border);
+  border-radius:.75rem;
+  background:var(--nr-header);
+  overflow:hidden;
+  min-width:0;
+}
+.nr-api-panel .nr-tabs{margin:0}
+.nr-api-panel-chrome{
+  display:flex;align-items:center;gap:.5rem;
+  padding:.55rem .75rem;
+  border-bottom:1px solid var(--nr-border);
+  background:var(--nr-code-bg);
+}
+.nr-api-panel-chrome .nr-tab-list{
+  flex:1;display:flex;flex-wrap:wrap;align-items:center;gap:.15rem .55rem;margin:0;min-width:0
+}
+.nr-api-panel-chrome .nr-tab{
+  appearance:none;font:inherit;font-size:.82rem;font-weight:650;
+  padding:.35rem .2rem;margin:0;border:0;border-radius:0;
+  background:transparent;color:var(--nr-muted);cursor:pointer;
+  box-shadow:none;border-bottom:2px solid transparent
+}
+.nr-api-panel-chrome .nr-tab:hover{color:var(--nr-fg)}
+.nr-api-panel-chrome .nr-tab.nr-tab-active{
+  color:var(--nr-accent);border-bottom-color:var(--nr-accent);box-shadow:none
+}
+.nr-api-panel-chrome .nr-copy{
+  flex:0 0 auto;position:relative;
+  width:2rem;height:2rem;padding:0;margin:0;
+  border:1px solid var(--nr-border);border-radius:.45rem;
+  background:var(--nr-bg);color:transparent;overflow:hidden;
+  text-indent:2.5rem;white-space:nowrap;cursor:pointer;font:inherit
+}
+.nr-api-panel-chrome .nr-copy::before,
+.nr-api-panel-chrome .nr-copy::after{
+  content:"";position:absolute;pointer-events:none
+}
+.nr-api-panel-chrome .nr-copy::before{
+  inset-block-start:.45rem;inset-inline-start:.45rem;
+  width:.72rem;height:.72rem;border:1.5px solid var(--nr-fg);border-radius:.18rem;opacity:.55
+}
+.nr-api-panel-chrome .nr-copy::after{
+  inset-block-start:.68rem;inset-inline-start:.68rem;
+  width:.72rem;height:.72rem;border:1.5px solid var(--nr-fg);border-radius:.18rem;
+  background:var(--nr-bg)
+}
+.nr-api-panel-chrome .nr-copy:hover{border-color:var(--nr-accent)}
+.nr-api-panel .nr-tab-panel{margin:0}
+.nr-api-panel .nr-code-block{margin:0}
+.nr-api-panel .nr-code-block pre{
+  margin:0;padding:1rem 1.05rem 1.15rem;max-height:22rem;overflow:auto;
+  border:0;border-radius:0;background:transparent;font-size:.84em;line-height:1.45
+}
+.nr-api-panel .nr-code-block .nr-copy{display:none}
+
+/* Fallback tab chrome outside panels (unused on operation pages after panel migration) */
+.nr-tabs{margin:0 0 1rem}
+.nr-tab-list{display:flex;flex-wrap:wrap;gap:.35rem;margin:0 0 .75rem}
+.nr-tab{
+  font:inherit;font-weight:650;padding:.45rem .7rem;border:1px solid var(--nr-border);
+  border-radius:.5rem;background:var(--nr-bg);color:var(--nr-fg);cursor:pointer
+}
+.nr-tab.nr-tab-active{border-color:var(--nr-accent);box-shadow:inset 0 -2px 0 var(--nr-accent)}
+.nr-tab-panel{margin:0 0 1rem}
+@media (scripting: enabled){
+  .nr-tabs .nr-tab-panel{display:none}
+  .nr-tabs .nr-tab-panel.nr-tab-panel-active{display:block}
+}
+.nr-code-block{position:relative}
+.nr-code-block pre{margin:0 0 .5rem}
+.nr-copy{
+  font:inherit;font-size:.85em;padding:.3rem .55rem;border:1px solid var(--nr-border);
+  border-radius:.4rem;background:var(--nr-bg);color:var(--nr-fg);cursor:pointer
+}
+`;
+
+const PLATFORM_API_JS = `
+(() => {
+  for (const root of document.querySelectorAll('.nr-tabs')) {
+    const list = root.querySelector(':scope > .nr-api-panel-chrome > .nr-tab-list, :scope > .nr-tab-list');
+    if (!list) continue;
+    const tabs = [...list.querySelectorAll(':scope > .nr-tab')];
+    const panels = [...root.querySelectorAll(':scope > .nr-tab-panel')];
+    if (tabs.length === 0 || tabs.length !== panels.length) continue;
+    tabs.forEach((tab, index) => {
+      tab.addEventListener('click', () => {
+        tabs.forEach((t, i) => t.classList.toggle('nr-tab-active', i === index));
+        panels.forEach((p, i) => p.classList.toggle('nr-tab-panel-active', i === index));
+      });
+    });
+  }
+  for (const btn of document.querySelectorAll('button.nr-copy')) {
+    btn.addEventListener('click', async () => {
+      const tabsRoot = btn.closest('.nr-tabs');
+      const activePanel = tabsRoot && tabsRoot.querySelector(':scope > .nr-tab-panel.nr-tab-panel-active');
+      const pre =
+        (activePanel && activePanel.querySelector('pre')) ||
+        (btn.closest('.nr-code-block') && btn.closest('.nr-code-block').querySelector('pre'));
+      const text = pre ? pre.textContent || '' : '';
+      try {
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          await navigator.clipboard.writeText(text);
+        }
+      } catch {}
+    });
+  }
+})();
+`;
+
+export const PLATFORM_CSS_V3 = `${PLATFORM_CSS_V2.replaceAll('/_nrdocs/v2/', '/_nrdocs/v3/')}${PLATFORM_API_CSS}`;
+
+export const PLATFORM_JS_V3 = `${PLATFORM_JS_V2.replaceAll('/_nrdocs/v2/', '/_nrdocs/v3/')}
+${PLATFORM_API_JS}
+`;
+
 /** Served at `/_nrdocs/v1/mermaid.js`. Stub in unit tests; real bundle from release build. */
 export const PLATFORM_MERMAID = MERMAID_BUNDLE;
 
@@ -961,6 +1114,13 @@ const ASSETS: Record<string, { body: string; mediaType: string }> = {
     mediaType: 'text/javascript; charset=utf-8',
   },
   [PLATFORM_ASSETS_V2[3]]: { body: PLATFORM_LOGO_SVG, mediaType: 'image/svg+xml; charset=utf-8' },
+  [PLATFORM_ASSETS_V3[0]]: { body: PLATFORM_CSS_V3, mediaType: 'text/css; charset=utf-8' },
+  [PLATFORM_ASSETS_V3[1]]: { body: PLATFORM_JS_V3, mediaType: 'text/javascript; charset=utf-8' },
+  [PLATFORM_ASSETS_V3[2]]: {
+    body: PLATFORM_MERMAID,
+    mediaType: 'text/javascript; charset=utf-8',
+  },
+  [PLATFORM_ASSETS_V3[3]]: { body: PLATFORM_LOGO_SVG, mediaType: 'image/svg+xml; charset=utf-8' },
 };
 
 export async function servePlatformAsset(

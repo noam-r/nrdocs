@@ -40,6 +40,23 @@ describe('fetchProtocolVersion', () => {
             { status: 200, headers: { 'content-type': 'application/json' } },
           ),
       }),
-    ).resolves.toBeUndefined();
+    ).resolves.toMatchObject({ artifact_schema_versions: [1, 2] });
+  });
+
+  it('accepts a Worker that advertises schema 3', async () => {
+    await expect(
+      fetchProtocolVersion('https://docs.example.com', {
+        fetch: async () =>
+          new Response(
+            JSON.stringify({
+              product: 'nrdocs',
+              package_version: '2.0.0',
+              api_versions: [1],
+              artifact_schema_versions: [1, 2, 3],
+            }),
+            { status: 200, headers: { 'content-type': 'application/json' } },
+          ),
+      }),
+    ).resolves.toMatchObject({ artifact_schema_versions: [1, 2, 3] });
   });
 });

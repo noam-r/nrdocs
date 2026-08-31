@@ -35,4 +35,8 @@ function loadPackaged(name: string): string {
 export const BUNDLED_WORKER_MODULE = loadPackaged('worker.mjs');
 export const BUNDLED_PLATFORM_CSS = loadPackaged('reader.css');
 export const BUNDLED_PLATFORM_JS = loadPackaged('reader.js');
+export const BUNDLED_PLATFORM_CSS_V2 = loadPackaged('reader-v2.css');
+export const BUNDLED_PLATFORM_JS_V2 = loadPackaged('reader-v2.js');
+export const BUNDLED_PLATFORM_CSS_V3 = loadPackaged('reader-v3.css');
+export const BUNDLED_PLATFORM_JS_V3 = loadPackaged('reader-v3.js');
 export const BUNDLED_PLATFORM_MERMAID = loadPackaged('mermaid.js');

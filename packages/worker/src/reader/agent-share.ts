@@ -6,6 +6,7 @@ import {
   AGENT_SHARE_RATE_INSTANCE,
   AGENT_SHARE_RATE_SITE_IP,
   isManifestV2,
+  isManifestV3,
   parseAgentShareDuration,
   parseSlug,
 } from '@nrdocs/contracts';
@@ -46,7 +47,11 @@ export async function handleAgentShareGet(
   const site = await getSiteBySlug(ctx.db, slug);
   if (!siteIsReadable(site)) return notFound(ctx);
   const manifest = await loadCurrentManifest(ctx.store, site);
-  if (manifest === 'missing' || manifest === 'invalid' || !isManifestV2(manifest)) {
+  if (
+    manifest === 'missing' ||
+    manifest === 'invalid' ||
+    !(isManifestV2(manifest) || isManifestV3(manifest))
+  ) {
     return notFound(ctx);
   }
   if (site.access_mode === 'public') {
@@ -132,7 +137,11 @@ export async function handleAgentSharePost(
 
   if (!siteIsReadable(site) || site.access_mode !== 'password') return notFound(ctx);
   const manifest = await loadCurrentManifest(ctx.store, site);
-  if (manifest === 'missing' || manifest === 'invalid' || !isManifestV2(manifest)) {
+  if (
+    manifest === 'missing' ||
+    manifest === 'invalid' ||
+    !(isManifestV2(manifest) || isManifestV3(manifest))
+  ) {
     return notFound(ctx);
   }
   const sessionOk = await authorizedForPasswordSite(ctx, site, request);

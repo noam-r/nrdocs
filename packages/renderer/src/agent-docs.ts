@@ -98,6 +98,7 @@ export function buildAgentIndexMarkdown(input: {
 export function buildAgentAllMarkdown(input: {
   siteTitle: string;
   pages: Array<{ title: string; humanRoute: string; pageId: string; markdown: string }>;
+  maxBytes?: number;
 }): Uint8Array | null {
   const parts: string[] = [
     `# ${escapeMd(input.siteTitle)}`,
@@ -122,7 +123,8 @@ export function buildAgentAllMarkdown(input: {
   }
   const text = `${parts.join('\n').replace(/\n+$/, '')}\n`;
   const bytes = new TextEncoder().encode(text);
-  if (bytes.byteLength > AGENT_ALL_MD_MAX_BYTES) return null;
+  const maxBytes = input.maxBytes ?? AGENT_ALL_MD_MAX_BYTES;
+  if (bytes.byteLength > maxBytes) return null;
   return bytes;
 }
 

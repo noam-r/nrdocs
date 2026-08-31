@@ -569,8 +569,12 @@ GET /product-handbook/
 - If `index.md` exists, serve it as the site root.
 - Otherwise, redirect to the first navigable page.
 - Serve only pages and assets included in the current publication.
-- Do not expose publisher source files or a downloadable site archive.
-- For a schema v2 publication, successful HTML responses for authorized readers include a `Link` alternate to the machine-readable index, and `/_nrdocs/agent/{slug}/` serves stored Markdown and media by declared agent routes.
+- Do not expose publisher source Markdown, OpenAPI source files, or a
+  downloadable site archive.
+- When the publication includes `api`, authorized readers may download the
+  single generated bundled OpenAPI JSON at the reserved route defined in
+  document 12; that artifact is not publisher source.
+- For a schema v2 or v3 publication, successful HTML responses for authorized readers include a `Link` alternate to the machine-readable index, and `/_nrdocs/agent/{slug}/` serves stored Markdown and media by declared agent routes.
 
 ## Journey 13: Read a Password-Protected Site
 
@@ -772,6 +776,54 @@ Copy a prompt that tells an AI to fetch the current machine-readable publication
 Schema v2 HTML pages include an icon control that opens a dialog explaining the human-facing steps. The on-screen explanation is not copied. Copying puts a separate prompt on the clipboard that tells the model to start at the machine-readable entry URL. The dialog also discloses that the publication may change while a copied link remains valid. A password-protected site additionally discloses that anyone who receives the prompt can read the site until the grant expires.
 
 A public site copies a non-expiring clean entry URL under `/_nrdocs/agent/{slug}/index.md`. A password-protected site requires an existing reader session, lets the reader choose 1 hour, 24 hours (default), or 7 days, and only then mints a grant URL under `/_nrdocs/agent/share/{grant}/`. There is no CLI command for grants.
+
+## Journey 23: Publish Guides with an OpenAPI Reference
+
+### Goal
+
+Publish Markdown guides together with a generated API Reference from one
+OpenAPI description.
+
+### Setup
+
+```yaml
+# nrdocs.yml
+title: Product Docs
+navigation: auto
+api:
+  specification: openapi.yaml
+```
+
+### Required behavior
+
+- Preview and publish use the same OpenAPI validation and rendering pipeline.
+- Authored navigation precedes a generated API Reference section.
+- Routes under `/api-reference/` are reserved; collisions fail clearly.
+- Promotion is atomic across Markdown pages, generated pages, agent content,
+  and the bundled OpenAPI download.
+- Absence of `api` leaves Markdown-only behavior unchanged.
+
+Details are normative in
+[`12-openapi-reference-extension.md`](./12-openapi-reference-extension.md).
+
+## Journey 24: Read and Download an API Reference
+
+### Goal
+
+Read generated operation and schema pages and download the bundled OpenAPI
+document under ordinary site access.
+
+### Required behavior
+
+- `/api-reference/` presents API info, servers, authentication overview, and
+  the Download OpenAPI control.
+- Operation and schema pages use the fixed reader shell and API article layout.
+- Public sites expose the download without authentication; password sites
+  require a reader session.
+- The download is processed JSON at `/api-reference/openapi.json`, not the
+  publisher's source `openapi.yaml` or dependency files.
+- Share with LLM includes generated API agent documents for schema v3
+  publications.
 
 ## Global Journey Invariants
 

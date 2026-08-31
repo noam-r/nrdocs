@@ -10,12 +10,17 @@ export type NavigationEntry = {
   children?: NavigationEntry[];
 };
 
+export type ApiConfig = {
+  specification: string;
+};
+
 export type NrdocsConfig = {
   publish?: { credential: SiteId };
   title: string;
   language: string;
   direction: Direction;
   navigation: NavigationAuto | NavigationEntry[];
+  api?: ApiConfig;
 };
 
 export type ParseConfigOptions = {
@@ -59,7 +64,7 @@ function parseNavigationEntry(raw: unknown, depth: number): NavigationEntry {
 
 export function parseNrdocsConfig(raw: unknown, options: ParseConfigOptions = {}): NrdocsConfig {
   if (!isPlainObject(raw)) throw new Error('nrdocs.yml must be a mapping');
-  const allowed = new Set(['publish', 'title', 'language', 'direction', 'navigation']);
+  const allowed = new Set(['publish', 'title', 'language', 'direction', 'navigation', 'api']);
   for (const key of Object.keys(raw)) {
     if (!allowed.has(key)) throw new Error(`unknown nrdocs.yml field: ${key}`);
   }
@@ -95,9 +100,33 @@ export function parseNrdocsConfig(raw: unknown, options: ParseConfigOptions = {}
     throw new Error('publish.credential is required');
   }
 
-  return publish
-    ? { publish, title, language, direction, navigation }
-    : { title, language, direction, navigation };
+  let api: ApiConfig | undefined;
+  if (raw.api !== undefined) {
+    if (!isPlainObject(raw.api)) throw new Error('api must be a mapping');
+    for (const key of Object.keys(raw.api)) {
+      if (key !== 'specification') throw new Error(`unknown api field: ${key}`);
+    }
+    if (typeof raw.api.specification !== 'string' || raw.api.specification.length === 0) {
+      throw new Error('api.specification is required');
+    }
+    const spec = raw.api.specification;
+    if (
+      spec.includes('\\') ||
+      spec.startsWith('/') ||
+      spec.includes('\0') ||
+      spec.split('/').some((p) => p === '' || p === '.' || p === '..')
+    ) {
+      throw new Error('api.specification path is unsafe');
+    }
+    if (!/\.(ya?ml|json)$/i.test(spec)) {
+      throw new Error('api.specification must be a .yaml, .yml, or .json file');
+    }
+    api = { specification: spec };
+  }
+
+  const base = { title, language, direction, navigation };
+  const withPublish = publish ? { ...base, publish } : base;
+  return api ? { ...withPublish, api } : withPublish;
 }
 
 export function navigationDepth(entries: readonly NavigationEntry[], depth = 1): number {

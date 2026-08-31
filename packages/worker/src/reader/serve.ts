@@ -9,10 +9,12 @@ import {
 import {
   foldSlugInput,
   isManifestV2,
+  isManifestV3,
   parseManifest,
   parseSlug,
   type ManifestV1,
   type ManifestV2,
+  type ManifestV3,
   type RequestId,
 } from '@nrdocs/contracts';
 import { ApiError } from '../http.js';
@@ -73,7 +75,7 @@ export function siteIsReadable(site: SiteRow | null): site is SiteRow {
 export async function loadCurrentManifest(
   store: ArtifactObjectStore,
   site: SiteRow,
-): Promise<ManifestV1 | ManifestV2 | 'missing' | 'invalid'> {
+): Promise<ManifestV1 | ManifestV2 | ManifestV3 | 'missing' | 'invalid'> {
   if (!site.current_artifact_id) return 'missing';
   const key = artifactObjectKey(site.id, site.current_artifact_id, 'nrdocs-manifest.json');
   const bytes = await store.get(key);
@@ -141,25 +143,29 @@ export async function redirectToPassword(
 async function serveObject(
   ctx: ReaderContext,
   site: SiteRow,
-  manifest: ManifestV1 | ManifestV2,
+  manifest: ManifestV1 | ManifestV2 | ManifestV3,
   siteRelativePath: string,
   method: string,
   authorized: boolean,
 ): Promise<Response> {
   const lang = siteLang(site);
-  const pageSchema = isManifestV2(manifest) ? 2 : 1;
+  const pageSchema = isManifestV3(manifest) ? 3 : isManifestV2(manifest) ? 2 : 1;
 
   for (const page of manifest.pages) {
     if (page.route === siteRelativePath) {
-      const object = isManifestV2(manifest)
-        ? (page as ManifestV2['pages'][number]).html.object
-        : (page as ManifestV1['pages'][number]).object;
+      const object =
+        isManifestV2(manifest) || isManifestV3(manifest)
+          ? (page as ManifestV2['pages'][number]).html.object
+          : (page as ManifestV1['pages'][number]).object;
       const key = artifactObjectKey(site.id, site.current_artifact_id!, object);
       const bytes = await ctx.store.get(key);
       if (!bytes)
         return htmlResponse(unavailablePage(ctx.requestId, lang), 503, { hsts: ctx.hsts });
       const headers = new Headers(htmlSecurityHeaders({ hsts: ctx.hsts, pageSchema }));
-      if (isManifestV2(manifest) && (site.access_mode === 'public' || authorized)) {
+      if (
+        (isManifestV2(manifest) || isManifestV3(manifest)) &&
+        (site.access_mode === 'public' || authorized)
+      ) {
         headers.set(
           'link',
           `</_nrdocs/agent/${site.slug}/index.md>; rel="alternate"; type="text/markdown"`,
@@ -168,6 +174,25 @@ async function serveObject(
       if (method === 'HEAD') return new Response(null, { status: 200, headers });
       return new Response(Uint8Array.from(bytes), { status: 200, headers });
     }
+  }
+
+  if (isManifestV3(manifest) && manifest.openapi_download.route === siteRelativePath) {
+    const key = artifactObjectKey(
+      site.id,
+      site.current_artifact_id!,
+      manifest.openapi_download.object,
+    );
+    const bytes = await ctx.store.get(key);
+    if (!bytes) return htmlResponse(unavailablePage(ctx.requestId, lang), 503, { hsts: ctx.hsts });
+    const headers = new Headers({
+      ...baseSecurityHeaders({ hsts: ctx.hsts }),
+      'cache-control': NO_STORE,
+      'content-type': manifest.openapi_download.media_type,
+      'content-disposition': attachmentContentDisposition(manifest.openapi_download.filename),
+      'content-security-policy': ATTACHMENT_CSP,
+    });
+    if (method === 'HEAD') return new Response(null, { status: 200, headers });
+    return new Response(Uint8Array.from(bytes), { status: 200, headers });
   }
 
   for (const asset of manifest.assets) {

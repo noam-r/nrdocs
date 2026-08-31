@@ -292,10 +292,15 @@ The site ID is immutable. The administrator may rename the slug without changing
 
 The supported source is a directory containing:
 
-- Markdown pages;
+- Markdown pages (zero or more when an OpenAPI `api` block is configured; see
+  [`12-openapi-reference-extension.md`](./12-openapi-reference-extension.md));
 - `nrdocs.yml`;
-- supported images; and
-- supported referenced attachments.
+- supported images;
+- supported referenced attachments; and
+- optionally one OpenAPI 3.0.x or 3.1.x description and its local `$ref`
+  dependencies when `api` is configured.
+
+Without `api`, at least one navigable Markdown page remains required.
 
 The fixed Markdown feature set includes:
 
@@ -341,7 +346,7 @@ Numeric prefixes determine order but are removed from public URLs:
 02-guides/01-installation.md    -> /guides/installation/
 ```
 
-`index.md` represents its containing directory. If the publication root has no `index.md`, the site root redirects to the first navigable page.
+`index.md` represents its containing directory. If the publication root has no `index.md`, the site root redirects to the first navigable page. When `api` is configured and there are no authored Markdown pages, the site root redirects to the generated API Reference landing page `/api-reference/`.
 
 Publishers may materialize automatic navigation into an explicit editable list with:
 
@@ -375,7 +380,12 @@ nrdocs 2.0 has no:
 - comments;
 - analytics injection;
 - public site directory; or
-- source-download interface.
+- general source-download or site-archive interface.
+
+OpenAPI-enabled publications may expose one platform-generated, self-contained
+OpenAPI JSON download under a reserved site-relative route. That download is
+not a copy of publisher source files and is not a site archive. See
+[`12-openapi-reference-extension.md`](./12-openapi-reference-extension.md).
 
 The instance root shows a branded fixed page with a GitHub project link and never lists sites.
 
@@ -410,6 +420,8 @@ nrdocs 2.0 must support:
 13. Site enablement, disablement, rename, and permanent deletion.
 14. Generic, non-discoverable instance homepage behavior.
 15. Machine-readable agent access for the current publication, including Share with LLM.
+16. Optional additive OpenAPI reference generation within a Markdown minisite,
+    as specified in [`12-openapi-reference-extension.md`](./12-openapi-reference-extension.md).
 
 ## Non-Goals
 
@@ -432,10 +444,15 @@ nrdocs 2.0 must not include:
 15. Expiring reader share links.
 16. Site discovery or public-site listings.
 17. Search.
-18. Source Markdown or site archive downloads.
+18. Source Markdown downloads, site archive downloads, or any general
+    source-download interface. The single generated OpenAPI JSON download for
+    an `api`-enabled publication is an explicit exception defined in document
+    12; it is not publisher source and not a site archive.
 19. Per-site custom domains.
 20. Persistent servers, VMs, or containers.
 21. A general replacement for MkDocs, Docusaurus, or other static-site generators.
+22. Hosting, proxying, invoking, or providing an interactive console for the
+    documented HTTP API; remote OpenAPI `$ref` resolution; or OpenAPI editing.
 
 ## Clean Break from nrdocs 1.x
 

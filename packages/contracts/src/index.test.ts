@@ -71,6 +71,31 @@ describe('nrdocs.yml schema', () => {
       /credential/,
     );
   });
+  it('parses optional api.specification', () => {
+    const cfg = parseNrdocsConfig({
+      title: 'T',
+      navigation: 'auto',
+      api: { specification: 'openapi.yaml' },
+    });
+    expect(cfg.api).toEqual({ specification: 'openapi.yaml' });
+  });
+
+  it('rejects unsafe api.specification paths', () => {
+    expect(() =>
+      parseNrdocsConfig({
+        title: 'T',
+        navigation: 'auto',
+        api: { specification: '../openapi.yaml' },
+      }),
+    ).toThrow(/unsafe/);
+    expect(() =>
+      parseNrdocsConfig({
+        title: 'T',
+        navigation: 'auto',
+        api: { specification: 'openapi.txt' },
+      }),
+    ).toThrow(/yaml|yml|json/);
+  });
 });
 
 describe('language and title', () => {

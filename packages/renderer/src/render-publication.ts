@@ -2,14 +2,19 @@ import fsp from 'node:fs/promises';
 import path from 'node:path';
 import type { Root } from 'mdast';
 import {
+  AGENT_ALL_MD_MAX_BYTES,
+  AGENT_ALL_MD_MAX_BYTES_V3,
   AGENT_PAGE_MARKDOWN_MAX_BYTES,
   agentAssetRoute,
   agentAttachmentRoute,
   agentIdFromCanonicalPath,
   sealManifestV2,
+  sealManifestV3,
   sha256Hex,
   type ManifestDraftV2,
+  type ManifestDraftV3,
   type ManifestV2,
+  type ManifestV3,
   type SiteId,
 } from '@nrdocs/contracts';
 import { loadAndNormalizeMarkdown } from './markdown-scan.js';
@@ -22,7 +27,7 @@ import {
   markdownFragmentFromHeadingText,
 } from './markdown-fragments.js';
 import { mediaObjectPath, pageObjectPath, routeRelativeHref } from './relative-href.js';
-import { assemblePageDocumentV2, flattenNavigablePages } from './shell.js';
+import { assemblePageDocumentV2, assemblePageDocumentV3, flattenNavigablePages } from './shell.js';
 import {
   buildAgentAllMarkdown,
   buildAgentIndexMarkdown,
@@ -38,7 +43,7 @@ export type RenderedFile = {
 };
 
 export type InMemoryArtifact = {
-  manifest: ManifestV2;
+  manifest: ManifestV2 | ManifestV3;
   files: RenderedFile[];
 };
 
@@ -130,12 +135,15 @@ export async function renderPublication(
     { page: PublicationPage; tree: Root; headings: ReturnType<typeof headingFragmentsForTree> }
   >();
   for (const page of graph.pages) {
+    if (page.origin === 'openapi') continue;
     const { tree } = loadAndNormalizeMarkdown(
       new TextEncoder().encode(page.markdownText),
       page.sourceFile,
     );
     parsed.set(page.sourceFile, { page, tree, headings: headingFragmentsForTree(tree) });
   }
+
+  const assemblePage = graph.openapi ? assemblePageDocumentV3 : assemblePageDocumentV2;
 
   const assetAgent = new Map<string, { id: string; route: string }>();
   const seenMedia = new Set<string>();
@@ -179,16 +187,76 @@ export async function renderPublication(
   for (let i = 0; i < ordered.length; i++) {
     options.onProgress?.({ phase: 'page', current: i + 1, total: ordered.length });
     const meta = ordered[i]!;
+    const page = pageBySource.get(meta.sourceFile);
+    if (!page) {
+      throw new RendererError('missing_page', `Missing page data for:\n  ${meta.sourceFile}`);
+    }
+    const pageId = pageIdBySource.get(page.sourceFile)!;
+    const prev = i > 0 ? ordered[i - 1]! : null;
+    const next = i < ordered.length - 1 ? ordered[i + 1]! : null;
+
+    if (page.origin === 'openapi' && page.articleHtml) {
+      const mdBytes = new TextEncoder().encode(page.markdownText);
+      if (mdBytes.byteLength > AGENT_PAGE_MARKDOWN_MAX_BYTES) {
+        throw new RendererError(
+          'page_too_large',
+          `Normalized Markdown page exceeds 1 MiB:\n  ${page.sourceFile}`,
+        );
+      }
+      const document = assemblePage({
+        language: graph.site.language,
+        direction: graph.site.direction,
+        siteTitle: graph.site.title,
+        pageTitle: page.title,
+        pageRoute: page.route,
+        articleHtml: page.articleHtml,
+        navTree: graph.navTree,
+        prev: prev ? { title: prev.title, route: prev.route } : null,
+        next: next ? { title: next.title, route: next.route } : null,
+      });
+      const htmlBytes = new TextEncoder().encode(document);
+      if (htmlBytes.byteLength > 2 * 1024 * 1024) {
+        throw new RendererError(
+          'page_too_large',
+          `Rendered page exceeds 2 MiB:\n  ${page.sourceFile}`,
+        );
+      }
+      renderedPages.push({
+        route: page.route,
+        htmlObject: pageObjectPath(page.route),
+        mdObject: `agent/pages/${pageId}.md`,
+        title: page.title,
+        htmlBytes,
+        mdBytes,
+        id: pageId,
+        markdownText: page.markdownText,
+      });
+      continue;
+    }
+
     const loaded = parsed.get(meta.sourceFile);
     if (!loaded) {
       throw new RendererError('missing_page', `Missing page data for:\n  ${meta.sourceFile}`);
     }
-    const { page, tree, headings } = loaded;
-    const pageId = pageIdBySource.get(page.sourceFile)!;
+    const { tree, headings } = loaded;
 
     const htmlLinks = {
       resolvePageHref(href: string): string | null {
         const { pathOnly, fragment } = splitHref(href);
+        if (pathOnly.startsWith('/')) {
+          let route = pathOnly;
+          if (route !== '/api-reference/openapi.json' && !route.endsWith('/')) {
+            route = `${route}/`;
+          }
+          if (route === '/api-reference/openapi.json') {
+            return routeRelativeHref(page.route, route) + (fragment ? `#${fragment}` : '');
+          }
+          const target = graph.pages.find((p) => p.route === route);
+          if (target) {
+            return routeRelativeHref(page.route, target.route) + (fragment ? `#${fragment}` : '');
+          }
+          return null;
+        }
         if (!pathOnly.endsWith('.md') && pathOnly !== '') return null;
         let targetFile: string;
         try {
@@ -289,9 +357,7 @@ export async function renderPublication(
       );
     }
 
-    const prev = i > 0 ? ordered[i - 1]! : null;
-    const next = i < ordered.length - 1 ? ordered[i + 1]! : null;
-    const document = assemblePageDocumentV2({
+    const document = assemblePage({
       language: graph.site.language,
       direction: graph.site.direction,
       siteTitle: graph.site.title,
@@ -390,6 +456,7 @@ export async function renderPublication(
       pageId: p.id,
       markdown: p.markdownText,
     })),
+    maxBytes: graph.openapi ? AGENT_ALL_MD_MAX_BYTES_V3 : AGENT_ALL_MD_MAX_BYTES,
   });
 
   const indexText = buildAgentIndexMarkdown({
@@ -453,15 +520,79 @@ export async function renderPublication(
   files.push({ objectPath: 'agent/manifest.json', bytes: agentManifestBytes });
 
   const extra = 2 + (allBytes ? 1 : 0);
+  const openapiBytes = graph.openapi?.bundledJson;
+  const openapiExtra = openapiBytes ? 1 : 0;
   const file_count =
-    renderedPages.length * 2 + manifestAssets.length + manifestAttachments.length + extra;
+    renderedPages.length * 2 +
+    manifestAssets.length +
+    manifestAttachments.length +
+    extra +
+    openapiExtra;
   const uncompressed_size =
     renderedPages.reduce((s, p) => s + p.htmlBytes.byteLength + p.mdBytes.byteLength, 0) +
     manifestAssets.reduce((s, a) => s + a.size, 0) +
     manifestAttachments.reduce((s, a) => s + a.size, 0) +
     indexBytes.byteLength +
     agentManifestBytes.byteLength +
-    (allBytes ? allBytes.byteLength : 0);
+    (allBytes ? allBytes.byteLength : 0) +
+    (openapiBytes ? openapiBytes.byteLength : 0);
+
+  if (openapiBytes && graph.openapi) {
+    files.push({ objectPath: graph.openapi.download.object, bytes: openapiBytes });
+    const draft: ManifestDraftV3 = {
+      schema_version: 3,
+      page_schema_version: 3,
+      site_id: options.siteId,
+      generator: { name: 'nrdocs', version: options.generatorVersion },
+      site: {
+        title: graph.site.title,
+        language: graph.site.language,
+        direction: graph.site.direction,
+        root: graph.root,
+      },
+      pages: manifestPages,
+      assets: manifestAssets,
+      attachments: manifestAttachments,
+      agent: {
+        schema_version: 1,
+        index: {
+          object: 'agent/index.md',
+          size: indexBytes.byteLength,
+          sha256: indexSha,
+        },
+        manifest: {
+          object: 'agent/manifest.json',
+          size: agentManifestBytes.byteLength,
+          sha256: await fileSha256(agentManifestBytes),
+        },
+        all: allBytes
+          ? {
+              object: 'agent/all.md',
+              size: allBytes.byteLength,
+              sha256: allSha!,
+            }
+          : null,
+      },
+      openapi_download: {
+        route: graph.openapi.download.route,
+        object: graph.openapi.download.object,
+        media_type: graph.openapi.download.mediaType,
+        filename: graph.openapi.download.filename,
+        size: openapiBytes.byteLength,
+        sha256: await fileSha256(openapiBytes),
+      },
+      artifact: { file_count, uncompressed_size },
+    };
+    const manifest = await sealManifestV3(draft);
+    const manifestFile: RenderedFile = {
+      objectPath: 'nrdocs-manifest.json',
+      bytes: new TextEncoder().encode(JSON.stringify(manifest)),
+    };
+    const rest = files
+      .slice()
+      .sort((a, b) => (a.objectPath < b.objectPath ? -1 : a.objectPath > b.objectPath ? 1 : 0));
+    return { manifest, files: [manifestFile, ...rest] };
+  }
 
   const draft: ManifestDraftV2 = {
     schema_version: 2,

@@ -75,11 +75,72 @@ async function bundleWorker() {
   const assetsSource = await fs.readFile(assetsPath, 'utf8');
   const cssMatch = assetsSource.match(/export const PLATFORM_CSS = `([\s\S]*?)`;/);
   const jsMatch = assetsSource.match(/export const PLATFORM_JS = `([\s\S]*?)`;/);
+  const cssV2SuffixMatch = assetsSource.match(
+    /export const PLATFORM_CSS_V2 = `\$\{PLATFORM_CSS\.replaceAll\([^`]+\)\}([\s\S]*?)`;/,
+  );
+  const jsV2SuffixMatch = assetsSource.match(
+    /export const PLATFORM_JS_V2 = `\$\{PLATFORM_JS\.replaceAll\([^`]+\)\}([\s\S]*?)`;/,
+  );
+  const apiCssMatch = assetsSource.match(/const PLATFORM_API_CSS = `([\s\S]*?)`;/);
+  const apiJsMatch = assetsSource.match(/const PLATFORM_API_JS = `([\s\S]*?)`;/);
   if (!cssMatch || !jsMatch) {
     throw new Error('Failed to extract PLATFORM_CSS/PLATFORM_JS from platform-assets.ts');
   }
-  await fs.writeFile(path.join(packagedDir, 'reader.css'), cssMatch[1], 'utf8');
-  await fs.writeFile(path.join(packagedDir, 'reader.js'), jsMatch[1], 'utf8');
+  if (!cssV2SuffixMatch || !jsV2SuffixMatch || !apiCssMatch || !apiJsMatch) {
+    throw new Error('Failed to extract v2/v3 platform asset suffixes from platform-assets.ts');
+  }
+
+  // Template-literal bodies in platform-assets.ts use JS escapes (e.g. \\ → \). Decode them
+  // so packaged reader-*.js is valid JavaScript (type=module fails closed on syntax errors).
+  function decodeTemplateLiteralBody(body) {
+    let out = '';
+    for (let i = 0; i < body.length; i++) {
+      if (body[i] === '\\' && i + 1 < body.length) {
+        const n = body[i + 1];
+        if (n === '\\' || n === '`' || n === "'" || n === '"') {
+          out += n;
+          i += 1;
+          continue;
+        }
+        if (n === 'n') {
+          out += '\n';
+          i += 1;
+          continue;
+        }
+        if (n === 'r') {
+          out += '\r';
+          i += 1;
+          continue;
+        }
+        if (n === 't') {
+          out += '\t';
+          i += 1;
+          continue;
+        }
+        if (n === '$' && body[i + 2] === '{') {
+          out += '${';
+          i += 2;
+          continue;
+        }
+      }
+      out += body[i];
+    }
+    return out;
+  }
+
+  const cssV1 = cssMatch[1];
+  const jsV1 = decodeTemplateLiteralBody(jsMatch[1]);
+  const cssV2 = `${cssV1.replaceAll('/_nrdocs/v1/', '/_nrdocs/v2/')}${cssV2SuffixMatch[1]}`;
+  const jsV2 = `${jsV1.replaceAll('/_nrdocs/v1/', '/_nrdocs/v2/')}${decodeTemplateLiteralBody(jsV2SuffixMatch[1])}`;
+  const cssV3 = `${cssV2.replaceAll('/_nrdocs/v2/', '/_nrdocs/v3/')}${apiCssMatch[1]}`;
+  const jsV3 = `${jsV2.replaceAll('/_nrdocs/v2/', '/_nrdocs/v3/')}\n${decodeTemplateLiteralBody(apiJsMatch[1])}`;
+
+  await fs.writeFile(path.join(packagedDir, 'reader.css'), cssV1, 'utf8');
+  await fs.writeFile(path.join(packagedDir, 'reader.js'), jsV1, 'utf8');
+  await fs.writeFile(path.join(packagedDir, 'reader-v2.css'), cssV2, 'utf8');
+  await fs.writeFile(path.join(packagedDir, 'reader-v2.js'), jsV2, 'utf8');
+  await fs.writeFile(path.join(packagedDir, 'reader-v3.css'), cssV3, 'utf8');
+  await fs.writeFile(path.join(packagedDir, 'reader-v3.js'), jsV3, 'utf8');
   await fs.copyFile(
     path.join(repoRoot, 'assets/nrdocs-logo.svg'),
     path.join(packagedDir, 'logo.svg'),
@@ -96,6 +157,10 @@ async function bundleWorker() {
       'worker.mjs',
       'reader.css',
       'reader.js',
+      'reader-v2.css',
+      'reader-v2.js',
+      'reader-v3.css',
+      'reader-v3.js',
       'mermaid.js',
       'logo.svg',
       '',

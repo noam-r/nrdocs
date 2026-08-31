@@ -48,11 +48,12 @@ function pushPage(
   pages: Array<{ sourceFile: string; title: string }>,
   sourceFile: string,
   title: string,
+  maxPages: number = MAX_PUBLISHED_PAGES,
 ): void {
-  if (pages.length >= MAX_PUBLISHED_PAGES) {
+  if (pages.length >= maxPages) {
     throw new RendererError(
       'too_many_pages',
-      `Publication exceeds the maximum of ${MAX_PUBLISHED_PAGES} pages.`,
+      `Publication exceeds the maximum of ${maxPages} pages.`,
     );
   }
   pages.push({ sourceFile, title });
@@ -162,6 +163,7 @@ async function walkDir(
   depth: number,
   mode: 'auto' | 'generate',
   pages: Array<{ sourceFile: string; title: string }>,
+  maxPages: number,
 ): Promise<{ nodes: PublicationNavNode[]; entries: NavigationEntry[] }> {
   if (depth > MAX_NAV_DEPTH) {
     throw new RendererError(
@@ -208,7 +210,7 @@ async function walkDir(
     const title = await readPageTitle(rootDir, sourceFile);
     // For nested section index, this is handled by parent; at root we emit a page node.
     if (depth === 1 && relDir === '') {
-      pushPage(pages, sourceFile, title);
+      pushPage(pages, sourceFile, title, maxPages);
       nodes.push({
         kind: 'page',
         title,
@@ -227,7 +229,7 @@ async function walkDir(
     if (item.kind === 'page') {
       const sourceFile = joinRel(relDir, item.name);
       const title = await readPageTitle(rootDir, sourceFile);
-      pushPage(pages, sourceFile, title);
+      pushPage(pages, sourceFile, title, maxPages);
       const childDepth = relDir === '' ? 1 : depth;
       // When under a section, depth is section depth; pages at root are depth 1
       const pageDepth = relDir === '' ? 1 : depth;
@@ -271,8 +273,8 @@ async function walkDir(
 
       if (hasIndex) {
         sectionTitle = await readPageTitle(rootDir, sectionIndexRel);
-        pushPage(pages, sectionIndexRel, sectionTitle);
-        const nested = await walkDir(rootDir, childRel, sectionDepth + 1, mode, pages);
+        pushPage(pages, sectionIndexRel, sectionTitle, maxPages);
+        const nested = await walkDir(rootDir, childRel, sectionDepth + 1, mode, pages, maxPages);
         sectionNode = {
           kind: 'page',
           title: sectionTitle,
@@ -288,7 +290,7 @@ async function walkDir(
         };
       } else {
         sectionTitle = titleFromDirectoryName(item.name);
-        const nested = await walkDir(rootDir, childRel, sectionDepth + 1, mode, pages);
+        const nested = await walkDir(rootDir, childRel, sectionDepth + 1, mode, pages, maxPages);
         sectionNode = {
           kind: 'section-heading',
           title: sectionTitle,
@@ -322,9 +324,10 @@ function joinRel(dir: string, name: string): string {
 export async function discoverNavigation(
   rootDir: string,
   mode: 'auto' | 'generate',
+  maxPages: number = MAX_PUBLISHED_PAGES,
 ): Promise<DiscoveryResult> {
   const pages: Array<{ sourceFile: string; title: string }> = [];
-  const { nodes, entries } = await walkDir(rootDir, '', 1, mode, pages);
+  const { nodes, entries } = await walkDir(rootDir, '', 1, mode, pages, maxPages);
 
   if (pages.length === 0) {
     throw new RendererError(
@@ -341,10 +344,10 @@ export async function discoverNavigation(
     seen.add(p.sourceFile);
     uniquePages.push(p);
   }
-  if (uniquePages.length > MAX_PUBLISHED_PAGES) {
+  if (uniquePages.length > maxPages) {
     throw new RendererError(
       'too_many_pages',
-      `Publication exceeds the maximum of ${MAX_PUBLISHED_PAGES} pages.`,
+      `Publication exceeds the maximum of ${maxPages} pages.`,
     );
   }
 

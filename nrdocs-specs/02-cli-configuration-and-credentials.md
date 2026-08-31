@@ -278,11 +278,19 @@ title
 language
 direction
 navigation
+api
 ```
 
-No repository, build command, access request, password, server URL, theme, domain, plugin, JavaScript, CSS, search, export, or deployment setting is allowed in publication configuration.
+`api` is optional. When present it must satisfy
+[`12-openapi-reference-extension.md`](./12-openapi-reference-extension.md).
+Publications without `api` behave exactly as before.
 
-Unknown fields are validation errors. This prevents misspelled settings from being silently ignored.
+No repository, build command, access request, password, server URL, theme,
+domain, plugin, JavaScript, CSS, search, export, or deployment setting is
+allowed in publication configuration.
+
+Unknown fields are validation errors. This prevents misspelled settings from
+being silently ignored.
 
 ## `publish.credential`
 
@@ -448,8 +456,14 @@ Root entries have depth 1. Each `children` edge increases depth by one, and dept
 - No path may escape the publication root.
 - A file may appear only once.
 - Generated routes must be unique.
-- An explicit list defines the complete published page allowlist.
+- An explicit list defines the complete published **Markdown** page allowlist.
+- When `api` is configured, generated API Reference pages are additionally
+  published and appended to navigation after the authored list. They are never
+  written into `nrdocs.yml`. The full published page set is authored Markdown
+  pages ∪ generated API pages, as defined in document 12.
 - A link to an unlisted or missing Markdown file is a broken-link diagnostic, not a renderer failure. Preview still serves the site. `publish` prints the diagnostics and refuses unless `--force` is supplied. Forced publications render those links as struck-through broken links in the reader.
+- Links to generated API routes are validated once the generated route set is
+  known. Links to `api.specification` or OpenAPI dependency source paths fail.
 
 ## Automatic Navigation
 
@@ -548,8 +562,9 @@ Generated navigation must satisfy the same eight-level depth and common title li
 - If `navigation: auto`, the command replaces it with the generated list.
 - If explicit navigation exists, the command refuses unless `--force` is supplied.
 - `--dry-run` prints the proposed navigation and writes nothing.
-- The command preserves `publish`, `title`, `language`, `direction`, and unrelated settings.
+- The command preserves `publish`, `title`, `language`, `direction`, `api`, and unrelated settings.
 - It never creates, modifies, renames, or deletes Markdown files.
+- It never emits generated API Reference entries into the navigation list.
 
 The maximum total published page count is not a second navigation-specific setting. It is the shared artifact page-count limit defined by the security and resource-limit contract and enforced by automatic discovery, explicit navigation, preview, packaging, and Worker validation.
 
@@ -590,7 +605,9 @@ cannot both produce `/overview/`.
 ### Pages
 
 - Automatic navigation publishes all pages accepted by automatic discovery.
-- Explicit navigation publishes only listed pages.
+- Explicit navigation publishes only listed Markdown pages.
+- When `api` is configured, generated API Reference pages are published in
+  addition to the Markdown allowlist (document 12).
 
 ### Assets
 

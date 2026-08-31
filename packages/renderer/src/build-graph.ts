@@ -16,9 +16,12 @@ import {
   isForbiddenWebExtension,
 } from './markdown-scan.js';
 import { discoverNavigation, loadPublicationPages } from './discover.js';
+import { buildOpenApiIntegration, refreshOpenApiArticleHtml } from './openapi/integrate.js';
+import { OpenApiError } from './openapi/errors.js';
 import {
   MAX_NAV_DEPTH,
   MAX_PUBLISHED_PAGES,
+  MAX_PUBLISHED_PAGES_WITH_API,
   RendererError,
   errorLoc,
   type NormalizedPublicationGraph,
@@ -105,8 +108,16 @@ function firstNavigableRoute(nodes: PublicationNavNode[]): string | null {
   return null;
 }
 
-function selectRoot(pages: PublicationPage[], navTree: PublicationNavNode[]): PublicationRoot {
+function selectRoot(
+  pages: PublicationPage[],
+  navTree: PublicationNavNode[],
+  hasApi: boolean,
+): PublicationRoot {
   if (pages.some((p) => p.route === '/')) return { kind: 'page', route: '/' };
+  const markdownPages = pages.filter((p) => p.origin !== 'openapi');
+  if (markdownPages.length === 0 && hasApi) {
+    return { kind: 'redirect', route: '/api-reference/' };
+  }
   const first = firstNavigableRoute(navTree) ?? pages[0]?.route;
   if (!first) throw new RendererError('no_pages', 'No navigable page exists for the site root.');
   return { kind: 'redirect', route: first };
@@ -118,6 +129,7 @@ async function validateExplicitTree(
   depth: number,
   pages: Array<{ sourceFile: string; title: string }>,
   seenFiles: Set<string>,
+  maxPages: number,
 ): Promise<PublicationNavNode[]> {
   if (depth > MAX_NAV_DEPTH) {
     throw new RendererError('nav_depth', `Explicit navigation depth exceeds ${MAX_NAV_DEPTH}.`);
@@ -140,17 +152,17 @@ async function validateExplicitTree(
         );
       }
       seenFiles.add(sourceFile);
-      if (pages.length >= MAX_PUBLISHED_PAGES) {
+      if (pages.length >= maxPages) {
         throw new RendererError(
           'too_many_pages',
-          `Publication exceeds the maximum of ${MAX_PUBLISHED_PAGES} pages.`,
+          `Publication exceeds the maximum of ${maxPages} pages.`,
         );
       }
       pages.push({ sourceFile, title });
       route = routeForSourceFile(sourceFile);
     }
     const children = entry.children
-      ? await validateExplicitTree(rootDir, entry.children, depth + 1, pages, seenFiles)
+      ? await validateExplicitTree(rootDir, entry.children, depth + 1, pages, seenFiles, maxPages)
       : [];
     if (sourceFile && route) {
       nodes.push({
@@ -173,10 +185,23 @@ async function validateExplicitTree(
   return nodes;
 }
 
+function siteRouteFromHref(href: string): string | null {
+  const pathPart = href.split('#')[0]!.split('?')[0]!;
+  if (!pathPart.startsWith('/') || pathPart.includes('\\') || pathPart.includes('//')) {
+    return null;
+  }
+  if (pathPart === '/api-reference/openapi.json') return pathPart;
+  if (pathPart.endsWith('/')) return pathPart;
+  // Bare API routes without trailing slash are accepted as page routes.
+  if (pathPart.startsWith('/api-reference/')) return `${pathPart}/`;
+  return null;
+}
+
 async function collectReferences(
   rootDir: string,
   pages: PublicationPage[],
   pageFiles: Set<string>,
+  openapiSourcePaths: Set<string> | null,
 ): Promise<{
   assets: PublicationAsset[];
   attachments: PublicationAttachment[];
@@ -185,8 +210,11 @@ async function collectReferences(
   const assets = new Map<string, PublicationAsset>();
   const attachments = new Map<string, PublicationAttachment>();
   const diagnostics: PublicationDiagnostic[] = [];
+  const pageRoutes = new Set(pages.map((p) => p.route));
+  const openapiDownloadRoute = '/api-reference/openapi.json';
 
   for (const page of pages) {
+    if (page.origin === 'openapi') continue;
     const bytes = new TextEncoder().encode(page.markdownText);
     const { tree } = loadAndNormalizeMarkdown(bytes, page.sourceFile);
     const links = collectLinks(tree);
@@ -209,6 +237,18 @@ async function collectReferences(
         continue;
       }
 
+      const siteRoute = siteRouteFromHref(link.href);
+      if (siteRoute) {
+        if (siteRoute === openapiDownloadRoute || pageRoutes.has(siteRoute)) {
+          continue;
+        }
+        throw new RendererError(
+          'openapi_link_invalid',
+          `Link targets an unknown site route:\n  ${link.href}`,
+          errorLoc(page.sourceFile, link.line, link.column),
+        );
+      }
+
       let target: string;
       try {
         target = resolveRelativeHref(page.sourceFile, link.href);
@@ -221,6 +261,14 @@ async function collectReferences(
           );
         }
         throw error;
+      }
+
+      if (openapiSourcePaths?.has(target)) {
+        throw new RendererError(
+          'openapi_link_invalid',
+          `Markdown must not link to OpenAPI source files:\n  ${link.href}`,
+          errorLoc(page.sourceFile, link.line, link.column),
+        );
       }
 
       if (link.kind === 'page') {
@@ -262,7 +310,6 @@ async function collectReferences(
       const publicPath = publicPathForAsset(target);
 
       if (isImageExtension(ext) && (link.kind === 'image' || link.kind === 'attachment')) {
-        // Prefer image classification for image extensions even from links
         const existing = assets.get(target);
         if (existing) {
           if (!existing.referencedFrom.includes(page.sourceFile)) {
@@ -318,6 +365,30 @@ async function collectReferences(
 }
 
 function assertPublicationCollisions(graph: NormalizedPublicationGraph): void {
+  if (graph.openapi) {
+    for (const asset of graph.assets) {
+      if (
+        asset.publicPath === '/api-reference/openapi.json' ||
+        asset.publicPath.startsWith('/api-reference/')
+      ) {
+        throw new RendererError(
+          'openapi_route_collision',
+          `Asset path collides with the reserved API Reference prefix:\n  ${asset.sourceFile} → ${asset.publicPath}`,
+        );
+      }
+    }
+    for (const att of graph.attachments) {
+      if (
+        att.publicPath === '/api-reference/openapi.json' ||
+        att.publicPath.startsWith('/api-reference/')
+      ) {
+        throw new RendererError(
+          'openapi_route_collision',
+          `Attachment path collides with the reserved API Reference prefix:\n  ${att.sourceFile} → ${att.publicPath}`,
+        );
+      }
+    }
+  }
   const entries = [
     ...graph.pages.map((p) => ({ collection: 'pages' as const, path: p.route })),
     ...graph.assets.map((a) => ({ collection: 'assets' as const, path: a.publicPath })),
@@ -325,6 +396,9 @@ function assertPublicationCollisions(graph: NormalizedPublicationGraph): void {
       collection: 'attachments' as const,
       path: a.publicPath,
     })),
+    ...(graph.openapi
+      ? [{ collection: 'attachments' as const, path: graph.openapi.download.route }]
+      : []),
     ...graph.pages.map((p) => ({ collection: 'source' as const, path: p.sourceFile })),
     ...graph.assets.map((a) => ({ collection: 'source' as const, path: a.sourceFile })),
     ...graph.attachments.map((a) => ({ collection: 'source' as const, path: a.sourceFile })),
@@ -339,10 +413,22 @@ function assertPublicationCollisions(graph: NormalizedPublicationGraph): void {
   }
 }
 
+function wrapOpenApiError(error: unknown): never {
+  if (error instanceof OpenApiError) {
+    throw new RendererError(error.code, error.message, {
+      ...(error.sourceFile !== undefined ? { sourceFile: error.sourceFile } : {}),
+    });
+  }
+  throw error;
+}
+
 export async function buildPublicationGraph(
   rootDir: string,
   config: NrdocsConfig,
 ): Promise<NormalizedPublicationGraph> {
+  const hasApi = Boolean(config.api);
+  const maxPages = hasApi ? MAX_PUBLISHED_PAGES_WITH_API : MAX_PUBLISHED_PAGES;
+
   let navTree: PublicationNavNode[];
   let pageMetas: Array<{ sourceFile: string; title: string }>;
   let explicitNavigation: NavigationEntry[];
@@ -350,24 +436,100 @@ export async function buildPublicationGraph(
 
   if (config.navigation === 'auto') {
     navigationMode = 'auto';
-    const discovered = await discoverNavigation(rootDir, 'auto');
-    navTree = discovered.navTree;
-    pageMetas = discovered.pages;
-    explicitNavigation = discovered.explicitNavigation;
+    try {
+      const discovered = await discoverNavigation(rootDir, 'auto', maxPages);
+      navTree = discovered.navTree;
+      pageMetas = discovered.pages;
+      explicitNavigation = discovered.explicitNavigation;
+    } catch (error) {
+      if (hasApi && error instanceof RendererError && error.code === 'no_pages') {
+        navTree = [];
+        pageMetas = [];
+        explicitNavigation = [];
+      } else {
+        throw error;
+      }
+    }
   } else {
     navigationMode = 'explicit';
     pageMetas = [];
     const seen = new Set<string>();
-    navTree = await validateExplicitTree(rootDir, config.navigation, 1, pageMetas, seen);
+    navTree = await validateExplicitTree(rootDir, config.navigation, 1, pageMetas, seen, maxPages);
     explicitNavigation = config.navigation;
   }
 
-  const pages = await loadPublicationPages(rootDir, pageMetas);
+  let pages = await loadPublicationPages(rootDir, pageMetas);
   assertUniqueRoutes(pages.map((p) => ({ route: p.route, sourceFile: p.sourceFile })));
 
+  for (const page of pages) {
+    if (page.route === '/api-reference/' || page.route.startsWith('/api-reference/')) {
+      throw new RendererError(
+        'openapi_route_collision',
+        `Markdown page route collides with the reserved API Reference prefix:\n  ${page.sourceFile} → ${page.route}`,
+      );
+    }
+  }
+
+  let openapi: NormalizedPublicationGraph['openapi'];
+  let openapiIntegration: Awaited<ReturnType<typeof buildOpenApiIntegration>> | undefined;
+  if (config.api) {
+    let api;
+    try {
+      api = await buildOpenApiIntegration(rootDir, config.api.specification, {
+        knownPageRoutes: pages.map((p) => p.route),
+      });
+    } catch (error) {
+      wrapOpenApiError(error);
+    }
+    openapiIntegration = api;
+    navTree = [...navTree, api.navSection];
+    pages = [...pages, ...api.pages];
+    if (pages.length > maxPages) {
+      throw new RendererError(
+        'too_many_pages',
+        `Publication exceeds the maximum of ${maxPages} pages.`,
+      );
+    }
+    assertUniqueRoutes(pages.map((p) => ({ route: p.route, sourceFile: p.sourceFile })));
+    openapi = {
+      sourcePaths: api.sourcePaths,
+      bundledJson: api.bundledJson,
+      download: {
+        route: api.openapiDownload.route,
+        object: api.openapiDownload.object,
+        mediaType: api.openapiDownload.mediaType,
+        filename: api.openapiDownload.filename,
+      },
+    };
+  }
+
+  if (pages.length === 0) {
+    throw new RendererError(
+      'no_pages',
+      'Publication has no Markdown pages and no API reference to publish.',
+    );
+  }
+
   const pageFiles = new Set(pages.map((p) => p.sourceFile));
-  const { assets, attachments, diagnostics } = await collectReferences(rootDir, pages, pageFiles);
-  const root = selectRoot(pages, navTree);
+  const { assets, attachments, diagnostics } = await collectReferences(
+    rootDir,
+    pages,
+    pageFiles,
+    openapi?.sourcePaths ?? null,
+  );
+
+  if (openapiIntegration) {
+    try {
+      refreshOpenApiArticleHtml(openapiIntegration, {
+        knownPageRoutes: pages.filter((p) => p.origin !== 'openapi').map((p) => p.route),
+        knownAttachments: attachments.map((a) => a.publicPath),
+      });
+    } catch (error) {
+      wrapOpenApiError(error);
+    }
+  }
+
+  const root = selectRoot(pages, navTree, hasApi);
 
   const graph: NormalizedPublicationGraph = {
     rootDir,
@@ -384,6 +546,7 @@ export async function buildPublicationGraph(
     assets,
     attachments,
     diagnostics,
+    ...(openapi ? { openapi } : {}),
   };
   assertPublicationCollisions(graph);
   return graph;

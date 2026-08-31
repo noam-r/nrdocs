@@ -26,6 +26,7 @@ function dumpNav(entries: NavigationEntry[], indent: number): string[] {
 export function serializeNrdocsYaml(
   config: Pick<NrdocsConfig, 'title' | 'language' | 'direction' | 'navigation'> & {
     publish?: NrdocsConfig['publish'];
+    api?: NrdocsConfig['api'];
   },
   navigationOverride?: NavigationEntry[],
 ): string {
@@ -41,6 +42,10 @@ export function serializeNrdocsYaml(
   }
   if (config.direction !== 'auto') {
     lines.push(`direction: ${config.direction}`);
+  }
+  if (config.api) {
+    lines.push('api:');
+    lines.push(`  specification: ${dumpScalar(config.api.specification)}`);
   }
 
   const navigation = navigationOverride ?? config.navigation;

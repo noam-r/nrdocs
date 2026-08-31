@@ -164,4 +164,91 @@ describe('Phase 4 render + pack', () => {
       },
     );
   });
+
+  it('publishes OpenAPI landing and operation pages as schema 3', async () => {
+    await withFixture(
+      {
+        'openapi.yaml': `openapi: 3.1.0
+info:
+  title: Demo API
+  version: 1.0.0
+paths:
+  /pets:
+    get:
+      operationId: listPets
+      summary: List pets
+      tags: [pets]
+      responses:
+        '200':
+          description: ok
+`,
+      },
+      async (root) => {
+        const config = parseNrdocsConfig({
+          title: 'API Docs',
+          navigation: 'auto',
+          api: { specification: 'openapi.yaml' },
+        });
+        const { artifact } = await buildArtifactFromConfig(root, config, { siteId: SITE });
+        expect(artifact.manifest.schema_version).toBe(3);
+        expect(artifact.manifest.page_schema_version).toBe(3);
+        if (artifact.manifest.schema_version !== 3) throw new Error('expected v3');
+        expect(artifact.manifest.openapi_download.route).toBe('/api-reference/openapi.json');
+        expect(artifact.manifest.pages.map((p) => p.route)).toEqual([
+          '/api-reference/',
+          '/api-reference/operations/listPets/',
+        ]);
+        expect(artifact.manifest.site.root).toEqual({
+          kind: 'redirect',
+          route: '/api-reference/',
+        });
+        const landing = artifact.files.find(
+          (f) => f.objectPath === 'pages/api-reference/index.html',
+        )!;
+        const html = new TextDecoder().decode(landing.bytes);
+        expect(html).toContain('/_nrdocs/v3/reader.css');
+        expect(html).toContain('nr-api-layout');
+        expect(html).toContain('Download OpenAPI');
+        expect(artifact.files.some((f) => f.objectPath === 'openapi/openapi.json')).toBe(true);
+      },
+    );
+  });
+
+  it('allows Markdown guides to link to generated API routes', async () => {
+    await withFixture(
+      {
+        'index.md': '# Guides\n\nSee [list pets](/api-reference/operations/listPets/).\n',
+        'openapi.yaml': `openapi: 3.1.0
+info:
+  title: Demo API
+  version: 1.0.0
+paths:
+  /pets:
+    get:
+      operationId: listPets
+      summary: List pets
+      responses:
+        '200':
+          description: ok
+`,
+      },
+      async (root) => {
+        const config = parseNrdocsConfig({
+          title: 'Mixed Docs',
+          navigation: 'auto',
+          api: { specification: 'openapi.yaml' },
+        });
+        const { artifact } = await buildArtifactFromConfig(root, config, { siteId: SITE });
+        expect(artifact.manifest.schema_version).toBe(3);
+        expect(artifact.manifest.pages.map((p) => p.route)).toEqual([
+          '/',
+          '/api-reference/',
+          '/api-reference/operations/listPets/',
+        ]);
+        const home = artifact.files.find((f) => f.objectPath === 'pages/index.html')!;
+        const html = new TextDecoder().decode(home.bytes);
+        expect(html).toContain('api-reference/operations/listPets/');
+      },
+    );
+  });
 });

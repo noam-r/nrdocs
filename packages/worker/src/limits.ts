@@ -6,6 +6,7 @@ export const LIMITS = {
   maxExpansionRatio: 20,
   manifestMaxBytes: 1 * 1024 * 1024,
   maxDeclaredFiles: 1000,
+  maxDeclaredFilesWithOpenApi: 1600,
   maxPages: 500,
   maxAssets: 500,
   maxAttachments: 200,
@@ -46,3 +47,12 @@ export const PLATFORM_ASSETS_V2 = Object.freeze([
   '/_nrdocs/v2/mermaid.js',
   '/_nrdocs/v2/logo.svg',
 ] as const);
+
+export const PLATFORM_ASSETS_V3 = Object.freeze([
+  '/_nrdocs/v3/reader.css',
+  '/_nrdocs/v3/reader.js',
+  '/_nrdocs/v3/mermaid.js',
+  '/_nrdocs/v3/logo.svg',
+] as const);
+
+export const MAX_PAGES_WITH_OPENAPI = 800;

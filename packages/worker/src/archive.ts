@@ -33,7 +33,8 @@ function assertSafePath(path: string): void {
     top !== 'pages' &&
     top !== 'assets' &&
     top !== 'attachments' &&
-    top !== 'agent'
+    top !== 'agent' &&
+    top !== 'openapi'
   ) {
     throw new ApiError(
       PublisherApiErrorCode.InvalidArtifact,
@@ -158,8 +159,9 @@ export function extractUstarFiles(tar: Uint8Array): ArchiveFile[] {
         'Uncompressed artifact exceeds size limit.',
       );
     }
-    if (files.length + 1 > LIMITS.maxDeclaredFiles + 1) {
-      // +1 allows manifest + maxDeclaredFiles
+    if (files.length + 1 > LIMITS.maxDeclaredFilesWithOpenApi + 1) {
+      // +1 allows manifest + max payload files (OpenAPI-raised ceiling; schema
+      // version is enforced later in validateExpandedArtifact).
       throw new ApiError(PublisherApiErrorCode.InvalidArtifact, 'Archive declares too many files.');
     }
 

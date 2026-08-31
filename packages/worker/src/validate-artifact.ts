@@ -1,6 +1,7 @@
 import {
   findPathCollisions,
   isManifestV2,
+  isManifestV3,
   mediaTypeForExtension,
   normalizeExtension,
   parseAgentManifestV1,
@@ -9,18 +10,20 @@ import {
   sha256Hex,
   type ManifestV1,
   type ManifestV2,
+  type ManifestV3,
   type PathEntry,
   type SiteId,
 } from '@nrdocs/contracts';
 import { PublisherApiErrorCode } from '@nrdocs/contracts';
 import { ApiError } from './http.js';
-import { LIMITS } from './limits.js';
+import { LIMITS, MAX_PAGES_WITH_OPENAPI } from './limits.js';
 import type { ArchiveFile } from './archive.js';
 import { validateStoredPage } from './validate-page.js';
 import { validateStoredPageV2 } from './validate-page-v2.js';
+import { validateStoredPageV3 } from './validate-page-v3.js';
 
 export type ValidatedArtifact = {
-  manifest: ManifestV1 | ManifestV2;
+  manifest: ManifestV1 | ManifestV2 | ManifestV3;
   files: Map<string, Uint8Array>;
   digest: string;
 };
@@ -65,7 +68,7 @@ export async function validateExpandedArtifact(
     invalid('Manifest is not valid JSON.');
   }
 
-  let manifest: ManifestV1 | ManifestV2;
+  let manifest: ManifestV1 | ManifestV2 | ManifestV3;
   try {
     manifest = await parseManifest(raw, { verifyArtifactDigest: true });
   } catch (error) {
@@ -83,12 +86,17 @@ export async function validateExpandedArtifact(
     );
   }
 
-  if (manifest.pages.length > LIMITS.maxPages) invalid('Too many pages.');
+  const maxPages = isManifestV3(manifest) ? MAX_PAGES_WITH_OPENAPI : LIMITS.maxPages;
+  if (manifest.pages.length > maxPages) invalid('Too many pages.');
   if (manifest.assets.length > LIMITS.maxAssets) invalid('Too many assets.');
   if (manifest.attachments.length > LIMITS.maxAttachments) invalid('Too many attachments.');
 
+  const maxDeclaredFiles = isManifestV3(manifest)
+    ? LIMITS.maxDeclaredFilesWithOpenApi
+    : LIMITS.maxDeclaredFiles;
+
   const declared = new Map<string, { size: number; sha256: string }>();
-  if (isManifestV2(manifest)) {
+  if (isManifestV2(manifest) || isManifestV3(manifest)) {
     for (const page of manifest.pages) {
       declared.set(page.html.object, { size: page.html.size, sha256: page.html.sha256 });
       declared.set(page.markdown.object, {
@@ -108,6 +116,12 @@ export async function validateExpandedArtifact(
       declared.set(manifest.agent.all.object, {
         size: manifest.agent.all.size,
         sha256: manifest.agent.all.sha256,
+      });
+    }
+    if (isManifestV3(manifest)) {
+      declared.set(manifest.openapi_download.object, {
+        size: manifest.openapi_download.size,
+        sha256: manifest.openapi_download.sha256,
       });
     }
   } else {
@@ -140,6 +154,8 @@ export async function validateExpandedArtifact(
     declared.set(att.object, { size: att.size, sha256: att.sha256 });
   }
 
+  if (declared.size > maxDeclaredFiles) invalid('Archive declares too many files.');
+
   const expectedPaths = new Set<string>(['nrdocs-manifest.json', ...declared.keys()]);
   for (const path of expectedPaths) {
     if (!byPath.has(path)) invalid('Archive is missing a declared file.');
@@ -167,12 +183,15 @@ export async function validateExpandedArtifact(
     ...manifest.pages.map((p) => ({ collection: 'pages' as const, path: p.route })),
     ...manifest.assets.map((a) => ({ collection: 'assets' as const, path: a.path })),
     ...manifest.attachments.map((a) => ({ collection: 'attachments' as const, path: a.path })),
+    ...(isManifestV3(manifest)
+      ? [{ collection: 'attachments' as const, path: manifest.openapi_download.route }]
+      : []),
   ];
   if (findPathCollisions(publicEntries).length > 0) {
     invalid('Portable path collision detected.');
   }
 
-  if (isManifestV2(manifest)) {
+  if (isManifestV2(manifest) || isManifestV3(manifest)) {
     for (const path of [
       ...manifest.pages.map((p) => p.markdown.object),
       manifest.agent.index.object,
@@ -203,10 +222,17 @@ export async function validateExpandedArtifact(
       invalid(error instanceof Error ? error.message : 'agent/manifest.json is invalid.');
     }
     for (const page of manifest.pages) {
-      validateStoredPageV2(byPath.get(page.html.object)!, {
-        pageRoute: page.route,
-        manifest,
-      });
+      if (isManifestV3(manifest)) {
+        validateStoredPageV3(byPath.get(page.html.object)!, {
+          pageRoute: page.route,
+          manifest,
+        });
+      } else {
+        validateStoredPageV2(byPath.get(page.html.object)!, {
+          pageRoute: page.route,
+          manifest,
+        });
+      }
     }
   } else {
     for (const page of manifest.pages) {

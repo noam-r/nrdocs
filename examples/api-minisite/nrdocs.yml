@@ -1,0 +1,6 @@
+title: Petstore Docs
+language: en
+direction: ltr
+navigation: auto
+api:
+  specification: openapi/openapi.yaml
