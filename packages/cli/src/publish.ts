@@ -107,7 +107,14 @@ function refuseOrWarnBrokenReferences(
   if (!diagnostics || diagnostics.length === 0) return;
   const report = formatPublicationDiagnostics(diagnostics);
   const n = diagnostics.length;
-  const noun = n === 1 ? 'broken page link' : 'broken page links';
+  const pageOnly = diagnostics.every((d) => d.code === 'unlisted_markdown');
+  const noun = pageOnly
+    ? n === 1
+      ? 'broken page link'
+      : 'broken page links'
+    : n === 1
+      ? 'broken link'
+      : 'broken links';
   if (!force) {
     throw new CliError({
       code: 'local_validation',

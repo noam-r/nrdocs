@@ -146,11 +146,7 @@ export function serializeArticleMarkdown(
     const title = image.title ? ` "${escapeTitle(image.title)}"` : '';
     const assetHref = links.resolveAssetHref(src);
     if (assetHref === null) {
-      throw new RendererError(
-        'broken_link',
-        `Unable to resolve image:\n  ${src}\nfrom:\n  ${sourceFile}`,
-        { sourceFile },
-      );
+      return alt || escapeText(src);
     }
     return `![${alt}](${escapeUrl(assetHref)}${title})`;
   };

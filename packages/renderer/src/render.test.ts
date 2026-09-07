@@ -91,6 +91,57 @@ describe('Phase 4 render + pack', () => {
     );
   });
 
+  it('renders missing images as broken', async () => {
+    await withFixture(
+      {
+        'index.md': '# Home\n\n![diagram](images/missing.png)\n',
+      },
+      async (root) => {
+        const config = parseNrdocsConfig({
+          title: 'Handbook',
+          navigation: [{ title: 'Home', file: 'index.md' }],
+        });
+        const { artifact, diagnostics } = await buildArtifactFromConfig(root, config, {
+          siteId: SITE,
+        });
+        expect(diagnostics[0]?.code).toBe('missing_image');
+        expect(artifact.manifest.assets).toHaveLength(0);
+        const home = artifact.files.find((f) => f.objectPath === 'pages/index.html')!;
+        const html = new TextDecoder().decode(home.bytes);
+        expect(html).toContain('class="nr-broken-link"');
+        expect(html).toContain('title="Broken image: images/missing.png"');
+        expect(html).toContain('diagram');
+        expect(html).not.toContain('src="images/missing.png"');
+      },
+    );
+  });
+
+  it('renders missing attachment links as broken', async () => {
+    await withFixture(
+      {
+        'index.md': '# Home\n\nSee [manifest](./specification-digest-manifest.json).\n',
+      },
+      async (root) => {
+        const config = parseNrdocsConfig({
+          title: 'Handbook',
+          navigation: [{ title: 'Home', file: 'index.md' }],
+        });
+        const { artifact, diagnostics } = await buildArtifactFromConfig(root, config, {
+          siteId: SITE,
+        });
+        expect(diagnostics).toHaveLength(1);
+        expect(diagnostics[0]?.code).toBe('missing_attachment');
+        expect(artifact.manifest.attachments).toHaveLength(0);
+        const home = artifact.files.find((f) => f.objectPath === 'pages/index.html')!;
+        const html = new TextDecoder().decode(home.bytes);
+        expect(html).toContain('class="nr-broken-link"');
+        expect(html).toContain('title="Broken link: ./specification-digest-manifest.json"');
+        expect(html).toContain('manifest');
+        expect(html).not.toContain('href="specification-digest-manifest.json"');
+      },
+    );
+  });
+
   it('renders unlisted markdown links as broken', async () => {
     await withFixture(
       {

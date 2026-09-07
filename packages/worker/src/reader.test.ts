@@ -336,6 +336,8 @@ describe('reader serving', () => {
       expect(missingHtml).toContain('Instance home');
       expect(missingHtml).toContain('https://github.com/noam-r/nrdocs');
 
+      expect((await fetch('/_nrdocs/signed-in?site=handbook')).status).toBe(404);
+
       const unknown = await fetch('/missing-site/');
       expect(unknown.status).toBe(404);
     });
@@ -523,6 +525,14 @@ describe('reader serving', () => {
         });
         expect(authed.status).toBe(200);
         expect(await authed.text()).toContain('Hello world');
+
+        expect((await fetch('/_nrdocs/signed-in?site=handbook')).status).toBe(404);
+        const signedIn = await fetch('/_nrdocs/signed-in?site=handbook', {
+          headers: { cookie: sessionCookie! },
+        });
+        expect(signedIn.status).toBe(200);
+        expect(signedIn.headers.get('content-type')).toMatch(/image\/svg\+xml/);
+        expect(await signedIn.text()).toContain('<svg');
 
         // Second site with same password must not accept this session.
         const sql = (await import('./index.js')).workerPersistence(env.DB);

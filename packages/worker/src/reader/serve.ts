@@ -547,3 +547,29 @@ export async function handleLogoutPost(request: Request, ctx: ReaderContext): Pr
     setCookie: sessionClearCookie(site.id),
   });
 }
+
+const SIGNED_IN_DOT = `<svg xmlns="http://www.w3.org/2000/svg" width="1" height="1"/>`;
+
+/** 1×1 SVG when the reader has a password session; 404 otherwise (including public sites). */
+export async function handleSignedInGet(request: Request, ctx: ReaderContext): Promise<Response> {
+  const deny = () =>
+    new Response(null, {
+      status: 404,
+      headers: {
+        ...baseSecurityHeaders({ hsts: ctx.hsts }),
+        'cache-control': NO_STORE,
+      },
+    });
+  const url = new URL(request.url);
+  const slug = parseSlug(foldSlugInput(url.searchParams.get('site') ?? ''));
+  if (!slug) return deny();
+  const site = await getSiteBySlug(ctx.db, slug);
+  if (!siteIsReadable(site) || site.access_mode !== 'password') return deny();
+  if (!(await authorizedForPasswordSite(ctx, site, request))) return deny();
+  const headers = new Headers({
+    ...baseSecurityHeaders({ hsts: ctx.hsts }),
+    'cache-control': NO_STORE,
+    'content-type': 'image/svg+xml; charset=utf-8',
+  });
+  return new Response(SIGNED_IN_DOT, { status: 200, headers });
+}

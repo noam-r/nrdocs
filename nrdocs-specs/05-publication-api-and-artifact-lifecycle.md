@@ -767,8 +767,12 @@ The fixed platform interface uses reserved routes under `/_nrdocs/`, including:
 ```http
 GET  /_nrdocs/access?site={slug}&return={safe-relative-route}
 POST /_nrdocs/access
+GET  /_nrdocs/signed-in?site={slug}
+GET  /_nrdocs/logout?site={slug}
 POST /_nrdocs/logout
 ```
+
+`GET /_nrdocs/signed-in` returns a 1×1 SVG when the request carries a valid password session for that site, and 404 otherwise, including on public sites. The reader script uses that response to show the header logout control only while the reader is signed in.
 
 Password submission establishes a signed site-scoped reader session after verification. Logout invalidates the browser's copy of that site's session.
 
@@ -826,7 +830,7 @@ The artifact contains only:
 - assets referenced by those pages; and
 - allowed attachments referenced by those pages.
 
-An unlisted or missing Markdown page link is a local diagnostic. Preview still serves the publication and shows the link struck through. `publish` prints the diagnostic and refuses unless `--force` is supplied. Forced publications include the same broken-link rendering. Unreferenced files are ignored. Prohibited HTML, JavaScript, CSS, WebAssembly, raw HTML, MDX, plugins, components, and unsupported file types fail locally and remain independently rejectable by the Worker.
+An unlisted or missing Markdown page link, or a missing image or allowed attachment, is a local diagnostic. Preview still serves the publication and shows the link struck through. `publish` prints the diagnostic and refuses unless `--force` is supplied. Forced publications include the same broken-link rendering. Unreferenced files are ignored. Prohibited HTML, JavaScript, CSS, WebAssembly, raw HTML, MDX, plugins, components, and unsupported file types fail locally and remain independently rejectable by the Worker.
 
 `preview` stops before packaging and upload. It uses the same discovery, validation, renderer, routes, and fixed interface, but needs no credential and creates no durable server state.
 

@@ -572,7 +572,8 @@ export const PLATFORM_JS = `/* nrdocs platform reader.js v1 */
   if (slug && slug !== '_nrdocs') {
     const header = document.querySelector('.nr-header');
     const themeToggle = document.querySelector('.nr-theme-toggle');
-    if (header && !header.querySelector('.nr-sign-out')) {
+    const insertSignOut = () => {
+      if (!header || header.querySelector('.nr-sign-out')) return;
       const link = document.createElement('a');
       link.className = 'nr-sign-out nr-icon-btn';
       link.href = '/_nrdocs/logout?site=' + encodeURIComponent(slug);
@@ -581,6 +582,15 @@ export const PLATFORM_JS = `/* nrdocs platform reader.js v1 */
       link.textContent = 'Log out';
       if (themeToggle) header.insertBefore(link, themeToggle);
       else header.appendChild(link);
+    };
+    try {
+      if (typeof Image === 'function') {
+        const probe = new Image();
+        probe.addEventListener('load', insertSignOut);
+        probe.src = '/_nrdocs/signed-in?site=' + encodeURIComponent(slug);
+      }
+    } catch {
+      /* preview and non-browser tests have no Image */
     }
   }
 
@@ -677,26 +687,20 @@ export const PLATFORM_JS = `/* nrdocs platform reader.js v1 */
 `;
 
 export const PLATFORM_CSS_V2 = `${PLATFORM_CSS.replaceAll('/_nrdocs/v1/', '/_nrdocs/v2/')}
-/* v2 AI prompt control */
+/* v2 AI prompt control — sparkle (auto_awesome) */
 .nr-ai-share.nr-icon-btn{flex:0 0 2.25rem}
 .nr-ai-share.nr-icon-btn::before{
   content:"";
   position:absolute;
   inset:0;
   margin:auto;
-  width:.16rem;
-  height:.78rem;
+  width:1.05rem;
+  height:1.05rem;
   background:var(--nr-fg);
+  -webkit-mask:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath fill='black' d='M19 9l1.25-2.75L23 5l-2.75-1.25L19 1l-1.25 2.75L15 5l2.75 1.25zm-7.5.5L9 4 6.5 9.5 1 12l5.5 2.5L9 20l2.5-5.5L17 12z'/%3E%3C/svg%3E") center / contain no-repeat;
+  mask:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath fill='black' d='M19 9l1.25-2.75L23 5l-2.75-1.25L19 1l-1.25 2.75L15 5l2.75 1.25zm-7.5.5L9 4 6.5 9.5 1 12l5.5 2.5L9 20l2.5-5.5L17 12z'/%3E%3C/svg%3E") center / contain no-repeat;
 }
-.nr-ai-share.nr-icon-btn::after{
-  content:"";
-  position:absolute;
-  inset:0;
-  margin:auto;
-  width:.78rem;
-  height:.16rem;
-  background:var(--nr-fg);
-}
+.nr-ai-share.nr-icon-btn::after{content:none;display:none}
 .nr-ai-dialog{
   max-width:32rem;
   width:calc(100% - 2rem);
