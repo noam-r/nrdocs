@@ -461,7 +461,7 @@ Root entries have depth 1. Each `children` edge increases depth by one, and dept
   published and appended to navigation after the authored list. They are never
   written into `nrdocs.yml`. The full published page set is authored Markdown
   pages ∪ generated API pages, as defined in document 12.
-- A link to an unlisted or missing Markdown file is a broken-link diagnostic, not a renderer failure. Preview still serves the site. `publish` prints the diagnostics and refuses unless `--force` is supplied. Forced publications render those links as struck-through broken links in the reader.
+- A link to an unlisted or missing Markdown file, or to a missing image or allowed attachment, is a broken-link diagnostic, not a renderer failure. Preview still serves the site. `publish` prints the diagnostics and refuses unless `--force` is supplied. Forced publications render those links as struck-through broken links in the reader.
 - Links to generated API routes are validated once the generated route set is
   known. Links to `api.specification` or OpenAPI dependency source paths fail.
 
@@ -613,7 +613,7 @@ cannot both produce `/overview/`.
 
 The renderer parses selected pages and includes only supported local assets they reference.
 
-Referenced assets must exist within the publication root. Broken, escaping, or unsupported references are validation errors.
+Referenced images and allowed attachments must exist within the publication root unless `publish --force` is used. A missing image or allowed attachment is a broken-link diagnostic, not a renderer failure, and follows the same preview and `publish --force` rules as a missing Markdown page link. Escaping, symlink, or unsupported references remain validation errors.
 
 Unreferenced files are not packaged or uploaded.
 
@@ -925,7 +925,7 @@ nrdocs publish [directory] [--title <title>] [--force]
 
 `--title` is used only when admin-local `publish` creates or completes `nrdocs.yml`. It does not change an existing title.
 
-`--force` publishes even when the site has broken page links. Those links are shown struck through in the reader. Without `--force`, `publish` prints the diagnostics and leaves the live site unchanged.
+`--force` publishes even when the site has broken page, image, or attachment links. Those links are shown struck through in the reader. Without `--force`, `publish` prints the diagnostics and leaves the live site unchanged.
 
 ### Admin-local bind
 

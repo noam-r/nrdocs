@@ -99,6 +99,28 @@ function numberedStemPrefix(file: string): string | null {
   return match ? match[1]! : null;
 }
 
+function missingLocalFileMessage(input: {
+  kind: 'attachment' | 'image';
+  href: string;
+  target: string;
+  sourceFile: string;
+}): string {
+  const noun = input.kind === 'image' ? 'image' : 'attachment';
+  return [
+    `Link targets a missing ${noun}:`,
+    `  ${input.href}`,
+    'resolved:',
+    `  ${input.target}`,
+    'from:',
+    `  ${input.sourceFile}`,
+    '',
+    'That file does not exist on disk.',
+    '',
+    'Add the file under the publication root, or change the Markdown so it is not a local link.',
+    'Or re-run publish with --force to publish the broken link struck through.',
+  ].join('\n');
+}
+
 function firstNavigableRoute(nodes: PublicationNavNode[]): string | null {
   for (const n of nodes) {
     if (n.kind === 'page' && n.route) return n.route;
@@ -290,7 +312,6 @@ async function collectReferences(
         continue;
       }
 
-      await assertContainedRealPath(rootDir, target, 'Referenced file');
       const ext = normalizeExtension(target);
       if (!ext) {
         throw new RendererError(
@@ -305,6 +326,39 @@ async function collectReferences(
           `Referenced file extension is not allowed:\n  ${target}`,
           errorLoc(page.sourceFile, link.line, link.column),
         );
+      }
+
+      try {
+        await assertContainedRealPath(rootDir, target, 'Referenced file');
+      } catch (error) {
+        if (error instanceof RendererError && error.code === 'missing_path') {
+          const missingImage = isImageExtension(ext);
+          const missingAttachment = isAttachmentExtension(ext) && link.kind !== 'image';
+          if (missingImage || missingAttachment) {
+            const kind = missingImage ? 'image' : 'attachment';
+            diagnostics.push({
+              code: missingImage ? 'missing_image' : 'missing_attachment',
+              message: missingLocalFileMessage({
+                kind,
+                href: link.href,
+                target,
+                sourceFile: page.sourceFile,
+              }),
+              sourceFile: page.sourceFile,
+              ...(link.line !== undefined ? { line: link.line } : {}),
+              ...(link.column !== undefined ? { column: link.column } : {}),
+            });
+            continue;
+          }
+        }
+        if (error instanceof RendererError) {
+          throw new RendererError(
+            error.code,
+            error.message,
+            errorLoc(page.sourceFile, link.line, link.column),
+          );
+        }
+        throw error;
       }
       const mediaType = mediaTypeForExtension(ext)!;
       const publicPath = publicPathForAsset(target);

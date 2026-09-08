@@ -641,7 +641,7 @@ Create fixture directories for:
 - route collisions;
 - empty, control-containing, 160-scalar, 161-scalar, normalized, and duplicate-title cases;
 - exact, NFC, and locale-independent Unicode case collisions across selected source paths, public paths, and artifact paths;
-- unlisted Markdown links, including `publish --force` broken-link rendering;
+- unlisted Markdown links and missing images or allowed attachments, including `publish --force` broken-link rendering;
 - symlinked navigation candidates, selected pages, referenced files, ancestor directories, and escaping relative paths;
 - valid UTF-8 with and without one leading BOM, invalid UTF-8, misplaced or repeated BOMs, and LF/CRLF/CR-equivalent sources;
 - broken references;
@@ -1042,7 +1042,7 @@ Implement `nrdocs publish [directory] [--force]`:
 - publish-target preflight before rendering on the HTTP path;
 - token/site equality check on the HTTP path;
 - reuse of the Phase 3 and 4 pipeline;
-- `--force` to publish with broken page links rendered as struck-through reader markup;
+- `--force` to publish with broken page, image, or attachment links rendered as struck-through reader markup;
 - pre-upload counts;
 - artifact upload with required headers, or admin-local staging/promotion;
 - `published` and `unchanged` results;

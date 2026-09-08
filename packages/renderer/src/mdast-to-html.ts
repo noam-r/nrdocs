@@ -223,11 +223,8 @@ export function renderArticleHtml(
     const title = image.title ? ` title="${escapeAttr(image.title)}"` : '';
     const assetHref = links.resolveAssetHref(src);
     if (assetHref === null) {
-      throw new RendererError(
-        'broken_link',
-        `Unable to resolve image:\n  ${src}\nfrom:\n  ${sourceFile}`,
-        { sourceFile },
-      );
+      const label = (image.alt ?? '').trim() ? escapeHtml(image.alt ?? '') : escapeHtml(src);
+      return `<span class="nr-broken-link" title="${escapeAttr(`Broken image: ${src}`)}">${label}</span>`;
     }
     return `<img src="${escapeAttr(assetHref)}" alt="${alt}"${title} loading="lazy" decoding="async">`;
   };

@@ -592,7 +592,7 @@ After successful password submission:
 2. The reader returns to the originally requested page.
 3. Navigation within that site requires no further password entry.
 4. The session does not authorize another site, even if it uses the same password.
-5. The fixed reader interface provides a logout action.
+5. The fixed reader interface provides a logout action when a password session is active. Public sites do not show logout.
 
 The exact session lifetime and cookie protections are defined by the security specification. The duration is fixed platform behavior and is not configured per site.
 

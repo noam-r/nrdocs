@@ -12,6 +12,10 @@ describe('v2 share dialog', () => {
     expect(PLATFORM_CSS.startsWith('/* nrdocs platform reader.css v1 */')).toBe(true);
     expect(PLATFORM_JS.startsWith('/* nrdocs platform reader.js v1 */')).toBe(true);
     expect(PLATFORM_CSS_V2).toContain('.nr-ai-share.nr-icon-btn');
+    expect(PLATFORM_CSS_V2).toContain("viewBox='0 0 24 24'");
+    expect(PLATFORM_CSS_V2).not.toContain('height:.78rem');
+    expect(PLATFORM_JS).toContain('/_nrdocs/signed-in?site=');
+    expect(PLATFORM_JS).toContain("probe.addEventListener('load', insertSignOut)");
     expect(PLATFORM_CSS_V2).toContain('.nr-ai-btn-primary');
     expect(PLATFORM_JS_V2).toContain('Copy a prompt for an AI');
     expect(PLATFORM_JS_V2).toContain('None of the sentences here are copied');
@@ -152,5 +156,76 @@ describe('v2 share dialog', () => {
     await tick();
     expect(document.querySelector('textarea.nr-ai-fallback')).toBeNull();
     expect(document.querySelector('dialog')).toBeNull();
+  });
+});
+
+describe('header logout control', () => {
+  function runReaderJs(options: { fireLoad: boolean }): Document {
+    const { window, document } = parseHTML(
+      `<!doctype html><html><body>
+        <header class="nr-header">
+          <a class="nr-site-title" href="/handbook/">Handbook</a>
+          <button class="nr-theme-toggle" type="button">Theme</button>
+        </header>
+      </body></html>`,
+    );
+    class FakeImage {
+      _load?: () => void;
+      addEventListener(type: string, fn: () => void) {
+        if (type === 'load') this._load = fn;
+      }
+      set src(_url: string) {
+        if (options.fireLoad) queueMicrotask(() => this._load?.());
+      }
+    }
+    const matchMedia = () => ({
+      matches: false,
+      addEventListener: () => undefined,
+      removeEventListener: () => undefined,
+    });
+    Object.defineProperty(window, 'matchMedia', { value: matchMedia, configurable: true });
+    Object.defineProperty(window, 'localStorage', {
+      value: {
+        getItem: () => null,
+        setItem: () => undefined,
+        removeItem: () => undefined,
+      },
+      configurable: true,
+    });
+    Object.defineProperty(window, 'location', {
+      value: { pathname: '/handbook/' },
+      configurable: true,
+    });
+    const context = vm.createContext({
+      document,
+      window,
+      location: window.location,
+      navigator: window.navigator,
+      Image: FakeImage,
+      localStorage: window.localStorage,
+      matchMedia,
+      console,
+      setTimeout,
+      clearTimeout,
+      queueMicrotask,
+      Event: window.Event,
+    });
+    vm.runInContext(PLATFORM_JS, context);
+    return document;
+  }
+
+  it('does not insert logout until the signed-in probe loads', async () => {
+    const document = runReaderJs({ fireLoad: false });
+    await tick();
+    expect(document.querySelector('.nr-sign-out')).toBeNull();
+  });
+
+  it('inserts logout after a successful signed-in probe', async () => {
+    const document = runReaderJs({ fireLoad: true });
+    await tick();
+    const link = document.querySelector('.nr-sign-out') as HTMLAnchorElement | null;
+    expect(link).not.toBeNull();
+    expect(link!.getAttribute('href')).toBe('/_nrdocs/logout?site=handbook');
+    expect(link!.getAttribute('aria-label')).toBe('Log out');
   });
 });

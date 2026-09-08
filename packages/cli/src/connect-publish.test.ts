@@ -270,6 +270,39 @@ describe('nrdocs connect and publish', () => {
     });
   });
 
+  it('refuses missing attachments unless --force is supplied', async () => {
+    await withPublisherWorld(async ({ runtime, cap, docs, token, publisher }) => {
+      const connected = await main(['connect', 'docs', '--title', 'Handbook'], {
+        runtime,
+        terminal: scriptedTerminal({
+          lines: ['https://docs.example.com'],
+          masked: [token],
+        }),
+        publisher,
+      });
+      expect(connected).toBe(ExitCode.Success);
+
+      await fs.appendFile(
+        path.join(docs, 'index.md'),
+        '\n[manifest](./specification-digest-manifest.json)\n',
+      );
+      cap.reset();
+      const blocked = await main(['publish', 'docs'], { runtime, publisher });
+      expect(blocked).toBe(ExitCode.LocalValidation);
+      expect(cap.stderr).toMatch(/broken link/);
+      expect(cap.stderr).toMatch(/missing attachment/);
+      expect(cap.stderr).toMatch(/specification-digest-manifest\.json/);
+      expect(cap.stderr).toMatch(/--force/);
+      expect(cap.stderr).toMatch(/was not changed/);
+
+      cap.reset();
+      const forced = await main(['publish', 'docs', '--force'], { runtime, publisher });
+      expect(forced).toBe(ExitCode.Success);
+      expect(cap.stderr).toMatch(/Publishing with broken link/);
+      expect(cap.stdout).toContain('Published successfully.');
+    });
+  });
+
   it('binds via the local instance without Server or publishing token prompts', async () => {
     await withPublisherWorld(async ({ runtime, cap, docs, publisher, executor, store }) => {
       await writeInstanceDescriptor(runtime, {

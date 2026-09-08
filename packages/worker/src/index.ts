@@ -30,6 +30,7 @@ import {
   handleAccessPost,
   handleLogoutGet,
   handleLogoutPost,
+  handleSignedInGet,
   handleSiteContent,
   type ReaderContext,
 } from './reader/serve.js';
@@ -192,6 +193,17 @@ export async function handleRequest(request: Request, env: WorkerEnv): Promise<R
         return method === 'HEAD' ? headOf(res) : res;
       }
       if (method === 'POST') return await handleLogoutPost(request, ctx);
+      return htmlResponse(notFoundPage(), 405, { hsts });
+    }
+
+    if (url.pathname === '/_nrdocs/signed-in') {
+      const key = resolveSessionKey(env);
+      if (!key) return htmlResponse(unavailablePage(requestId), 503, { hsts });
+      const ctx = buildReaderContext(request, env, key);
+      if (method === 'GET' || method === 'HEAD') {
+        const res = await handleSignedInGet(request, ctx);
+        return method === 'HEAD' ? headOf(res) : res;
+      }
       return htmlResponse(notFoundPage(), 405, { hsts });
     }
 

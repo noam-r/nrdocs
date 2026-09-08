@@ -157,6 +157,63 @@ describe('auto discovery and graph', () => {
     );
   });
 
+  it('records missing allowed attachments as diagnostics', async () => {
+    await withFixture(
+      {
+        'index.md':
+          '# Home\n\nSee [manifest](./specification-digest-manifest.json) and [vectors](./protocol-digest-vectors.json).\n',
+      },
+      async (root) => {
+        const config = parseNrdocsConfig({ title: 'Site', navigation: 'auto' });
+        const graph = await buildPublicationGraph(root, config);
+        expect(graph.attachments).toHaveLength(0);
+        expect(graph.diagnostics).toHaveLength(2);
+        expect(graph.diagnostics.map((d) => d.code)).toEqual([
+          'missing_attachment',
+          'missing_attachment',
+        ]);
+        expect(graph.diagnostics[0]?.message).toMatch(
+          /missing attachment[\s\S]*specification-digest-manifest\.json[\s\S]*from:\n {2}index\.md[\s\S]*does not exist on disk/,
+        );
+        expect(graph.diagnostics[1]?.message).toMatch(/protocol-digest-vectors\.json/);
+      },
+    );
+  });
+
+  it('still packages an existing json attachment', async () => {
+    await withFixture(
+      {
+        'index.md': '# Home\n\n[manifest](./notes.json)\n',
+        'notes.json': '{"ok":true}\n',
+      },
+      async (root) => {
+        const config = parseNrdocsConfig({ title: 'Site', navigation: 'auto' });
+        const graph = await buildPublicationGraph(root, config);
+        expect(graph.diagnostics).toHaveLength(0);
+        expect(graph.attachments).toHaveLength(1);
+        expect(graph.attachments[0]?.sourceFile).toBe('notes.json');
+      },
+    );
+  });
+
+  it('records a missing image as a diagnostic', async () => {
+    await withFixture(
+      {
+        'index.md': '# Home\n\n![diagram](images/missing.png)\n',
+      },
+      async (root) => {
+        const config = parseNrdocsConfig({ title: 'Site', navigation: 'auto' });
+        const graph = await buildPublicationGraph(root, config);
+        expect(graph.assets).toHaveLength(0);
+        expect(graph.diagnostics).toHaveLength(1);
+        expect(graph.diagnostics[0]?.code).toBe('missing_image');
+        expect(graph.diagnostics[0]?.message).toMatch(
+          /missing image[\s\S]*images\/missing\.png[\s\S]*from:\n {2}index\.md/,
+        );
+      },
+    );
+  });
+
   it('records unlisted markdown links under explicit navigation', async () => {
     await withFixture(
       {
